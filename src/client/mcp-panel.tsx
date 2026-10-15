@@ -14,7 +14,7 @@
  */
 
 import { useMemo, useState } from "react";
-import type { CapabilityPanelApi, ClientMcpServer, McpApi, OpResult } from "./api.js";
+import type { CapabilityPanelApi, ClientMcpServer, ClientMcpTool, McpApi, McpTestResult, OpResult } from "./api.js";
 import { summarizeEntry, transportOf, validateEntry } from "../mcp/entry-util.js";
 import type { McpScope, McpServerEntry } from "../mcp/types.js";
 import { Modal } from "./modal.js";
@@ -465,6 +465,7 @@ function McpDetail({
  * onSave 抛错（如宿主校验/落盘失败）时把错误信息展示在表单顶部。
  */
 function McpForm({
+  api,
   mode,
   server,
   workspace,
@@ -474,6 +475,7 @@ function McpForm({
   onCancel,
   onSave,
 }: {
+  api: McpApi;
   mode: "new" | "edit";
   server?: ClientMcpServer;
   workspace?: string;
@@ -500,13 +502,19 @@ function McpForm({
   const [disabled, setDisabled] = useState(entry.disabled === true);
   const [errors, setErrors] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  // 「测试连接」：结果（成功含工具清单 / 失败含错误文案）与进行中标志。
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<McpTestResult | undefined>(undefined);
 
   const isNew = mode === "new";
   // 没有工作区时不能创建项目级条目（占位标签口径收敛在 panel-common.hasWorkspaceLabel）。
   const noWorkspace = !hasWorkspaceLabel(workspace);
 
-  /** 客户端前置校验（与宿主的 validateEntry 保持同口径，快速反馈）。 */
-  const submit = async () => {
+  /**
+   * 从当前表单值构建条目（保存与测试共用同一口径，避免"能测不能存"漂移）。
+   * 有校验问题时返回问题列表；测试与保存都直接展示这些问题。
+   */
+  const buildEntry = (): { ok: true; entry: McpServerEntry } | { ok: false; problems: string[] } => {
     const problems: string[] = [];
     if (key.trim().length === 0) problems.push("名称不能为空");
     if (transport === "stdio" && command.trim().length === 0) problems.push('stdio 服务器需要填写「命令」');
@@ -515,10 +523,7 @@ function McpForm({
     const headerRecord = linesToRecord(headers, "headers", problems);
     const timeout = timeoutMs.trim().length === 0 ? undefined : Number(timeoutMs);
     if (timeout !== undefined && (!Number.isFinite(timeout) || timeout <= 0)) problems.push("超时必须是正数（ms）");
-    if (problems.length > 0) {
-      setErrors(problems);
-      return;
-    }
+    if (problems.length > 0) return { ok: false, problems };
     // 只把"有内容的可选字段"写进条目，保持配置文件最小化。
     // 「全局导入」标记随编辑保留（改字段不抹掉"来自全局导入"的身份）。
     const importMarker = entry.importedFromGlobal === true ? { importedFromGlobal: true as const } : {};
@@ -541,9 +546,19 @@ function McpForm({
             ...(disabled ? { disabled: true } : {}),
             ...importMarker,
           };
+    return { ok: true, entry: next };
+  };
+
+  /** 保存（客户端前置校验与宿主 validateEntry 同口径，快速反馈）。 */
+  const submit = async () => {
+    const built = buildEntry();
+    if (!built.ok) {
+      setErrors(built.problems);
+      return;
+    }
     setSaving(true);
     try {
-      await onSave(scope, key.trim(), next);
+      await onSave(scope, key.trim(), built.entry);
       setErrors([]);
     } catch (error) {
       // 宿主校验 / 落盘失败：把错误展示在表单顶部（编辑态此前走面板级
@@ -553,6 +568,32 @@ function McpForm({
       setSaving(false);
     }
   };
+
+  /**
+   * 「测试」：把当前表单草稿直接交给宿主真实连接（不落盘、不挂载），
+   * 结果就地展示工具名与参数。失败只更新 testResult，不抛异常。
+   */
+  const runTest = async () => {
+    const built = buildEntry();
+    if (!built.ok) {
+      setErrors(built.problems);
+      setTestResult(undefined);
+      return;
+    }
+    setErrors([]);
+    setTesting(true);
+    setTestResult(undefined);
+    try {
+      setTestResult(await api.test({ entry: built.entry, key: key.trim() }));
+    } catch (error) {
+      // 传输层异常（RPC 断线等）：按失败结果展示，不冒泡到渲染层。
+      setTestResult({ ok: false, errors: [error instanceof Error ? error.message : String(error)] });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const busy = saving || testing;
 
   return (
     <div className={embedded ? undefined : "skp-detail-card"}>
@@ -625,8 +666,23 @@ function McpForm({
           <input type="checkbox" checked={disabled} onChange={(e) => setDisabled(e.target.checked)} />
           <span>禁用（保留在配置文件中，不挂载）</span>
         </label>
+        {/* 测试结果：成功给出工具名 + 参数（名字/类型/是否必填/说明），
+            失败给出宿主侧的中文错误文案（含原始错误 / stderr 摘要）。 */}
+        {testing && <div className="skp-status">正在连接并读取工具列表…</div>}
+        {testResult !== undefined && <McpTestReport result={testResult} />}
         <div className={actionsClass}>
-          <button type="button" className="skp-btn skp-btn-primary" disabled={saving} onClick={() => void submit()}>
+          {/* 「测试连接」= 次级按钮，与保存同级：用当前表单草稿真实连一次
+              （不落盘、不挂载），成功/失败都在表单内就地展示。 */}
+          <button
+            type="button"
+            className="skp-btn"
+            disabled={busy}
+            title="用当前表单内容真实连接一次（不保存、不挂载），列出该服务器的工具与参数"
+            onClick={() => void runTest()}
+          >
+            {testing ? "测试中…" : "测试连接"}
+          </button>
+          <button type="button" className="skp-btn skp-btn-primary" disabled={busy} onClick={() => void submit()}>
             {saving ? (isNew ? "添加中…" : "保存中…") : isNew ? "添加" : "保存"}
           </button>
           <button type="button" className="skp-btn" onClick={onCancel}>
@@ -636,6 +692,113 @@ function McpForm({
       </div>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// 「测试连接」结果展示
+// ---------------------------------------------------------------------------
+
+/** 面板渲染用的一条工具参数（从 inputSchema 展开）。 */
+interface ToolParameter {
+  name: string;
+  type: string;
+  required: boolean;
+  description?: string;
+}
+
+/**
+ * 「测试连接」的结果卡片（就地嵌在表单里）：
+ *  - 成功：`连接正常 · 发现 N 个工具 · 耗时 Xms` + 逐工具的名字/描述与参数表；
+ *    空工具列表给明确文案，不显示空壳列表；
+ *  - 失败：直接渲染宿主返回的中文错误文案（已含原始错误 / stderr 摘要）。
+ */
+function McpTestReport({ result }: { result: McpTestResult }) {
+  if (!result.ok) return <div className="skp-error">{result.errors.join("\n")}</div>;
+  return (
+    <div className="skp-field">
+      <span className="skp-field-label">
+        连接正常 · 发现 {result.tools.length} 个工具 · 耗时 {result.elapsedMs}ms
+      </span>
+      {result.instruction !== undefined && <div className="skp-note">服务器提示：{result.instruction}</div>}
+      {result.tools.length === 0 ? (
+        <div className="skp-note">连接成功，但服务器未暴露任何工具。</div>
+      ) : (
+        <ul className="skp-import-list">
+          {result.tools.map((tool) => (
+            <li key={tool.name} className="skp-import-item" style={{ display: "block" }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
+                <span className="skp-import-name" style={{ maxWidth: "none" }}>
+                  {tool.name}
+                </span>
+                <span className="skp-import-desc" style={{ whiteSpace: "normal" }} title={tool.description}>
+                  {tool.description ?? "（无描述）"}
+                </span>
+              </div>
+              <ToolParameters tool={tool} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** 单个工具的参数表：无参数时给一行「（无参数）」，不渲染空列表。 */
+function ToolParameters({ tool }: { tool: ClientMcpTool }) {
+  const parameters = toolParameters(tool);
+  if (parameters.length === 0) return <div className="skp-note">（无参数）</div>;
+  return (
+    <ul style={{ margin: "4px 0 0", padding: "0 0 0 14px", listStyle: "none", display: "flex", flexDirection: "column", gap: 2 }}>
+      {parameters.map((parameter) => (
+        <li
+          key={parameter.name}
+          className="skp-import-desc"
+          style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap", whiteSpace: "normal" }}
+        >
+          <span className="skp-import-name" style={{ maxWidth: "none" }}>
+            {parameter.name}
+          </span>
+          <span className="skp-tag skp-tag-flat">{parameter.type}</span>
+          <span className={parameter.required ? "skp-tag skp-tag-warn" : "skp-tag skp-tag-flat"}>
+            {parameter.required ? "必填" : "可选"}
+          </span>
+          {parameter.description !== undefined && <span>{parameter.description}</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** 从工具的 `inputSchema` 展开参数（`properties` + `required`）。 */
+function toolParameters(tool: ClientMcpTool): ToolParameter[] {
+  const schema = tool.parameters;
+  if (schema === undefined || schema === null) return [];
+  const properties = schema.properties;
+  if (properties === null || typeof properties !== "object" || Array.isArray(properties)) return [];
+  const required = Array.isArray(schema.required) ? schema.required.filter((name): name is string => typeof name === "string") : [];
+  return Object.entries(properties as Record<string, unknown>).map(([name, raw]) => {
+    const property = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+    const description = typeof property.description === "string" ? property.description : undefined;
+    return {
+      name,
+      type: schemaType(property),
+      required: required.includes(name),
+      ...(description !== undefined ? { description } : {}),
+    };
+  });
+}
+
+/** 一个 JSON Schema 属性的类型名（联合类型用 ` | ` 连接，缺 type 时给结构提示）。 */
+function schemaType(property: Record<string, unknown>): string {
+  const type = property.type;
+  if (typeof type === "string") return type;
+  if (Array.isArray(type)) {
+    const parts = type.filter((part): part is string => typeof part === "string");
+    if (parts.length > 0) return parts.join(" | ");
+  }
+  if (Array.isArray(property.enum)) return "enum";
+  if (property.anyOf !== undefined || property.oneOf !== undefined) return "union";
+  return "unknown";
 }
 
 // ---------------------------------------------------------------------------
@@ -685,6 +848,7 @@ function McpAddDialog({
       {/* 两个子面板常驻挂载：切 Tab 不丢已填内容。 */}
       <div hidden={tab !== "form"}>
         <McpForm
+          api={api}
           mode="new"
           workspace={workspace}
           embedded
@@ -728,6 +892,7 @@ function McpEditDialog({
   return (
     <Modal title={`编辑 ${server.key}`} onClose={onClose}>
       <McpForm
+        api={api}
         mode="edit"
         server={server}
         workspace={workspace}

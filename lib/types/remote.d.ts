@@ -64,6 +64,11 @@ export interface PanelRpcService {
         setEnabled(input: unknown): Promise<unknown>;
         importToProject(input: unknown): Promise<unknown>;
         status(cwd?: string): unknown;
+        /**
+         * 连通性测试：真实连接一份（可能未保存的）条目，返回工具名与入参。
+         * 零副作用（不落盘、不注册工具），失败也走业务失败信封（value.ok=false）。
+         */
+        test(input: unknown): Promise<unknown>;
     };
     quickMessages: {
         list(cwd?: string): Promise<unknown>;

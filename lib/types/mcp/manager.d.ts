@@ -7,6 +7,7 @@
  *
  * @module @chengdb/capability-panel/mcp/manager
  */
+import { type McpProbeResult } from "./probe.js";
 import type { OverridesManager } from "../overrides/manager.js";
 import type { ImportsManager } from "../imports/manager.js";
 import type { McpListResult, McpScope, McpServerEntry, McpStatusView } from "./types.js";
@@ -34,6 +35,17 @@ export type McpOpResult = {
     ok: false;
     errors: string[];
 };
+/** 「测试」入参：面板表单里的**草稿**也能直接测（不必先保存）。 */
+export interface McpTestInput {
+    /** 待测条目（未落盘的原样草稿）。 */
+    entry: McpServerEntry;
+    /** 条目键名（决定命名空间 serverName）；缺省（空/未给）用 `"server"`。 */
+    key?: string;
+    /** stdio 未写 cwd 时的兜底工作目录（通常是当前工作区）。 */
+    cwd?: string;
+    /** 探测超时（毫秒），缺省 15s、硬上限 60s（见 mcp/probe.ts）。 */
+    timeoutMs?: number;
+}
 /** 创建管理服务；loader 由 index.ts 注入（自动挂载与状态共用同一实例）。 */
 export declare function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overrides?: OverridesManager, imports?: ImportsManager): {
     list: (cwd?: string) => Promise<McpListResult>;
@@ -50,6 +62,7 @@ export declare function createMcpManager(deps: McpManagerDeps, loader: McpLoader
         existed?: boolean;
     }>;
     status: (cwd?: string) => McpStatusView[];
+    test: (input: McpTestInput) => Promise<McpProbeResult>;
 };
 /** 管理服务的完整类型（构造函数的返回值）。 */
 export type McpManager = ReturnType<typeof createMcpManager>;

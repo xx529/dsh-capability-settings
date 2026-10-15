@@ -5,6 +5,89 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **MCP 服务器配置「测试连接」**：新增/编辑 MCP server 时可以不落盘先试连——
+  表单里点「测试连接」即按当前草稿真连一次（stdio 或 streamable-http），
+  成功后列出该 server 暴露的**工具名 + 参数列表**（参数名 / 类型 / 必填或
+  可选 / 说明）与耗时，失败给出中文文案 + 原始错误（stdio 还会附服务器
+  stderr 尾巴）。实现见 `src/mcp/probe.ts`：一次性 `Client` + transport，
+  `finally` 里 `client.close()` 后兜底 `transport.close()`，超时用
+  `AbortController`（默认 15s，夹在 0.5–60s），**不注册任何工具、不碰宿主
+  tools 注册表**，探测结束无残留子进程。RPC endpoint `mcp.test`，静态校验
+  （`validateEntry`）失败时直接返回、不发连接。新增依赖
+  `@modelcontextprotocol/client@2.0.0`（与宿主 `dsh-mcp-client` 同版本）。
+- **面板入口上移到侧栏上方、面板改为占据主区域**：入口从
+  `sidebar.footer.action`（Settings 旁）改注册到 `sidebar.panellist`
+  （ui-sidebar 的「全局面板」图标排，位于品牌/新建会话行之下、工作区列表
+  之上），同时把同名 id 注册进 `main` keyed slot——点击入口由布局把主区域
+  切到面板，不再是浮层。两个注册成对（ui-sidebar 明确：选择没有对应 `main`
+  条目的 id 会抛错）。浮层外壳（backdrop / popover / 关闭按钮）与
+  `CapabilitiesFooterAction` 一并删除，`CapabilityPanel` 现在只渲染页面本体。
+
+### 修复
+
+- **能力面板钉选工作区后，其它工作区输入框的 MCP/Skills/快捷消息弹层串味**：
+  面板头部「项目作用域」下拉框的钉选值（`selection.cwd`）此前被 composer
+  三个按钮/弹层的 API 共用，于是在 B 工作区的对话框里会列出 A 工作区的
+  项目级 MCP server（及技能/快捷消息）。现在 composer 使用**独立的
+  `composerApi`**（`currentWorkspaceCwd` 只取当前会话工作区，`selectedProject`
+  恒为 undefined、`selectProject` 空操作），面板继续使用带钉选的那份；
+  两份共用同一份工作区订阅回调集合，所以各自都能随会话切换刷新。
+- **连带修复**：工作区变化的通知判定此前只比较「钉选优先」的 cwd，面板钉选
+  到 A 时把当前会话从 B 切到 C 不会触发通知，composer 会继续显示 B 的项目级
+  条目。现在同时跟踪「面板侧」与「会话侧」两个 cwd 键。
+- `src/mcp/loader.ts` 里解释「为何必须用宿主那份 mcp-client」的注释有两处与
+  实测不符（已按 AGENTS.md「结论必须有据可查」纠正）：① 两份副本的预留
+  表达式其实相同，真正的差异是 `@deepseek-ai/dsh-scope` 的
+  `kScope = Symbol("dsh.scope")` 是普通 Symbol（非 `Symbol.for`），插件自带
+  副本读不到宿主打在 agent ctx 上的 scope tag，恒回落 `ctx.root`；② 本机
+  `profiles/desktop` 的 `cordis.patch.yml` 并没有 root 级 mcp-client 条目
+  （只有 `profiles/web` 有），因此全局层撞名是安全网而非必然。
+
+### 变更
+
+- **全局 MCP 改为整个 harness 复用同一份实例**：`<agentsHome>/mcp.json`
+  （兼容旧位置 dsh home / `~/.claude`）里的 server 不再**每个 session 各起
+  一份进程**，而是逐条挂在插件自己的 Cordis context（`scopeOf(ctx)` 为空 ⇒
+  serverName 按 `ctx.root` 预留）上一次，所有 session 共用；全局配置写入后
+  仍热重挂（`loader.reload()`）。
+- **项目级 MCP 保持每会话隔离**：`<项目根>/.mcp.json` 的原生条目仍挂在
+  `agent.ctx` 上，同一工作区里各 session 各一份、互不冲突；同名项目条目按
+  tools 注册表的「scoped 注册遮蔽全局」规则遮蔽全局那份。
+- **「在本项目禁用全局 MCP」改用 `tools.restrict` 屏蔽**：全局层既然共享就
+  无法按项目卸载，于是按 session 对该 agent 作用域 `restrict({ deny })`
+  掉该 server 的全局工具（名单从 `ctx.root.get("tools").schemas()` 按
+  `mcp__<serverName>__` 前缀精确取，空名单不调用——`restrict` 契约规定空
+  filter 会失败）。任何失败（宿主无 `restrict`、名字未注册、调用抛错）都
+  降级为「记一条 warning + 状态视图标 `skipped`/`failed`」，**绝不影响
+  session 挂载**。挂载状态视图新增可选 `scope: "global" | "session"` 与
+  `restrictions[]`，全局层以哨兵会话 `sessionId === "*global*"` 出现在
+  `status()` 里（`servers[].{key,serverName,state,error}` 形状不变，客户端
+  聚合逻辑向后兼容）。
+- **行为差异（请留意）**：① 全局 stdio 条目**没有显式写 `cwd`** 时，其工作
+  目录从「各会话的项目根」变成「宿主进程目录」（单例没有"当前项目"；条目
+  自己写了 `cwd` 不受影响）；② 若某个 profile 的 `cordis.patch.yml` 里已经
+  root 级插入了同名 mcp-client（例：`profiles/web` 插了
+  mcp-AnySearch / mcp-tavily / mcp-context7 / mcp-github），本插件不再重复
+  挂载该 serverName：状态显示为 `conflict` 并带友好文案，工具仍由那份实例
+  提供，但**面板里对该条目的编辑不会生效**——请在 profile 里改；③ 宿主没有
+  `loader` 服务（headless 等）时会回落到插件自带的 mcp-client 副本，此时
+  `scopeOf()` 读不到宿主 scope tag，项目级的每会话隔离会降级为「同 cwd 只
+  允许一个 session 挂同名 server」，其余 session 显示 `conflict`。
+- 面板 MCP 行尚未展示宿主的 `restrictions[]`（宿主已提供，客户端类型
+  `ClientMcpStatus` 暂未透出）：`restrict` 降级时面板看不到「本项目屏蔽未
+  生效」的标注，只会在宿主日志里出现 warning。属已知限制。
+
+### 内部
+
+- `src/mcp/loader.ts` 顶层架构改为「全局单例层 + 项目级每会话层」两个独立
+  串行队列（互不 await，避免死锁）；`tools/change` 事件用于在工具集合变化
+  后幂等重算屏蔽名单（不让「后注册的工具」漏出）。
+- 验证：三条实现任务各有真实行为脚本（假 cordis ctx 驱动 loader、真实
+  stdio/HTTP MCP 探测、SSR 渲染冒烟），并由独立验证者按六条需求逐条复核
+  （含变异对照证明测试有检测力）；脚本落在 gitignore 的 `notes/` 下，不进版本库。
+
 ## [1.1.0] - 2026-09-29
 
 ### 修复

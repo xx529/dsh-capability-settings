@@ -225,6 +225,35 @@ export interface McpUpsertInput {
   entry: McpServerEntry;
 }
 
+/** 面板视角的一个 MCP 工具（宿主探测结果投影）。 */
+export interface ClientMcpTool {
+  name: string;
+  description?: string;
+  /**
+   * 工具的 `inputSchema`（JSON Schema 原样透传）：面板读取 `properties` /
+   * `required` 渲染参数表（名字 / 类型 / 是否必填 / 说明）。
+   */
+  parameters?: Record<string, unknown>;
+  outputSchema?: unknown;
+}
+
+/**
+ * 「测试 MCP 服务器」的结果：
+ *  - 成功：连接正常 + 工具清单（可能为空——服务器未暴露任何工具）+ 耗时；
+ *  - 失败：人类可读的中文错误文案列表（含原始错误 / stderr 摘要）。
+ */
+export type McpTestResult =
+  | {
+      ok: true;
+      /** 规范化后的命名空间（对应挂载后的 `mcp__<serverName>__*`）。 */
+      serverName: string;
+      tools: ClientMcpTool[];
+      elapsedMs: number;
+      /** 服务器自报的 instructions（有则展示）。 */
+      instruction?: string;
+    }
+  | { ok: false; errors: string[] };
+
 /** MCP 域的面板 API。 */
 export interface McpApi {
   list(): Promise<ClientMcpList>;
@@ -241,6 +270,13 @@ export interface McpApi {
   importToProject(input: { key: string; overwrite?: boolean }): Promise<OpResult & { existed?: boolean }>;
   /** 当前项目下各 session 的实时挂载状态。 */
   status(): Promise<ClientMcpStatus[]>;
+  /**
+   * 「测试」：真实连接这份（可能尚未保存的）条目并列出其工具名与入参。
+   *
+   * 零副作用：不落盘、不注册工具、不改变任何已挂载连接；失败以
+   * `{ ok:false, errors }` 返回（不抛异常），由面板就地展示。
+   */
+  test(input: { entry: McpServerEntry; key?: string; timeoutMs?: number }): Promise<McpTestResult>;
 }
 
 // ---------------------------------------------------------------------------

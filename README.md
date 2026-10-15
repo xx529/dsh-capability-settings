@@ -36,13 +36,19 @@
 
 ### 🗂 一个面板，管住三个能力域
 
-侧栏底部（Settings 旁）新增「能力面板」入口，点击弹出锚定浮层。面板顶部在
+侧栏**上方**（品牌/新建会话行之下、工作区列表之上）新增「能力面板」入口，
+点击后像「插件 / 自动化任务 / Context」那样**占据主区域**（不再是浮层，也不
+会挤压对话区）。面板顶部在
 **快捷消息 / Skills / MCP** 三个域之间切换，每个域内部再按 **项目 / 全局**
 两区分离——项目区只列本项目配置里的条目，全局区只列全局配置，两区都支持
 关键词搜索。头部下拉框还可以把"项目"钉选到任意已知工作区——不切 session
-也能管理别的项目。
+也能管理别的项目（**钉选只影响面板**：输入框里的三个弹层始终跟随当前会话
+自己的工作区）。
 
 ![面板：Skills 域列表](docs/screenshots/panel-skills.png)
+
+> 截图摄于 1.1.0（入口在侧栏底部、面板是浮层）。此后入口移到侧栏上方、
+> 面板改为占据主区域，版面比截图更宽；三个域的列表与操作完全一致。
 
 ### 📥 Skills：三种方式安装，一键导出分享
 
@@ -130,9 +136,15 @@ watcher + 目录重发布原生生效（下一步即注入/剔除），没有写
   `<projectRoot>/.mcp.json`，全局级 `~/.agents/mcp.json`（读取兼容旧位置
   `~/.dsh/mcp.json`），同名 key 项目级覆盖全局级；`env`/`headers`/`args`
   支持 `${VAR}` 环境变量插值。
-- host 插件监听 `agent/created`，把启用的 server 逐个挂进 agent 自己的
-  Cordis context——工具以 `mcp__<serverName>__<tool>` 出现在**该 session
-  内**，按 session 隔离，agent 销毁自动卸载。
+- 全局级 `<agentsHome>/mcp.json` 的条目**整个 harness 只挂一份实例**（挂在本
+  插件自己的 Cordis context 上，`serverName` 按 root 作用域预留，各 session
+  共用同一个 MCP 进程）；**项目级** `<项目根>/.mcp.json` 的条目仍挂在 agent
+  自己的 Cordis context 上——工具以 `mcp__<serverName>__<tool>` 出现在**该
+  session 内**，同一工作区里各 session 各一份、彼此隔离，agent 销毁自动卸载。
+- 新增/编辑 server 时可以先点**「测试连接」**：按当前草稿真连一次（不必先
+  保存），成功后列出该 server 暴露的**工具名与参数列表**（参数名 / 类型 /
+  必填或可选 / 说明）与耗时；失败给出中文文案与原始错误。探测是一次性连接，
+  不注册任何工具，结束即关闭（含 stdio 子进程）。
 - 面板分「项目 / 全局」两区：项目区条目可启停/编辑/删除，全局区条目提供
   **「导入到本项目」**——登记一条**引用**（写入
   `<项目根>/.agents/capability-imports.json`），不是物理复制：内容始终
@@ -169,8 +181,11 @@ watcher + 目录重发布原生生效（下一步即注入/剔除），没有写
 - **MCP / 快捷消息**：「导入到本项目」登记**引用**（内容实时跟随全局，
   启停是引用上的项目级标记，写在 `.agents/capability-imports.json`）；
 - **MCP 弹层的「本项目」开关**：输入框的 MCP 弹层里，全局 server 可以
-  直接切换本项目启用/禁用（写 `.agents/capability-overrides.json`，
-  本项目的 session 热卸载/重挂，不动全局配置，其他项目不受影响）。
+  直接切换本项目启用/禁用（写 `.agents/capability-overrides.json`）。
+  全局实例是共享的，所以「禁用」由宿主的 `tools.restrict`
+  在该 session 的 agent 作用域上屏蔽其工具实现——全局配置不动、其他项目
+  不受影响；宿主不提供 `restrict` 时降级（记 warning + 状态标 `skipped`，
+  工具对本会话仍可见）。
 
 ### ⌨️ 输入框里的「能力工具组」
 
@@ -202,42 +217,63 @@ watcher + 目录重发布原生生效（下一步即注入/剔除），没有写
 ```
 浏览器客户端                          宿主（host）
 ┌─────────────────────┐   RPC     ┌──────────────────────────────┐
-│ sidebar.footer      │ ────────► │ ctx.capabilityPanel 服务      │
-│  └ 能力面板浮层      │ /capability│  ├ skills        磁盘 CRUD    │
-│ conversation.input  │ -panel    │  ├ mcp           配置 CRUD +   │
-│  └ 能力工具组×3      │ 通道       │  │               热挂载 loader │
+│ sidebar.panellist    │ ────────► │ ctx.capabilityPanel 服务      │
+│  └ 能力面板图标       │ /capability│  ├ skills        磁盘 CRUD    │
+│ main(key=capability- │ -panel    │  ├ mcp           配置 CRUD +   │
+│  panel) └ 面板页面    │ 通道       │  │               热挂载 loader │
 │ conversation.input  │           │  ├ quickMessages 配置 CRUD     │
-│  └ 弹层×3            │           │  ├ overrides 项目级禁用声明    │
-└─────────────────────┘           │  └ imports   项目级引用声明    │
-                                  │ agent/created → dsh-mcp-client│
+│  └ 能力工具组×3      │           │  ├ overrides 项目级禁用声明    │
+│ conversation.input  │           │  └ imports   项目级引用声明    │
+│  └ 弹层×3            │           │ agent/created → 项目级挂载     │
+└─────────────────────┘           │ 插件 ctx      → 全局单例挂载   │
                                   └──────────────────────────────┘
 ```
 
 - **不重复注册 skills provider**：面板列表直接读受管根目录的磁盘（与官方
   filesystem provider 口径逐字节一致），启停只写 frontmatter 调用键，
   由宿主的文件 watcher 原生生效。
-- **MCP 按 session 隔离**：挂在 agent 自己的 Cordis context 上，agent
-  dispose 即自动卸载；桥接插件取**宿主那份** `@deepseek-ai/dsh-mcp-client`
-  实例，`serverName` 按 agent 作用域预留，同一项目多个 session 各自挂载、
-  互不冲突。宿主没有 loader 时（headless 等）回落到插件自带副本，那种情况下
-  `serverName` 仍是全应用单份，后到者显示黄色冲突圆点、不影响先挂载者。
+- **MCP 分两层**：全局条目挂在插件的 root 侧 context 上一次（`serverName` 按
+  `ctx.root` 预留，全应用共用一份实例）；项目条目挂在 agent 自己的 context
+  上（`serverName` 按 agent 作用域预留，同项目多 session 各自挂载、互不冲突，
+  agent 销毁即自动卸载）。为此必须取**宿主那份**
+  `@deepseek-ai/dsh-mcp-client` 实例：插件自带副本的
+  `@deepseek-ai/dsh-scope` 里 `kScope` 是普通 Symbol（非 `Symbol.for`），
+  `scopeOf()` 读不到宿主打在 agent ctx 上的 scope tag，会恒回落 `ctx.root`，
+  项目级的每会话隔离随之失效。宿主没有 loader 时（headless 等）回落自带
+  副本，那种情况下同名 server 全应用只允许一份，后到者显示冲突圆点。
+- **「在本项目禁用全局 MCP」靠 `tools.restrict` 屏蔽**：全局层共享、无法按
+  项目卸载，于是按 session 对该 agent 作用域 deny 掉该 server 的全局工具
+  （名单按 `mcp__<serverName>__` 前缀精确取；宿主没有 `restrict`、名字尚未
+  注册或调用抛错时降级为 warning + 状态标 `skipped`/`failed`，不影响挂载）。
+- **若 profile 里已 root 级挂过同名 server**（例：`profiles/web` 的
+  `cordis.patch.yml` 插了 mcp-AnySearch / mcp-tavily / mcp-mobile-next /
+  mcp-context7 / mcp-github 共 5 条），本插件不再重复挂载该 serverName：状态
+  显示 `conflict` 并带文案，工具仍由那份实例提供，但**面板里对该条目的编辑
+  不会生效**——请改 profile。
 - **UI 纯增量**：侧栏入口与输入框按钮都注册在宿主的列表槽（list slot）里，
   不顶替、不遮蔽任何内置 UI，也不绑定特定 session。
 
 ## 安装
 
-安装最新 release（推荐，版本钉死）：
+> 本仓库是 [chengdb/dsh-plugin-capability-panel](https://github.com/chengdb/dsh-plugin-capability-panel)
+> 的 fork（包名仍是 `@chengdb/capability-panel`，保持 profile patch id 与
+> `tsdown` 的 pluginId 不变）。下面的安装地址指向本 fork。
+
+跟随 `master` 最新代码（推荐）：
+
+```powershell
+dsh plugin --profile web add "github:xx529/dsh-capability-settings#master"
+dsh web        # 打开 Web GUI，侧栏上方（工作区列表之上）可见「能力面板」
+```
+
+安装上游 release（版本钉死，功能等同 1.1.0，不含本仓库后续改动）：
 
 ```powershell
 dsh plugin --profile web add "github:chengdb/dsh-plugin-capability-panel#v1.1.0"
-dsh web        # 打开 Web GUI，侧栏底部可见「能力面板」
 ```
 
-跟随 `master` 最新代码（无 release 时可临时用）：
-
-```powershell
-dsh plugin --profile web add "github:chengdb/dsh-plugin-capability-panel#master"
-```
+被 `dsh` 以 git 方式安装时，`lib/` 是**随仓库提交的构建产物**——改完 `src/`
+记得 `pnpm build` 并把 `lib/**` 一起提交，否则安装方拿到的仍是旧产物。
 
 ## 卸载
 
@@ -265,15 +301,15 @@ dsh web
 ```
 src/
   index.ts        宿主插件入口——暴露 ctx.capabilityPanel 服务
-  client.ts       客户端插件入口（侧栏入口 + 输入框工具组 + 弹层）
+  client.ts       客户端插件入口（侧栏 panellist 入口 + main 页面 + 输入框工具组 + 弹层）
   remote.ts       host↔client RPC 接线（endpoint 按域前缀路由）
   shared/         项目根探测 / 文件写锁 / skill 根定位与来源分类（两端共用）
   skills/         skills 域：磁盘读写、CRUD、安装/导出、URL 下载、shadow stub、校验
-  mcp/            MCP 域：.mcp.json 读写、agent 自动挂载、写后热重挂
+  mcp/            MCP 域：.mcp.json 读写、全局单例 + 项目级每会话挂载、探测（测试连接）
   quick-messages/ 快捷消息域：JSON 配置读写、CRUD
   overrides/      项目级禁用声明：.agents/capability-overrides.json 读写（兼容旧位置）
   imports/        项目级「全局能力引用」：.agents/capability-imports.json 读写（MCP / 快捷消息）
-  client/         React 面板（三域两区）、三个 composer 弹层、zip 工具、自含样式
+  client/         React 面板（三域两区）、三个 composer 弹层、入口外壳、zip 工具、自含样式
 ```
 
 ## License

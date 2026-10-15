@@ -101,15 +101,49 @@ export interface McpListResult {
 }
 /** 一条 server 在一个 session 内的实时挂载状态。 */
 export type McpMountState = "mounted" | "failed" | "conflict";
-/** 某个 session 的 MCP 实时挂载状态视图。 */
+/**
+ * 一条挂载记录的归属层：
+ *
+ *   - `global`：全应用共享的全局单例层（挂在插件自己的 ctx 上，
+ *     `serverName` 按 `ctx.root` 预留，所有 session 复用同一份进程/连接）；
+ *   - `session`：该 session 独占的项目层（挂在 `agent.ctx` 上，`serverName`
+ *     按该 agent 的作用域预留，天然按会话隔离）。
+ *
+ * 省略时按 `session` 解读，保证旧客户端（只读
+ * `status[].servers[].{key,serverName,state,error}`）的语义不变。
+ */
+export type McpMountScope = "global" | "session";
+/**
+ * 一条「按会话屏蔽全局 server」的结果（`tools.restrict` 能力的可观测性）。
+ *
+ * 项目级「禁用全局 server」在全局层成为共享单例后无法靠"不挂载"实现，
+ * 只能在 session 上屏蔽该 session 继承到的全局工具；本视图让面板能看到
+ * 屏蔽是否真的生效，以及降级原因。
+ */
+export interface McpRestrictionView {
+    /** 被屏蔽的全局 server 条目键。 */
+    key: string;
+    /**
+     * `applied` = 已生效；`skipped` = 当前没有可屏蔽的全局工具（server 尚未
+     * 连接、或宿主未注册任何该 server 的工具），本次未调用 restrict；
+     * `failed` = restrict 调用抛错（已降级，全局工具对本会话仍可见）。
+     */
+    state: "applied" | "skipped" | "failed";
+    error?: string;
+}
+/** 某个 session（或全局层）的 MCP 实时挂载状态视图。 */
 export interface McpStatusView {
     sessionId: string;
-    /** 该 session 的项目根（无工作区时缺省）。 */
+    /** 该 session 的项目根（无工作区时缺省）。全局层缺省。 */
     projectRoot?: string;
+    /** 本记录的归属层；缺省按 `session` 解读（向后兼容）。 */
+    scope?: McpMountScope;
     servers: Array<{
         key: string;
         serverName: string;
         state: McpMountState;
         error?: string;
     }>;
+    /** 该 session 上「全局 server 被本项目屏蔽」的结果（仅 session 层携带）。 */
+    restrictions?: McpRestrictionView[];
 }

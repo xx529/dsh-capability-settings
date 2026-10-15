@@ -1,5 +1,25 @@
 /**
- * Capability Panel 的 React 视图（侧栏底部按钮弹出的浮层面板）。
+ * Capability Panel 的 React 视图（占据**主区域**的页面，不再是浮层）。
+ *
+ * 入口在**侧栏上方**：本插件向 `sidebar.panellist`（ui-sidebar 的「全局
+ * 面板」图标排，位于工作区列表之上、`sidebar.settings` 页脚之上）注册
+ * `{ id: 'capability-panel', order: 30, label: '能力面板' }` 与图标本体，
+ * 并向 `main` keyed slot 注册同名的 `key: 'capability-panel'` 页面组件。
+ * 侧栏自己渲染按钮 / tooltip / label 文本，点击时把主区域切到该 key
+ * （与 plugins / schedules / dsh-context 同构）；两者必须成对注册——侧栏
+ * 选择没有对应 main 条目的 id 会抛错。浮层外壳、backdrop 与关闭按钮都已
+ * 随之删除。
+ *
+ * **两份 api，切勿合并（防回归）**：
+ *   - 面板自身用 client.ts 中带「项目钉选」的 `api`：`currentWorkspaceCwd`
+ *     是 `selection.cwd ?? 当前会话工作区`，所以头部「项目作用域」下拉框
+ *     能把项目级视图钉到任意工作区；
+ *   - composer（输入框工具行：快捷消息 / Skills / MCP 三个按钮与弹层）在
+ *     client.ts 中用单独的 `composerApi`：`currentWorkspaceCwd` **只**取当前
+ *     会话自己的工作区，`selectedProject()` 恒为 undefined。两者共用同一份
+ *     `subscribeWorkspace` 回调集合，因此都会随会话工作区切换刷新。
+ *   若把面板这份 api 交给 composer，就会出现在面板里把项目作用域钉到 A
+ *   工作区后、B 工作区的对话框弹层列出 A 的项目级技能/MCP 的串味 bug。
  *
  * 根容器按能力域分 Tab：
  *   - 快捷消息：项目 + 全局快捷语，支持搜索/过滤与详情视图（见
@@ -37,10 +57,13 @@ const DOMAIN_LABEL: Record<DomainTab, string> = {
 };
 
 /**
- * 面板根组件：头部（标题 + 项目下拉框 + 关闭按钮 + 域 Tab）
- * + 当前域视图（Skills / MCP）。
+ * 面板根组件：头部（标题 + 项目下拉框 + 域 Tab）+ 当前域视图。
+ *
+ * 它是主区域页面的本体（见 panel-entry.tsx 的 CapabilityPanelPage），自带
+ * `.skp-panel`（height:100% / flex column），因此不再需要浮层外壳与关闭
+ * 按钮——关闭 = 侧栏切换到别的主面板。
  */
-export function CapabilityPanel({ api, onClose }: { api: CapabilityPanelApi; onClose?: () => void }) {
+export function CapabilityPanel({ api }: { api: CapabilityPanelApi }) {
   // 域、工作区标签、下拉框选项、钉选状态各自维护一份 useState；
   // 起始值取自 api 的快照方法。
   const [domain, setDomain] = useState<DomainTab>("skills");
@@ -67,8 +90,8 @@ export function CapabilityPanel({ api, onClose }: { api: CapabilityPanelApi; onC
     };
   }, [api]);
 
-  // 标题行 + 关闭按钮是浮层自己的 chrome（footer-action 的 popover
-  // 不提供外壳级 header）。
+  // 页面 chrome 由主区域提供（侧栏切换主面板 = 关闭）；这里只渲染
+  // 标题行 + 域 Tab 与当前域视图。
   return (
     <section className="skp-panel" aria-label="能力面板">
       <header className="skp-header">
@@ -97,11 +120,6 @@ export function CapabilityPanel({ api, onClose }: { api: CapabilityPanelApi; onC
               ]}
               onChange={(value) => api.selectProject(value === "" ? undefined : value)}
             />
-            {onClose !== undefined && (
-              <button className="skp-close" type="button" aria-label="关闭能力面板" title="关闭面板" onClick={onClose}>
-                ✕
-              </button>
-            )}
           </div>
         </div>
         {/* 域 Tab：快捷消息 / skills / mcp 之间切换视图。 */}
@@ -128,68 +146,6 @@ export function CapabilityPanel({ api, onClose }: { api: CapabilityPanelApi; onC
         <QuickMessagesPanel api={api} workspace={workspace} />
       )}
     </section>
-  );
-}
-
-/**
- * 侧栏底部入口：Settings 旁的一个按钮，点击切换居中的浮层面板。
- *
- * 根 div 同时包裹按钮与浮层，因此浮层内部的点击不会命中"外部 pointerdown
- * 关闭"的判定。注册目标是根作用域的 `sidebar.footer.action` 列表槽
- * （replace-risk none）：纯增量、不绑定 session。
- */
-export function CapabilitiesFooterAction({ api, wide }: { api: CapabilityPanelApi; wide: boolean }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-
-  // 点击 rootRef 外部任意处关闭浮层（浮层在 rootRef 内，弹层内点击
-  // 永远不会走到 dismiss 分支）。capture 阶段监听，抢在其它处理前判定。
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (rootRef.current !== null && event.target instanceof Node && !rootRef.current.contains(event.target)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", onPointerDown, true);
-    return () => document.removeEventListener("pointerdown", onPointerDown, true);
-  }, [open]);
-
-  // Esc 也可关闭浮层。
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open]);
-
-  return (
-    <div ref={rootRef} className="skp-foot">
-      {open && (
-        <>
-          {/* 遮罩层：与设置弹窗一致的风格，点击变暗并关闭。 */}
-          <div className="skp-backdrop" onClick={() => setOpen(false)} />
-          <div className="skp-popover">
-            <CapabilityPanel api={api} onClose={() => setOpen(false)} />
-          </div>
-        </>
-      )}
-      <button
-        type="button"
-        className="skp-foot-btn"
-        aria-expanded={open}
-        title="能力面板"
-        onClick={() => setOpen((value) => !value)}
-      >
-        <span aria-hidden="true" className="skp-foot-icon">
-          ✦
-        </span>
-        {/* wide=false 对应侧栏收窄成 56px 竖条，只显示图标。 */}
-        {wide && <span className="skp-foot-label">能力面板</span>}
-      </button>
-    </div>
   );
 }
 

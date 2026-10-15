@@ -13,6 +13,7 @@ import { withFileLock } from "../shared/file-lock.js";
 import { errMessage } from "../shared/errors.js";
 import { locateConfigFile, removeFiles, type ConfigFileLocation } from "../shared/config-location.js";
 import { readMcpFile, sanitizeServerName, summarizeEntry, transportOf, validateEntry, writeMcpFile } from "./config-file.js";
+import { probeMcpServer, type McpProbeResult } from "./probe.js";
 import { GLOBAL_MCP_FILE_NAME, globalMcpDirs, projectMcpFile } from "./paths.js";
 import type { OverridesManager } from "../overrides/manager.js";
 import type { ImportsManager } from "../imports/manager.js";
@@ -40,6 +41,18 @@ export interface McpUpsertInput extends McpWriteInput {
 
 /** 写操作的结果：成功或带错误信息列表。 */
 export type McpOpResult = { ok: true } | { ok: false; errors: string[] };
+
+/** 「测试」入参：面板表单里的**草稿**也能直接测（不必先保存）。 */
+export interface McpTestInput {
+  /** 待测条目（未落盘的原样草稿）。 */
+  entry: McpServerEntry;
+  /** 条目键名（决定命名空间 serverName）；缺省（空/未给）用 `"server"`。 */
+  key?: string;
+  /** stdio 未写 cwd 时的兜底工作目录（通常是当前工作区）。 */
+  cwd?: string;
+  /** 探测超时（毫秒），缺省 15s、硬上限 60s（见 mcp/probe.ts）。 */
+  timeoutMs?: number;
+}
 
 /** 创建管理服务；loader 由 index.ts 注入（自动挂载与状态共用同一实例）。 */
 export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overrides?: OverridesManager, imports?: ImportsManager) {
@@ -283,7 +296,25 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
     return loader.status(cwd);
   }
 
-  return { list, upsert, remove, setEnabled, importToProject, status };
+  /**
+   * 「测试」：先做与 upsert 同一口径的**静态校验**（失败直接返回 errors，
+   * 不发起任何连接），再真实连接这份草稿配置并列出工具名与入参。
+   *
+   * 纯探测、零副作用：不落盘、不触 loader.reload、不注册任何工具、不留子
+   * 进程（见 mcp/probe.ts）。因此可以直接测面板里还没保存的表单草稿。
+   */
+  async function test(input: McpTestInput): Promise<McpProbeResult> {
+    // 键名只影响命名空间；草稿没填名字时也能测（回落 "server"，与
+    // sanitizeServerName 的兜底一致），静态校验仍按该键名跑一遍。
+    const key = typeof input.key === "string" && input.key.trim().length > 0 ? input.key.trim() : "server";
+    const entry =
+      input.entry !== null && typeof input.entry === "object" && !Array.isArray(input.entry) ? input.entry : ({} as McpServerEntry);
+    const errors = validateEntry(key, entry);
+    if (errors.length > 0) return { ok: false, errors };
+    return probeMcpServer({ key, entry, cwd: input.cwd, timeoutMs: input.timeoutMs });
+  }
+
+  return { list, upsert, remove, setEnabled, importToProject, status, test };
 }
 
 /** 管理服务的完整类型（构造函数的返回值）。 */

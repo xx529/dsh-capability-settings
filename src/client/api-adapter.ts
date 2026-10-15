@@ -14,12 +14,14 @@ import type {
   CapabilityPanelApi,
   ClientMcpList,
   ClientMcpStatus,
+  ClientMcpTool,
   ClientOverrides,
   ClientQuickMessagesList,
   ClientSkillDetail,
   ClientSkillSummary,
   CreateSkillInput,
   InstallResult,
+  McpTestResult,
   McpUpsertInput,
   WorkspaceOption,
 } from "./api.js";
@@ -238,6 +240,15 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
         if (!result.ok) throw new Error(result.errors.join("; "));
         return result.value as ClientMcpStatus[];
       },
+
+      /**
+       * 「测试」：探测结果自带业务 ok/errors 形状，`unwrap` 后直接以
+       * McpTestResult 归一返回（失败不抛异常，交给面板就地展示）。
+       */
+      async test(input) {
+        const cwd = deps.currentWorkspaceCwd();
+        return toMcpTestResult(unwrap(await rpc("mcp.test", { ...input, cwd })));
+      },
     },
 
     quickMessages: {
@@ -343,5 +354,37 @@ function toInstallResult(result: RawResult): InstallResult {
     ok: true,
     ...(typeof self.name === "string" ? { name: self.name } : {}),
     ...(self.existed === true ? { existed: true } : {}),
+  };
+}
+
+/**
+ * 把解开信封后的探测结果投影成 McpTestResult（防御宿主侧数据漂移：
+ * 工具必须是对象且带字符串 name，否则丢弃；缺省值补齐）。
+ */
+function toMcpTestResult(result: RawResult): McpTestResult {
+  if (!result.ok) return { ok: false, errors: result.errors };
+  const self = result as unknown as Record<string, unknown>;
+  const tools = (Array.isArray(self.tools) ? self.tools : [])
+    .filter((tool): tool is Record<string, unknown> => tool !== null && typeof tool === "object" && !Array.isArray(tool))
+    .filter((tool) => typeof tool.name === "string" && (tool.name as string).length > 0)
+    .map((tool) => toClientTool(tool));
+  return {
+    ok: true,
+    serverName: typeof self.serverName === "string" && self.serverName.length > 0 ? self.serverName : "server",
+    tools,
+    elapsedMs: typeof self.elapsedMs === "number" && Number.isFinite(self.elapsedMs) ? self.elapsedMs : 0,
+    ...(typeof self.instruction === "string" && self.instruction.length > 0 ? { instruction: self.instruction } : {}),
+  };
+}
+
+/** 单个工具的宽松投影（parameters 必须是对象，否则省略该字段）。 */
+function toClientTool(tool: Record<string, unknown>): ClientMcpTool {
+  const parameters = tool.parameters;
+  const outputSchema = tool.outputSchema;
+  return {
+    name: tool.name as string,
+    ...(typeof tool.description === "string" && tool.description.length > 0 ? { description: tool.description } : {}),
+    ...(parameters !== null && typeof parameters === "object" && !Array.isArray(parameters) ? { parameters: parameters as Record<string, unknown> } : {}),
+    ...(outputSchema !== undefined ? { outputSchema } : {}),
   };
 }

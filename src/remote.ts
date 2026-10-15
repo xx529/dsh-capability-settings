@@ -68,6 +68,11 @@ export interface PanelRpcService {
     setEnabled(input: unknown): Promise<unknown>;
     importToProject(input: unknown): Promise<unknown>;
     status(cwd?: string): unknown;
+    /**
+     * 连通性测试：真实连接一份（可能未保存的）条目，返回工具名与入参。
+     * 零副作用（不落盘、不注册工具），失败也走业务失败信封（value.ok=false）。
+     */
+    test(input: unknown): Promise<unknown>;
   };
   quickMessages: {
     list(cwd?: string): Promise<unknown>;
@@ -130,6 +135,10 @@ export async function handleEndpoint(service: PanelRpcService, endpoint: string,
         return { ok: true, value: await service.mcp.importToProject(p) };
       case "mcp.status":
         return { ok: true, value: service.mcp.status(cwd) };
+      case "mcp.test":
+        // 探测自身把失败收进业务信封（value.ok=false），这里保持同一形状：
+        // 客户端适配器解出 { ok:false, errors } 后由面板展示。
+        return { ok: true, value: await service.mcp.test(p) };
       case "quick.list":
         return { ok: true, value: await service.quickMessages.list(cwd) };
       case "quick.upsert":
