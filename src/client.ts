@@ -118,22 +118,53 @@ export function apply(ctx: any) {
   });
 
   // composer（输入框工具行：快捷消息 / Skills / MCP 三个按钮与弹层）专用
-  // 实例：项目作用域**只跟随当前会话自己的工作区**，永远不读面板的钉选
-  // 状态 `selection.cwd`。否则在面板里把「项目作用域」钉到 A 工作区后，B
-  // 工作区的对话框弹层会列出 A 的项目级技能/MCP（串味 bug）。
-  // 订阅回调集合与上面那份共用（subscribeWorkspace），所以两边都会随会话
-  // 工作区切换刷新；`selectedProject` / `selectProject` 恒为空操作——composer
-  // 不提供钉选入口。
-  const composerApi = createPanelApi({
+  // 实例：项目作用域**只跟随该组件所在 session 自己的工作区**，永远不读面板
+  // 的钉选状态 `selection.cwd`，也不允许退化成"工作区列表第一项"。否则在
+  // 面板里把「项目作用域」钉到 A 工作区后，B 工作区的对话框弹层会列出 A 的
+  // 项目级技能/MCP（串味 bug）。
+  //
+  // 为什么必须把 sessionId 传进来：composer 的两个槽
+  // （`conversation.input.left` / `conversation.input.overlay`）都是 session
+  // 作用域，standardProps 里直接给 `sessionId: SessionId`。而本机外壳
+  // （dsh 0.2.0-rc.2）的 `sessions.list` 快照形状是
+  // `{ ids, byId, phase, projectionsBySession }`——**没有 `current`**；
+  // `workspaces.list` 快照是 `{ items, archivedSessionIds, pinnedSessionIds,
+  // state, phase, error }`——**没有 `recentWorkspaceId`**。只靠这两个服务
+  // 拿不到"当前会话"，解析会退化成 `items[0]`（第一个工作区），这正是
+  // "在 B 工作区却看到 A 的项目级 MCP"的另一个成因（已用真机 GUI 复现并
+  // 用 sessionId 修掉）。详见 currentWorkspaceCwd 的兜底顺序。
+  //
+  // 每个 session 一份实例并缓存：槽组件在会话切换时会以新的 sessionId 渲染，
+  // 拿到的就是对应工作区的 api；同一会话内复用同一实例，避免每次渲染重建。
+  const composerApiFallback = createPanelApi({
     rpc: ctx.get("connection")?.rpc,
     currentWorkspaceCwd: () => currentWorkspaceCwd(ctx),
     subscribeWorkspace,
     listProjects: () => listWorkspaceOptions(ctx),
     selectedProject: () => undefined,
     selectProject: () => {
-      /* composer 不钉选项目：项目作用域恒跟随当前会话 */
+      /* composer 不钉选项目：项目作用域恒跟随所在 session */
     },
   });
+  const sessionApiCache = new Map<string, ReturnType<typeof createPanelApi>>();
+  /** 取该 session 自己的 composer api；拿不到 sessionId 时退回无钉选实例。 */
+  const composerApiFor = (sessionId: unknown): ReturnType<typeof createPanelApi> => {
+    if (typeof sessionId !== "string" || sessionId.length === 0) return composerApiFallback;
+    const cached = sessionApiCache.get(sessionId);
+    if (cached !== undefined) return cached;
+    const created = createPanelApi({
+      rpc: ctx.get("connection")?.rpc,
+      currentWorkspaceCwd: () => currentWorkspaceCwd(ctx, sessionId),
+      subscribeWorkspace,
+      listProjects: () => listWorkspaceOptions(ctx),
+      selectedProject: () => undefined,
+      selectProject: () => {
+        /* composer 不钉选项目：项目作用域恒跟随所在 session */
+      },
+    });
+    sessionApiCache.set(sessionId, created);
+    return created;
+  };
 
   // sessions / workspaces 的基线都是异步解析的 SnapshotStore，所以订阅图
   // 变化：当解析出的 cwd（或工作区列表本身）变化时重新读取两份快照并
@@ -197,25 +228,27 @@ export function apply(ctx: any) {
   // 各自独立、外部点击互斥关闭。Skills 与快捷消息弹层从 session 标准套件
   // 读 useInput / inputActions：Skills 点击某行把 `/name ` 追加进草稿（宿主
   // ui-skill '/' 源的同款口令形式），快捷消息点击把正文追加进草稿。
-  // 三个按钮与三个弹层一律用 `composerApi`（只跟随当前会话工作区，不含
-  // 面板的钉选），切勿换回上面的 `api`——那会造成跨工作区串味。
+  // 三个按钮与三个弹层一律用 `composerApiFor(props.sessionId)`（只跟随**所在
+  // session** 的工作区，不含面板钉选、不退化成列表第一项），切勿换回上面的
+  // `api`——那会造成跨工作区串味。
   if (ctx.slots?.inject && ctx.slots.register) {
     const disposeTools = ctx.slots.inject("conversation.input.left", () =>
-      ctx.slots.register({ name: "conversation.input.left", id: "capability-panel-tools", order: 10, label: "能力工具" }, (props: any) =>
-        createElement(
+      ctx.slots.register({ name: "conversation.input.left", id: "capability-panel-tools", order: 10, label: "能力工具" }, (props: any) => {
+        const composerApi = composerApiFor(props?.sessionId);
+        return createElement(
           "div",
           { className: "skp-composer-tools" },
           ComposerQuickButton(),
           ComposerSkillsButton({ api: composerApi, draft: typeof props?.input?.draft === "string" ? props.input.draft : "" }),
           ComposerMcpButton({ api: composerApi }),
-        ),
-      ),
+        );
+      }),
     );
     if (typeof disposeTools === "function") disposers.push(disposeTools);
     const disposeSkillsOverlay = ctx.slots.inject("conversation.input.overlay", () =>
       ctx.slots.register({ name: "conversation.input.overlay", id: "capability-panel-skills", order: 5, label: "Skills" }, (props: any) =>
         ComposerSkillsOverlay({
-          api: composerApi,
+          api: composerApiFor(props?.sessionId),
           useInput: typeof props?.useInput === "function" ? props.useInput : undefined,
           inputActions: typeof props?.inputActions?.setDraft === "function" ? props.inputActions : undefined,
         }),
@@ -229,7 +262,7 @@ export function apply(ctx: any) {
     const disposeQuickOverlay = ctx.slots.inject("conversation.input.overlay", () =>
       ctx.slots.register({ name: "conversation.input.overlay", id: "capability-panel-quick", order: 7, label: "快捷消息" }, (props: any) =>
         ComposerQuickOverlay({
-          api: composerApi,
+          api: composerApiFor(props?.sessionId),
           useInput: typeof props?.useInput === "function" ? props.useInput : undefined,
           inputActions: typeof props?.inputActions?.setDraft === "function" ? props.inputActions : undefined,
         }),
@@ -241,8 +274,8 @@ export function apply(ctx: any) {
     // `conversation.input.overlay`。开合状态由 composer-mcp 模块内的微存储
     // 跨两棵 React 树共享。
     const disposeOverlay = ctx.slots.inject("conversation.input.overlay", () =>
-      ctx.slots.register({ name: "conversation.input.overlay", id: "capability-panel-mcp", order: 10, label: "MCP 服务器" }, () =>
-        ComposerMcpOverlay({ api: composerApi }),
+      ctx.slots.register({ name: "conversation.input.overlay", id: "capability-panel-mcp", order: 10, label: "MCP 服务器" }, (props: any) =>
+        ComposerMcpOverlay({ api: composerApiFor(props?.sessionId) }),
       ),
     );
     if (typeof disposeOverlay === "function") disposers.push(disposeOverlay);
@@ -254,24 +287,54 @@ export function apply(ctx: any) {
 }
 
 /**
- * 推导当前活动的工作区目录（若存在）。
+ * 推导某个工作区的目录（若存在）。
  *
- * 最高保真来源是当前 session 自己的工作目录（`sessions.list` →
- * `byId[current].cwd`）；session 存在但还没有 cwd 时，回退到包含它的
- * Workspace；没有当前 session 时（例如从 hero 屏打开设置）用最近活跃的
- * workspace，再退到第一个注册的 workspace。
+ * 解析顺序（第一个命中即返回）：
  *
- * 注意：workspaces 快照在 `workspaces.list`（SnapshotStore）上——服务本身
- * 没有 getSnapshot，且没有 `current` 字段；它暴露 `items` /
- * `recentWorkspaceId` / `baselinesReady`。
+ *   1. **显式 sessionId**（composer 槽的 standardProps 直接提供）→ 若
+ *      `sessions.byId[sessionId].cwd` 有值就直接用它（session 自己的工作目录），
+ *      否则找 `workspaces.list` 快照里 `sessionIds` 含它的那个 Workspace 的 path。
+ *      这是唯一在 dsh 0.2.0-rc.2 外壳上可靠的一步：该版本的
+ *      `sessions.list` 快照形状是 `{ ids, byId, phase, projectionsBySession }`
+ *      （**没有 `current`**，且真机上 `byId[session]` 也**没有 `cwd`**，所以
+ *      sessionId 实际走的是 Workspace 归属那一路），`workspaces.list` 快照是
+ *      `{ items, archivedSessionIds, pinnedSessionIds, state, phase, error }`
+ *      （**没有 `recentWorkspaceId`**）。
+ *   2. `sessions.list.current` → `byId[current].cwd`（老外壳的字段；有就用，
+ *      它是 session 的工作目录本身）。
+ *   3. 该外壳没有 `current` 时：`byId` 里**唯一**被主视图保留
+ *      （`retainedBy.mainView > 0`）的会话（前台会话）→ 其 `cwd`。
+ *   4. `sessions.list.current` / 上面的前台会话 → 包含它的 Workspace 的 path。
+ *   5. `workspaces.list.recentWorkspaceId`（老外壳字段）。
+ *   6. `items[0]`（第一个注册的工作区）——**只作为最后兜底**：在前五步都
+ *      拿不到时它会给出一个与会话无关的工作区，所以 composer 一律通过第 1 步
+ *      的 sessionId 走精确解析，绝不落到这里。
  */
-function currentWorkspaceCwd(ctx: any): string | undefined {
-  let current: string | undefined;
+function currentWorkspaceCwd(ctx: any, sessionId?: string): string | undefined {
+  const wanted = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : undefined;
+  let current: string | undefined = wanted;
   try {
     const sessions = ctx.get("sessions");
     const snap = sessions?.list?.getSnapshot?.();
-    current = snap?.current;
-    if (typeof current === "string") {
+    if (current === undefined) {
+      const active = snap?.current;
+      if (typeof active === "string") current = active;
+    }
+    if (current === undefined) {
+      // 该外壳（dsh 0.2.0-rc.2）的 sessions 快照没有 `current` 字段，退而用
+      // "被主视图保留" 的会话：`byId[id].retainedBy.mainView > 0`。**只在唯一
+      // 一个会话满足时采用**，否则宁可不用（多会话同时保留时无法判定谁在前台，
+      // 乱选会造成跨工作区串味）。
+      const byId = snap?.byId;
+      if (byId !== null && typeof byId === "object") {
+        const mainViewIds = Object.keys(byId).filter((id) => {
+          const retained = (byId as Record<string, { retainedBy?: Record<string, number> }>)[id]?.retainedBy;
+          return typeof retained?.mainView === "number" && retained.mainView > 0;
+        });
+        if (mainViewIds.length === 1) current = mainViewIds[0];
+      }
+    }
+    if (current !== undefined) {
       const cwd = snap?.byId?.[current]?.cwd;
       if (typeof cwd === "string" && cwd.length > 0) return cwd;
     }
@@ -280,13 +343,13 @@ function currentWorkspaceCwd(ctx: any): string | undefined {
   }
   try {
     const workspaces = ctx.get("workspaces");
-    const items: Array<{ workspaceId: string; path?: string; sessionIds?: string[] }> =
-      workspaces?.list?.getSnapshot?.()?.items ?? [];
-    if (typeof current === "string") {
+    const snapshot = workspaces?.list?.getSnapshot?.();
+    const items: Array<{ workspaceId: string; path?: string; sessionIds?: string[] }> = snapshot?.items ?? [];
+    if (current !== undefined) {
       const owned = items.find((w) => w.sessionIds?.includes?.(current));
       if (owned?.path) return owned.path;
     }
-    const recent = workspaces?.list?.getSnapshot?.()?.recentWorkspaceId;
+    const recent = snapshot?.recentWorkspaceId;
     if (typeof recent === "string") {
       const item = items.find((w) => w.workspaceId === recent);
       if (item?.path) return item.path;
@@ -316,9 +379,25 @@ function listWorkspaceOptions(ctx: any): Array<{ id: string; path: string; title
   }
 }
 
-/** 工作区列表的廉价变更检测键（用于判断是否需要刷新下拉框）。 */
+/**
+ * 工作区列表的廉价变更检测键（用于判断是否需要刷新下拉框与 composer 标签）。
+ *
+ * **必须包含每个 Workspace 的 `sessionIds`**：新建会话时宿主会先把会话登记进
+ * Workspace（`items[].sessionIds` 变化），composer 随后才按 sessionId 解析所属
+ * 工作区。若 key 只看 `id:path:title`，这次变化不触发通知，新建会话的弹层会
+ * 停在旧值（真机形状下表现为退化成 `items[0]`）。
+ */
 function workspaceItemsKey(ctx: any): string {
-  return listWorkspaceOptions(ctx)
-    .map((o) => `${o.id}:${o.path}:${o.title ?? ""}`)
-    .join("|");
+  try {
+    const items: Array<{ workspaceId?: string; path?: string; title?: string; sessionIds?: string[] }> =
+      ctx.get("workspaces")?.list?.getSnapshot?.()?.items ?? [];
+    return items
+      .map(
+        (w) =>
+          `${String(w.workspaceId ?? w.path)}:${w.path ?? ""}:${w.title ?? ""}:${(w.sessionIds ?? []).join(",")}`,
+      )
+      .join("|");
+  } catch {
+    return "";
+  }
 }

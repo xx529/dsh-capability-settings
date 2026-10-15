@@ -9,3 +9,5 @@ notes/
 .mcp.json
 .agents
 .dsh
+# 隔离验证用（独立 DSH_HOME / profile / MCP 夹具），不进版本库
+.verify-home/

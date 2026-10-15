@@ -135,7 +135,14 @@ export function useComposerStore<T>(store: ComposerStoreApi<T>): ComposerStoreSt
  */
 export function useWorkspaceLabel(api: CapabilityPanelApi): string {
   const [workspace, setWorkspace] = useState<string>(() => api.workspaceLabel());
-  useEffect(() => api.subscribeWorkspace(() => setWorkspace(api.workspaceLabel())), [api]);
+  // `api` 变化（composer 按 sessionId 换实例）时必须**立即**用新实例重算一次，
+  // 不能只重新订阅：外壳若复用同一个槽组件实例、只替换 sessionId props，旧
+  // 实例的标签会留在 state 里，而下游（如 composer-mcp 的 `isFresh(workspace)`
+  // 短路）就会拒绝为新会话取数——切会话后弹层内容不刷新。
+  useEffect(() => {
+    setWorkspace(api.workspaceLabel());
+    return api.subscribeWorkspace(() => setWorkspace(api.workspaceLabel()));
+  }, [api]);
   return workspace;
 }
 

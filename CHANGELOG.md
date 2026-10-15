@@ -34,6 +34,26 @@
   `composerApi`**（`currentWorkspaceCwd` 只取当前会话工作区，`selectedProject`
   恒为 undefined、`selectProject` 空操作），面板继续使用带钉选的那份；
   两份共用同一份工作区订阅回调集合，所以各自都能随会话切换刷新。
+- **同一 bug 的更深一层成因（真机复现后修复）**：`currentWorkspaceCwd()` 依赖
+  的两个字段在 dsh `0.2.0-rc.2` 外壳里**都不存在**——`sessions.list` 快照形状是
+  `{ ids, byId, phase, projectionsBySession }`（**没有 `current`**），
+  `workspaces.list` 快照是 `{ items, archivedSessionIds, pinnedSessionIds,
+  state, phase, error }`（**没有 `recentWorkspaceId`**）。于是解析退化为
+  `items[0]`（工作区列表第一项）：在 ws-b 的会话里，弹层列出的却是 ws-a 的
+  项目级 server，且切换工作区不会变。现在 composer 槽位直接使用 standardProps
+  提供的 **`sessionId`**（`conversation.input.left` / `conversation.input.overlay`
+  均为 session 作用域，契约里就有 `sessionId: SessionId`）精确解析所在工作区，
+  并按 sessionId 缓存 api 实例；面板侧（root 作用域拿不到 sessionId）在该外壳上
+  退化为「**唯一**被主视图保留（`retainedBy.mainView > 0`）的会话」，只在唯一时
+  采用以免多会话歧义。该成因由隔离实例 + 真实 `dsh 0.2.0-rc.2` 外壳的 GUI
+  实测发现并复验（见 `notes/real-gui-evidence/`）。
+- **连带修复（防回归）**：① `useWorkspaceLabel` 在传入的 api 实例变化时只重新订阅、
+  没有立刻用新实例重算标签，下游 `ComposerMcpButton` 又会用「标签未变」短路掉取数——
+  外壳若复用同一个槽组件实例、只替换 `sessionId` props，切会话后弹层就不会为新会话
+  取数；现在 effect 里先 `setWorkspace(api.workspaceLabel())` 再订阅。
+  ② 工作区变更通知键（`workspaceItemsKey`）此前只含 `id:path:title`，而新建会话时
+  宿主先改的是 `items[].sessionIds`，这次变化不触发通知，新建会话的弹层会停在旧值；
+  现在把每个 Workspace 的 `sessionIds` 纳入通知键。
 - **连带修复**：工作区变化的通知判定此前只比较「钉选优先」的 cwd，面板钉选
   到 A 时把当前会话从 B 切到 C 不会触发通知，composer 会继续显示 B 的项目级
   条目。现在同时跟踪「面板侧」与「会话侧」两个 cwd 键。
@@ -87,6 +107,13 @@
 - 验证：三条实现任务各有真实行为脚本（假 cordis ctx 驱动 loader、真实
   stdio/HTTP MCP 探测、SSR 渲染冒烟），并由独立验证者按六条需求逐条复核
   （含变异对照证明测试有检测力）；脚本落在 gitignore 的 `notes/` 下，不进版本库。
+- **真机 GUI 验证**：另建完全隔离的 DSH 实例（`DSH_HOME=<repo>/.verify-home`、
+  独立端口、本地装入与桌面应用同版本的 `dsh@0.2.0-rc.2`、夹具工作区与夹具 MCP
+  进程），用真实浏览器逐条复验六项需求，并用进程计数给出逻辑改动的硬证据
+  （3 个真实会话时全局 MCP 进程 = 1，同一工作区两个会话的项目级 MCP 进程 = 2）。
+  证据与复现步骤见 `notes/real-gui-evidence/`。注意：系统里全局安装的
+  `dsh@0.1.2-alpha.2` 外壳**没有** `sidebar.panellist` 槽，用它会误判 UI 改动，
+  验证必须用 0.2.0-rc.2 及以上外壳。
 
 ## [1.1.0] - 2026-09-29
 

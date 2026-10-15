@@ -6,6 +6,11 @@
 
 ![能力面板总览](docs/screenshots/panel-overview.png)
 
+> **外壳版本要求**：侧栏入口用的是 root 作用域的 `sidebar.panellist` 槽
+> （「全局面板」图标排）与同 id 的 `main` keyed 槽，**需要 dsh 外壳 ≥ 0.2.0-rc.2**
+> （桌面应用 0.2.0-rc.2 即有；更早的 `0.1.2-alpha.2` 只有 `sidebar.footer.action`，
+> 那时入口与主区域面板都不会注册——升级外壳即可）。
+
 ## 它能做什么
 
 | 能力域 | 浏览/搜索 | 新增/安装 | 编辑 | 启用/禁用 | 删除 | 导入/导出 |
@@ -192,6 +197,13 @@ watcher + 目录重发布原生生效（下一步即注入/剔除），没有写
 输入框左下角注册了一组三个按钮（顺序与面板域 Tab 一致）：
 **快捷消息 / Skills / MCP**。点击在输入框上方展开弹层，三个弹层共用
 同一锚点，切换不跳位；Esc / 点击外部关闭，彼此互斥。
+
+三个按钮与三个弹层的**项目作用域一律跟随自己所在 session 的工作区**：
+composer 槽（`conversation.input.left` / `conversation.input.overlay`）都是
+session 作用域、standardProps 里直接给 `sessionId`，插件按它解析出所属工作区
+（`workspaces` 快照的 `items[].sessionIds`），并按 sessionId 缓存适配器实例。
+因此在 B 工作区的会话里**只会**看到 B 的项目级条目——既不受能力面板头部
+「项目作用域」钉选影响，也不会因为拿不到"当前会话"而退化成工作区列表第一项。
 
 ![输入框能力工具组与 Skills 弹层](docs/screenshots/composer-skills.png)
 
