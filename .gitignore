@@ -11,3 +11,6 @@ notes/
 .dsh
 # 隔离验证用（独立 DSH_HOME / profile / MCP 夹具），不进版本库
 .verify-home/
+
+# profile 变更前的备份（含依赖/patch），不进版本库
+.profile-backup/
