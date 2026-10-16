@@ -43,5 +43,7 @@ export declare function useAsyncList<T>(load: () => Promise<T>, deps: readonly u
     data: T | undefined;
     loading: boolean;
     error: string | undefined;
-    reload: () => void;
+    reload: (options?: {
+        silent?: boolean;
+    }) => void;
 };

@@ -64,15 +64,17 @@ export function ZoneTabs({ value, onChange }: { value: PanelZone; onChange(zone:
 export function useAsyncList<T>(
   load: () => Promise<T>,
   deps: readonly unknown[],
-): { data: T | undefined; loading: boolean; error: string | undefined; reload: () => void } {
+): { data: T | undefined; loading: boolean; error: string | undefined; reload: (options?: { silent?: boolean }) => void } {
   const [data, setData] = useState<T | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>(undefined);
   const seq = useRef(0);
 
-  const reload = useCallback(() => {
+  const reload = useCallback((options?: { silent?: boolean }) => {
     const run = ++seq.current;
-    setLoading(true);
+    // `silent`：后台轮询（宿主还在重挂时）不要闪「加载中…」把已渲染的列表换成
+    // 占位——只有首次加载与用户动作触发的刷新才显示 loading。
+    if (options?.silent !== true) setLoading(true);
     setError(undefined);
     load()
       .then((value) => {

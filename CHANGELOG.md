@@ -84,6 +84,23 @@
   **说明另起一行**，`overflow-wrap:anywhere` 让长 URL / 长英文安全换行；工具列表
   自身滚动 `max-height:min(46vh,420px)`——既不截断内容，也不再把「添加/取消」等
   操作按钮顶出屏幕。
+- **删除 MCP 后列表不立即消失（要切到别的页面再回来才看到）**（用户反馈）。根因不在
+  面板：`manager` 的写路径 `await reloadFor(...)` → `loader.reload()` →
+  `remountGlobal()` 会 `await fiber` **逐条等每个全局 server 起进程 + MCP 握手**。
+  本机 5 条 stdio server 走 `npx`/`bunx` 冷启动，于是 `mcp.remove` / `mcp.upsert` /
+  `mcp.setEnabled` 这几个 RPC 会卡住数秒到数十秒；面板的刷新跟在 RPC 之后，所以
+  表现为"删掉了但列表不动"（文件其实早就写好，切页触发的重新加载才显示出来）。
+  现在：
+  ① **写入只等文件落盘就返回**（`reloadFor` 改为 fire-and-forget，重挂交给 loader
+  自己的串行队列在后台做），紧随其后的 `mcp.list` 立刻就是新内容；
+  ② 重挂期间 `status()` 带 `settling: true`，面板据此**静默轮询**（每 800ms，上限约
+  16s）让「已挂载/未挂载」自行收敛，并且只刷新数据、不闪「加载中…」；
+  ③ 尚未拿到状态的条目显示「挂载中…」而不是看起来像未挂载；
+  ④ 全局层与 session 层换代都是"新一代状态攒好再整体替换"，重挂中途不会出现
+  "所有 server 都掉了"的假象。
+  真机实测（隔离实例 + 一个 initialize 故意慢 4s 的 MCP）：修复前写入 RPC 会被重挂
+  拖住数秒（塞一个永不响应握手的 server 时，重挂持续 ≥24s，写入就会一直卡着）；
+  修复后 `mcp.remove` **6ms** 返回、行 **260ms** 内从列表消失，`mcp.upsert` 同样 6ms。
 - `src/mcp/loader.ts` 里解释「为何必须用宿主那份 mcp-client」的注释有两处与
   实测不符（已按 AGENTS.md「结论必须有据可查」纠正）：① 两份副本的预留
   表达式其实相同，真正的差异是 `@deepseek-ai/dsh-scope` 的

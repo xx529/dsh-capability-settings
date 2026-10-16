@@ -154,4 +154,11 @@ export interface McpStatusView {
   }>;
   /** 该 session 上「全局 server 被本项目屏蔽」的结果（仅 session 层携带）。 */
   restrictions?: McpRestrictionView[];
+  /**
+   * 后台是否还有重挂在进行（全局换代 / 本 session 换代）。
+   *
+   * 写入路径不再等待重挂完成（见 `manager.reloadFor` 的注释），所以 RPC 返回
+   * 后挂载状态可能还在收敛；面板在 `settling` 为真时短暂轮询，几秒内自行刷新。
+   */
+  settling?: boolean;
 }

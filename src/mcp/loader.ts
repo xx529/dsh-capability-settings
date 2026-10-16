@@ -223,6 +223,14 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
   /** 全局层当前这一代的 fiber 与挂载结果（全应用共享，不属于任何 session）。 */
   let globalFibers: MountedFiber[] = [];
   let globalMounts: MountState[] = [];
+  /**
+   * 正在重挂的代数计数（> 0 ⇒ `status().settling === true`）。
+   *
+   * 写入路径（`manager.reloadFor`）**不再等待**重挂完成，所以 RPC 返回后挂载
+   * 状态可能还在后台换代；面板据此短暂轮询，让"已挂载/未挂载"在几秒内自行
+   * 收敛，而不是让"保存/删除/启停"卡住数秒（见 manager 里 reloadFor 的注释）。
+   */
+  let settling = 0;
   /** 全局层重挂队列：配置变化时串行换代，避免新旧两代同 serverName 相撞。 */
   let globalQueue: Promise<void> = Promise.resolve();
 
@@ -446,36 +454,45 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
    * （全局工具集变了，原先"暂无可屏蔽工具"的 session 需要重新计算）。
    */
   async function remountGlobal(): Promise<void> {
-    const previous = globalFibers;
-    globalFibers = [];
-    globalMounts = [];
-    // 上一代 fiber 并联释放（各 fiber 独立，失败不挡住新一代挂载）。
-    await Promise.all(previous.map((fiber) => fiber.dispose().catch(() => undefined)));
-    const servers = await resolveGlobalEntries();
-    for (const { key, entry } of servers) {
-      const config = toClientConfig(key, entry, globalFallbackCwd);
-      const serverName = config.serverName;
-      try {
-        // 挂在**本插件自己的 ctx**（root 侧）→ 桥接层 owner = ctx.root →
-        // 全应用一份实例（这是本次改动的核心）。
-        const fiber = ctx.plugin(await mcpClient(), config);
-        globalFibers.push({ dispose: () => fiber.dispose() });
-        // await 激活：同步的配置/命名空间/owner 冲突失败要归因到这一条。
-        await fiber;
-        globalMounts.push({ key, serverName, state: "mounted" });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        // 桥接层按 (owner, serverName) 预留："already in use" 表示 Host 的
-        // root 作用域上已有同名 mcp-client（profile 自带的 AnySearch /
-        // context7 等）。这是预期行为而非配置错误：不重复挂载，功能由既有
-        // 实例提供，只把文案换成人话，避免误导用户去改 serverName。
-        const conflict = /already in use/.test(message);
-        globalMounts.push({ key, serverName, state: conflict ? "conflict" : "failed", error: conflict ? GLOBAL_CONFLICT_NOTE : message });
-        logger.warn?.(`capability-panel: global MCP server "${key}" not mounted: ${message}`);
+    settling += 1;
+    // 新一代的挂载状态先攒在本地、换代完成才赋给 globalMounts：否则重挂期间
+    // `status()` 会短暂显示"全部未挂载"（旧代已 dispose、新代还没挂上），
+    // 面板看起来像"刚删完所有 server 都掉了"。
+    const nextMounts: MountState[] = [];
+    try {
+      const previous = globalFibers;
+      globalFibers = [];
+      // 上一代 fiber 并联释放（各 fiber 独立，失败不挡住新一代挂载）。
+      await Promise.all(previous.map((fiber) => fiber.dispose().catch(() => undefined)));
+      const servers = await resolveGlobalEntries();
+      for (const { key, entry } of servers) {
+        const config = toClientConfig(key, entry, globalFallbackCwd);
+        const serverName = config.serverName;
+        try {
+          // 挂在**本插件自己的 ctx**（root 侧）→ 桥接层 owner = ctx.root →
+          // 全应用一份实例（这是本次改动的核心）。
+          const fiber = ctx.plugin(await mcpClient(), config);
+          globalFibers.push({ dispose: () => fiber.dispose() });
+          // await 激活：同步的配置/命名空间/owner 冲突失败要归因到这一条。
+          await fiber;
+          nextMounts.push({ key, serverName, state: "mounted" });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          // 桥接层按 (owner, serverName) 预留："already in use" 表示 Host 的
+          // root 作用域上已有同名 mcp-client（profile 自带的 AnySearch /
+          // context7 等）。这是预期行为而非配置错误：不重复挂载，功能由既有
+          // 实例提供，只把文案换成人话，避免误导用户去改 serverName。
+          const conflict = /already in use/.test(message);
+          nextMounts.push({ key, serverName, state: conflict ? "conflict" : "failed", error: conflict ? GLOBAL_CONFLICT_NOTE : message });
+          logger.warn?.(`capability-panel: global MCP server "${key}" not mounted: ${message}`);
+        }
       }
+      // 全局工具集换代后重算各 session 的屏蔽（同步调用，不跨 await）。
+      for (const record of sessions.values()) applyRestrictions(record);
+    } finally {
+      globalMounts = nextMounts;
+      settling -= 1;
     }
-    // 全局工具集换代后重算各 session 的屏蔽（同步调用，不跨 await）。
-    for (const record of sessions.values()) applyRestrictions(record);
   }
 
   /** 全局层重挂串行化：并发触发会落在队尾依次执行。 */
@@ -493,33 +510,41 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
    * （重连交由桥接层处理）；restrict 的任何失败都降级。
    */
   async function remount(record: SessionRecord): Promise<void> {
-    disposeRestrictions(record);
-    const previous = record.fibers;
-    record.fibers = [];
-    record.mounts = [];
-    // 上一代 fiber 并联释放（各 fiber 独立，失败不挡住新一代挂载）。
-    await Promise.all(previous.map((fiber) => fiber.dispose().catch(() => undefined)));
-    if (!enabled) return;
-    const plan = await resolveSessionPlan(record.cwd);
-    record.restrictTargets = plan.restrict;
-    for (const { key, entry } of plan.session) {
-      const config = toClientConfig(key, entry, record.projectRoot ?? record.cwd);
-      const serverName = config.serverName;
-      try {
-        const fiber = record.agent.ctx.plugin(await mcpClient(), config);
-        record.fibers.push({ dispose: () => fiber.dispose() });
+    settling += 1;
+    // 同全局层：新一代状态攒本地、换代完成才替换，避免重挂期间出现
+    // "该项目所有 server 都掉了"的假象。
+    const nextMounts: MountState[] = [];
+    try {
+      disposeRestrictions(record);
+      const previous = record.fibers;
+      record.fibers = [];
+      // 上一代 fiber 并联释放（各 fiber 独立，失败不挡住新一代挂载）。
+      await Promise.all(previous.map((fiber) => fiber.dispose().catch(() => undefined)));
+      if (!enabled) return;
+      const plan = await resolveSessionPlan(record.cwd);
+      record.restrictTargets = plan.restrict;
+      for (const { key, entry } of plan.session) {
+        const config = toClientConfig(key, entry, record.projectRoot ?? record.cwd);
+        const serverName = config.serverName;
+        try {
+          const fiber = record.agent.ctx.plugin(await mcpClient(), config);
+          record.fibers.push({ dispose: () => fiber.dispose() });
         // await 激活：同步的配置/命名空间失败要归因到这一条。
         await fiber;
-        record.mounts.push({ key, serverName, state: "mounted" });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        const conflict = /already in use/.test(message);
-        record.mounts.push({ key, serverName, state: conflict ? "conflict" : "failed", error: conflict ? SESSION_CONFLICT_NOTE : message });
-        logger.warn?.(`capability-panel: MCP server "${key}" not mounted for session ${record.agent.id}: ${message}`);
+          nextMounts.push({ key, serverName, state: "mounted" });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const conflict = /already in use/.test(message);
+          nextMounts.push({ key, serverName, state: conflict ? "conflict" : "failed", error: conflict ? SESSION_CONFLICT_NOTE : message });
+          logger.warn?.(`capability-panel: MCP server "${key}" not mounted for session ${record.agent.id}: ${message}`);
+        }
       }
+      // 全局屏蔽在项目层挂载之后重算：本代的 scoped 注册与全局可见性都已就位。
+      applyRestrictions(record);
+    } finally {
+      record.mounts = nextMounts;
+      settling -= 1;
     }
-    // 全局屏蔽在项目层挂载之后重算：本代的 scoped 注册与全局可见性都已就位。
-    applyRestrictions(record);
   }
 
   /** 每个 session 串行化重挂：并发触发会落在队尾合并执行。 */
@@ -596,6 +621,7 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
           sessionId: GLOBAL_MOUNT_SESSION_ID,
           scope: "global",
           servers: globalMounts.filter((mount) => !restrictedForProject.has(mount.key)).map((mount) => ({ ...mount })),
+          ...(settling > 0 ? { settling: true } : {}),
         },
       ];
       for (const [sessionId, record] of sessions) {
@@ -606,6 +632,7 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
           scope: "session",
           servers: record.mounts.map((mount) => ({ ...mount })),
           ...(record.restrictions.length > 0 ? { restrictions: record.restrictions.map((restriction) => ({ ...restriction })) } : {}),
+          ...(settling > 0 ? { settling: true } : {}),
         });
       }
       return views;

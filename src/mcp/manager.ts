@@ -95,13 +95,25 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
     }
   }
 
-  /** 执行写入后按作用域重挂：项目只重挂该项目根的 session。 */
-  async function reloadFor(scope: McpScope, cwd?: string): Promise<void> {
-    if (scope === "global") {
-      await loader.reload();
-      return;
-    }
-    if (cwd !== undefined) await loader.reload(findProjectRoot(cwd));
+  /**
+   * 写入落盘后触发重挂：项目只重挂该项目根的 session，全局换代整个全局层。
+   *
+   * **故意不 await**（fire-and-forget）：全局写入会重挂所有全局 server，而桥接层
+   * 的 `await fiber` 要等**每条 server 起进程 + MCP 握手**完成——本机 5 条 stdio
+   * server 走 `npx`/`bunx` 冷启动，等待会让 `mcp.remove` / `mcp.upsert` /
+   * `mcp.setEnabled` 这类 RPC 卡住数秒到数十秒。面板的刷新跟在 RPC 之后，于是
+   * 表现为"删掉了但列表不消失，切页回来才看到"（那时文件早已写好）。
+   *
+   * 现在写入只等**文件落盘**就返回：紧随其后的 `mcp.list` 立刻是新的；挂载状态
+   * 由 loader 自己的串行队列在后台收敛，并通过 `status().settling` 告知面板
+   * "还在重挂"，面板据此短暂轮询（见 `mcp-panel` 的 settle 轮询）。
+   *
+   * 这里只做兜底 catch：`loader.reload()` 内部用 `Promise.allSettled` 且逐条把
+   * 失败归因到状态里，正常情况下不会 reject。
+   */
+  function reloadFor(scope: McpScope, cwd?: string): void {
+    const task = scope === "global" ? loader.reload() : cwd !== undefined ? loader.reload(findProjectRoot(cwd)) : Promise.resolve();
+    void task.catch(() => undefined);
   }
 
   /**
@@ -193,7 +205,7 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
       return { ok: true };
     });
     if (!result.ok) return result;
-    await reloadFor(input.scope, input.cwd);
+    reloadFor(input.scope, input.cwd);
     return { ok: true };
   }
 
@@ -202,7 +214,7 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
   async function remove(input: McpWriteInput): Promise<McpOpResult> {
     if (input.scope === "project" && imports !== undefined && input.cwd !== undefined && (await isReference(input.cwd, input.key))) {
       const result = await imports.remove({ cwd: input.cwd, domain: "mcp", name: input.key });
-      if (result.ok) await reloadFor("project", input.cwd);
+      if (result.ok) reloadFor("project", input.cwd);
       return result;
     }
     const result = await withLockedFile(input, async (servers, readFile) => {
@@ -215,7 +227,7 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
       return { ok: true };
     });
     if (!result.ok) return result;
-    await reloadFor(input.scope, input.cwd);
+    reloadFor(input.scope, input.cwd);
     return { ok: true };
   }
 
@@ -237,7 +249,7 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
   async function setEnabled(input: McpWriteInput & { enabled: boolean }): Promise<McpOpResult> {
     if (input.scope === "project" && imports !== undefined && input.cwd !== undefined && (await isReference(input.cwd, input.key))) {
       const result = await imports.setEnabled({ cwd: input.cwd, domain: "mcp", name: input.key, enabled: input.enabled });
-      if (result.ok) await reloadFor("project", input.cwd);
+      if (result.ok) reloadFor("project", input.cwd);
       return result;
     }
     const result = await withLockedFile(input, async (servers, readFile) => {
@@ -253,7 +265,7 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
       return { ok: true };
     });
     if (!result.ok) return result;
-    await reloadFor(input.scope, input.cwd);
+    reloadFor(input.scope, input.cwd);
     return { ok: true };
   }
 
@@ -287,7 +299,7 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
     }
     const result = await imports.import({ cwd: input.cwd, domain: "mcp", name: input.key, overwrite: input.overwrite });
     if (!result.ok) return result;
-    await reloadFor("project", input.cwd);
+    reloadFor("project", input.cwd);
     return { ok: true };
   }
 

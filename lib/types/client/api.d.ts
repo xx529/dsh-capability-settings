@@ -237,6 +237,11 @@ export interface ClientMcpStatus {
     sessionId: string;
     projectRoot?: string;
     servers: ClientMcpMount[];
+    /**
+     * 宿主后台是否还在重挂（写入不再阻塞 RPC，见 `manager.reloadFor`）。
+     * 面板据此在写操作后短暂轮询，让挂载状态自行收敛。
+     */
+    settling?: boolean;
 }
 /** 新增/更新一条 server 的入参。 */
 export interface McpUpsertInput {

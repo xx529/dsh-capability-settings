@@ -13,7 +13,7 @@
  * @module @chengdb/capability-panel/client/mcp-panel
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CapabilityPanelApi, ClientMcpServer, ClientMcpTool, McpApi, McpTestResult, OpResult } from "./api.js";
 import { summarizeEntry, transportOf, validateEntry } from "../mcp/entry-util.js";
 import type { McpScope, McpServerEntry } from "../mcp/types.js";
@@ -66,13 +66,43 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
   const { data, loading, error, reload } = useAsyncList(
     async () => {
       const [list, statuses] = await Promise.all([mcpApi.list(), mcpApi.status().catch(() => [])]);
-      return { servers: list.servers, listErrors: list.errors, mounts: aggregateMounts(statuses) };
+      return {
+        servers: list.servers,
+        listErrors: list.errors,
+        mounts: aggregateMounts(statuses),
+        // 宿主后台还在重挂（写入不再阻塞 RPC，见 manager.reloadFor）→ 面板据此轮询。
+        settling: statuses.some((status) => status.settling === true),
+      };
     },
     [mcpApi, workspace],
   );
   const servers = data?.servers ?? [];
   const listErrors = data?.listErrors ?? [];
   const mounts = data?.mounts ?? {};
+  const settling = data?.settling === true;
+
+  /**
+   * 写操作返回时宿主可能还在后台重挂（全局换代要逐条起进程 + 握手）：只要
+   * `status().settling` 为真就每 800ms 静默重拉一次（上限 ~20 次 ≈16s），让
+   * 「已挂载 / 未挂载」自行收敛——不阻塞写入 RPC 是"删掉立刻消失"的关键。
+   *
+   * 依赖里**必须带 `data`**：每次静默重拉都会换一个新的 data 对象，effect 才会
+   * 重新排下一个定时器；只依赖 `settling` 的话，settling 一直为真 ⇒ 依赖没变
+   * ⇒ 只轮询一次就停了。
+   */
+  const settleTries = useRef(0);
+  useEffect(() => {
+    if (!settling) {
+      settleTries.current = 0;
+      return;
+    }
+    if (settleTries.current >= 20) return;
+    const timer = window.setTimeout(() => {
+      settleTries.current += 1;
+      reload({ silent: true });
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [settling, data, reload]);
 
   // 过滤：当前区 + 搜索词（命中 key 或摘要）。
   const visible = useMemo(() => {
@@ -214,6 +244,9 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
                       <span className="skp-tag skp-tag-flat">{server.transport}</span>
                       {!server.enabled && <span className="skp-tag skp-tag-readonly">已禁用</span>}
                       {/* 启用但挂载异常的实时信号：失败红 / 冲突橙（tooltip 里有详情）。 */}
+                      {/* 还在后台重挂时，尚未拿到状态的条目显示「挂载中…」，
+                          避免看起来像"未挂载"而误判失败。 */}
+                      {server.enabled && mount === undefined && settling && <span className="skp-tag skp-tag-flat">挂载中…</span>}
                       {server.enabled && mount?.state === "failed" && <span className="skp-tag skp-tag-error">挂载失败</span>}
                       {server.enabled && mount?.state === "conflict" && <span className="skp-tag skp-tag-warn">冲突</span>}
                       {server.shadowed && <span className="skp-tag skp-tag-directory">被遮蔽</span>}
