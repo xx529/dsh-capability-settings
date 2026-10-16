@@ -13,7 +13,7 @@
  * @module @chengdb/capability-panel/client/mcp-panel
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CapabilityPanelApi, ClientMcpServer, ClientMcpTool, McpApi, McpTestResult, OpResult } from "./api.js";
 import { summarizeEntry, transportOf, validateEntry } from "../mcp/entry-util.js";
 import type { McpScope, McpServerEntry } from "../mcp/types.js";
@@ -235,6 +235,7 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
           <div className="skp-detail">
             {selectedServer ? (
               <McpDetail
+                api={mcpApi}
                 server={selectedServer}
                 mount={mounts[selectedServer.key]}
                 hasWorkspace={!noWorkspace}
@@ -287,6 +288,7 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
  *  同名时两击确认覆盖）、编辑、删除——全局条目不在面板里启停，需要
  *  项目级控制时先导入再在项目副本上操作。 */
 function McpDetail({
+  api,
   server,
   mount,
   hasWorkspace,
@@ -297,6 +299,8 @@ function McpDetail({
   onDelete,
   onImport,
 }: {
+  /** 面板 API：详情页的「查看工具与参数」直接复用 `mcp.test` 探测通道。 */
+  api: McpApi;
   server: ClientMcpServer;
   mount?: MountInfo;
   /** 面板是否附着在可写工作区上（全局条目的「导入到本项目」需要 cwd）。 */
@@ -315,6 +319,26 @@ function McpDetail({
   const isReference = server.reference === true;
   /** 移除按钮文案：全局导入的副本 = 「移出」（全局原版仍在全局区）；其余 = 「删除」。 */
   const removeVerb = imported ? "移出" : "删除";
+  // 「查看工具与参数」：真连一次该条目（零副作用探测），就地展开描述 + 工具 + 参数。
+  const [inspect, setInspect] = useState<{ open: boolean; testing: boolean; result?: McpTestResult }>({
+    open: false,
+    testing: false,
+  });
+  // 换选中的服务器时收起并丢弃上一次的结果，避免把 A 的清单显示在 B 上。
+  useEffect(() => {
+    setInspect({ open: false, testing: false });
+  }, [server.key, server.scope]);
+
+  /** 跑一次探测；失败以 `{ ok:false, errors }` 归一（不抛异常，就地展示）。 */
+  const runInspect = async () => {
+    setInspect({ open: true, testing: true });
+    try {
+      const result = await api.test({ entry: server.entry, key: server.key });
+      setInspect({ open: true, testing: false, result });
+    } catch (error) {
+      setInspect({ open: true, testing: false, result: { ok: false, errors: [String(error)] } });
+    }
+  };
   return (
     <div className="skp-detail-card">
       {/* 头部：标题 + 归属徽标。徽标按"出身"显示：与全局同源的项目区条目
@@ -395,6 +419,24 @@ function McpDetail({
             编辑
           </button>
         )}
+        {/* 查看工具与参数：不必进编辑弹窗，详情页直接真连一次并列出描述/工具/参数
+            （零副作用探测：不落盘、不注册工具、不影响已挂载连接）。 */}
+        <button
+          type="button"
+          className="skp-btn"
+          disabled={inspect.testing}
+          title={
+            inspect.open
+              ? "收起工具与参数"
+              : "真连一次该服务器并列出它的描述、工具与参数（不落盘、不注册工具、不影响已挂载的连接）"
+          }
+          onClick={() => {
+            if (inspect.open) setInspect({ open: false, testing: false });
+            else void runInspect();
+          }}
+        >
+          {inspect.testing ? "连接中…" : inspect.open ? "收起工具列表" : "查看工具与参数"}
+        </button>
         {/* 二次确认：confirmingDelete 时按钮变红并显示确认文案。 */}
         <button
           type="button"
@@ -445,6 +487,23 @@ function McpDetail({
           </>
         )}
       </dl>
+      {/* 「查看工具与参数」的结果：与上方字段用分隔线隔开，报告自身滚动，
+          不会把详情页顶长到看不见操作按钮。 */}
+      {inspect.open && (
+        <div className="skp-detail-inspect">
+          <div className="skp-detail-inspect-head">
+            <span className="skp-field-label">工具与参数</span>
+            <button type="button" className="skp-link-btn" disabled={inspect.testing} onClick={() => void runInspect()}>
+              {inspect.testing ? "连接中…" : "重新测试"}
+            </button>
+          </div>
+          {inspect.result === undefined ? (
+            <div className="skp-note">正在连接并读取工具清单…</div>
+          ) : (
+            <McpTestReport result={inspect.result} />
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -707,65 +766,94 @@ interface ToolParameter {
 }
 
 /**
- * 「测试连接」的结果卡片（就地嵌在表单里）：
- *  - 成功：`连接正常 · 发现 N 个工具 · 耗时 Xms` + 逐工具的名字/描述与参数表；
- *    空工具列表给明确文案，不显示空壳列表；
- *  - 失败：直接渲染宿主返回的中文错误文案（已含原始错误 / stderr 摘要）。
+ * 「测试连接」/「查看工具与参数」的报告卡片。
+ *
+ * 排版要点（此前用 `skp-import-*` 兼职渲染，长描述挤成一团、列表被 200px 截断）：
+ *  - 顶部只放状态徽标 + 工具数 / 参数总数 / 耗时，一眼可读；
+ *  - `instruction`（服务器提示，常常是上千字的说明）单独成块并**默认折叠 3 行**，
+ *    需要时点「展开」，不再淹没工具清单；
+ *  - 每个工具一张卡片：等宽字体工具名 + 参数个数 + 描述（折叠 3 行，完整文本在
+ *    `title` 里）；参数按「名字 + 类型 + 必填/可选」一行徽标、说明另起一行，
+ *    允许任意换行（长 URL / 长英文单词不撑破布局）；
+ *  - 工具列表自身滚动（`max-height:min(46vh,420px)`），既不截断内容也不把
+ *    表单按钮或详情字段顶出屏幕。
  */
 function McpTestReport({ result }: { result: McpTestResult }) {
   if (!result.ok) return <div className="skp-error">{result.errors.join("\n")}</div>;
+  const parameterTotal = result.tools.reduce((sum, tool) => sum + toolParameters(tool).length, 0);
+  const hasInstruction = typeof result.instruction === "string" && result.instruction.trim().length > 0;
   return (
-    <div className="skp-field">
-      <span className="skp-field-label">
-        连接正常 · 发现 {result.tools.length} 个工具 · 耗时 {result.elapsedMs}ms
-      </span>
-      {result.instruction !== undefined && <div className="skp-note">服务器提示：{result.instruction}</div>}
+    <div className="skp-test">
+      <div className="skp-test-head">
+        <span className="skp-tag skp-tag-global">连接正常</span>
+        <span className="skp-test-stat">{result.tools.length} 个工具</span>
+        {parameterTotal > 0 && <span className="skp-test-stat">{parameterTotal} 个参数</span>}
+        <span className="skp-test-stat">耗时 {result.elapsedMs}ms</span>
+      </div>
+      {hasInstruction && <McpInstruction text={result.instruction as string} />}
       {result.tools.length === 0 ? (
         <div className="skp-note">连接成功，但服务器未暴露任何工具。</div>
       ) : (
-        <ul className="skp-import-list">
+        <div className="skp-test-tools">
           {result.tools.map((tool) => (
-            <li key={tool.name} className="skp-import-item" style={{ display: "block" }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
-                <span className="skp-import-name" style={{ maxWidth: "none" }}>
-                  {tool.name}
-                </span>
-                <span className="skp-import-desc" style={{ whiteSpace: "normal" }} title={tool.description}>
-                  {tool.description ?? "（无描述）"}
-                </span>
-              </div>
-              <ToolParameters tool={tool} />
-            </li>
+            <McpToolCard key={tool.name} tool={tool} />
           ))}
-        </ul>
+        </div>
       )}
     </div>
   );
 }
 
-/** 单个工具的参数表：无参数时给一行「（无参数）」，不渲染空列表。 */
-function ToolParameters({ tool }: { tool: ClientMcpTool }) {
-  const parameters = toolParameters(tool);
-  if (parameters.length === 0) return <div className="skp-note">（无参数）</div>;
+/** 服务器提示（`instructions`）：默认折叠 3 行，点「展开/收起」切换。 */
+function McpInstruction({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
   return (
-    <ul style={{ margin: "4px 0 0", padding: "0 0 0 14px", listStyle: "none", display: "flex", flexDirection: "column", gap: 2 }}>
-      {parameters.map((parameter) => (
-        <li
-          key={parameter.name}
-          className="skp-import-desc"
-          style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap", whiteSpace: "normal" }}
-        >
-          <span className="skp-import-name" style={{ maxWidth: "none" }}>
-            {parameter.name}
-          </span>
-          <span className="skp-tag skp-tag-flat">{parameter.type}</span>
-          <span className={parameter.required ? "skp-tag skp-tag-warn" : "skp-tag skp-tag-flat"}>
-            {parameter.required ? "必填" : "可选"}
-          </span>
-          {parameter.description !== undefined && <span>{parameter.description}</span>}
-        </li>
-      ))}
-    </ul>
+    <div className="skp-test-instruction">
+      <div className="skp-test-instruction-head">
+        <span className="skp-field-label">服务器提示</span>
+        <button type="button" className="skp-link-btn" onClick={() => setExpanded((value) => !value)}>
+          {expanded ? "收起" : "展开"}
+        </button>
+      </div>
+      <p className={expanded ? "skp-test-instruction-body" : "skp-test-instruction-body skp-clamp-3"}>{text}</p>
+    </div>
+  );
+}
+
+/** 单个工具卡片：名字 + 参数个数 + 描述 + 参数列表。 */
+function McpToolCard({ tool }: { tool: ClientMcpTool }) {
+  const parameters = toolParameters(tool);
+  const description = typeof tool.description === "string" ? tool.description.trim() : "";
+  return (
+    <section className="skp-tool">
+      <div className="skp-tool-head">
+        <code className="skp-tool-name">{tool.name}</code>
+        <span className="skp-test-stat">{parameters.length > 0 ? `${parameters.length} 个参数` : "无参数"}</span>
+      </div>
+      {description.length > 0 && (
+        <p className="skp-tool-desc skp-clamp-3" title={description}>
+          {description}
+        </p>
+      )}
+      {parameters.length > 0 && (
+        <ul className="skp-params">
+          {parameters.map((parameter) => (
+            <li key={parameter.name} className="skp-param">
+              <div className="skp-param-head">
+                <code className="skp-param-name">{parameter.name}</code>
+                <span className="skp-tag skp-tag-flat">{parameter.type}</span>
+                <span className={parameter.required ? "skp-tag skp-tag-warn" : "skp-tag skp-tag-flat"}>
+                  {parameter.required ? "必填" : "可选"}
+                </span>
+              </div>
+              {parameter.description !== undefined && parameter.description.trim().length > 0 && (
+                <p className="skp-param-desc">{parameter.description}</p>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
