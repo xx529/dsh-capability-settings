@@ -129,12 +129,12 @@ export const SKP_CSS = `
 .skp-dd-btn:focus-visible{border-color:var(--skp-border-strong);box-shadow:0 0 0 3px var(--dsw-alias-interactive-bg-active,rgba(20,28,40,.08));}
 .skp-dd-btn:disabled{background:var(--skp-fill);color:var(--skp-text-3);cursor:default;}
 .skp-dd-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.skp-dd-pop{position:fixed;z-index:120;padding:5px;border:1px solid var(--skp-border);border-radius:10px;background:var(--skp-surface);box-shadow:0 12px 32px rgba(15,20,30,.16),0 2px 8px rgba(15,20,30,.08);overflow:auto;scrollbar-width:thin;}
+.skp-dd-pop{position:fixed;z-index:120;padding:5px;border:1px solid var(--skp-border);border-radius:10px;background:var(--skp-surface);box-shadow:0 12px 32px rgba(15,20,30,.16),0 2px 8px rgba(15,20,30,.08);overflow:auto;scrollbar-width:thin;max-width:calc(100vw - 16px);}
 .skp-dd-opt{display:flex;align-items:center;gap:8px;width:100%;padding:9px 10px;border:none;border-radius:7px;background:none;font:inherit;font-size:13.5px;color:var(--skp-text-2);cursor:pointer;text-align:left;transition:background-color .12s var(--skp-ease),color .12s var(--skp-ease);}
 .skp-dd-opt:hover:not(:disabled){background:var(--skp-hover);color:var(--skp-text);}
 .skp-dd-opt-active{color:var(--skp-text);background:var(--dsw-alias-interactive-bg-active,rgba(20,28,40,.08));font-weight:500;}
 .skp-dd-opt:disabled{opacity:.45;cursor:default;}
-.skp-dd-opt-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.skp-dd-opt-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .skp-dd-hint{margin-left:auto;flex:none;font-size:11.5px;color:var(--skp-text-3);}
 .skp-dd-check{margin-left:auto;flex:none;font-size:12px;line-height:1;}
 .skp-dd-hint+.skp-dd-check{margin-left:0;}
