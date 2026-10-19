@@ -9,6 +9,8 @@
  */
 
 import { findProjectRoot } from "../shared/project-root.js";
+import { MCP_USAGE_VIEW_LIMIT, type McpUsageView } from "./types.js";
+import type { McpUsageLog } from "./usage.js";
 import { withFileLock } from "../shared/file-lock.js";
 import { errMessage } from "../shared/errors.js";
 import { locateConfigFile, removeFiles, type ConfigFileLocation } from "../shared/config-location.js";
@@ -24,6 +26,11 @@ import type { McpLoader } from "./loader.js";
 export interface McpManagerDeps {
   dshHome?: string;
   agentsHome?: string;
+  /**
+   * MCP 工具调用的内存使用记录（只读展示，不落盘）。缺省时 `usage()` 返回空，
+   * 其余功能不受影响——便于单测/无宿主环境构造 manager。
+   */
+  usage?: McpUsageLog;
 }
 
 /** 一次写操作的最小入参（scope + 目标文件定位）。 */
@@ -326,7 +333,19 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
     return probeMcpServer({ key, entry, cwd: input.cwd, timeoutMs: input.timeoutMs });
   }
 
-  return { list, upsert, remove, setEnabled, importToProject, status, test };
+  /**
+   * 最近 MCP 工具调用记录（**只读、内存内、不落盘**）。
+   *
+   * 记录来自 loader/index 在宿主注册的 `tools.guard` 旁路（见 mcp/usage.ts），
+   * 因此进程重启/插件重载即清空；这里只做查询与过滤，绝不写任何文件。
+   */
+  function usage(input?: { serverName?: string; limit?: number }): McpUsageView {
+    const log = deps.usage;
+    if (log === undefined) return { entries: [], limit: MCP_USAGE_VIEW_LIMIT };
+    return log.query(input);
+  }
+
+  return { list, upsert, remove, setEnabled, importToProject, status, test, usage };
 }
 
 /** 管理服务的完整类型（构造函数的返回值）。 */

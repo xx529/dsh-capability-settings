@@ -73,6 +73,11 @@ export interface PanelRpcService {
      * 零副作用（不落盘、不注册工具），失败也走业务失败信封（value.ok=false）。
      */
     test(input: unknown): Promise<unknown>;
+    /**
+     * 最近 MCP 工具调用记录（只读、内存内、不落盘）。
+     * 传 `serverName` 只返回该 server 的调用；`limit` 控制"最近 n 条"。
+     */
+    usage(input: unknown): unknown;
   };
   quickMessages: {
     list(cwd?: string): Promise<unknown>;
@@ -135,6 +140,9 @@ export async function handleEndpoint(service: PanelRpcService, endpoint: string,
         return { ok: true, value: await service.mcp.importToProject(p) };
       case "mcp.status":
         return { ok: true, value: service.mcp.status(cwd) };
+      case "mcp.usage":
+        // 只读查询：始终返回 { ok:true, value:{ entries, limit } }。
+        return { ok: true, value: service.mcp.usage(p) };
       case "mcp.test":
         // 探测自身把失败收进业务信封（value.ok=false），这里保持同一形状：
         // 客户端适配器解出 { ok:false, errors } 后由面板展示。

@@ -184,6 +184,13 @@ export const SKP_CSS = `
 .skp-clamp-3{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
 .skp-link-btn{border:0;background:none;padding:0;font:inherit;font-size:12px;color:var(--skp-accent);cursor:pointer;white-space:nowrap;}
 .skp-link-btn:hover{text-decoration:underline;}
+/* 详情页「使用记录」列表：时间 / 会话标题 / 工具名三列，等宽数字对齐；
+   自身滚动（不超过 40vh），不把详情页顶太长。 */
+.skp-usage{margin:0;padding:6px 8px;list-style:none;display:flex;flex-direction:column;gap:4px;max-height:min(40vh,320px);overflow:auto;scrollbar-width:thin;border:1px solid var(--skp-border);border-radius:var(--skp-radius-sm);}
+.skp-usage-row{display:flex;align-items:baseline;gap:10px;min-width:0;font-size:12.5px;}
+.skp-usage-time{flex:none;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;color:var(--skp-text-3);}
+.skp-usage-session{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--skp-text-2);}
+.skp-usage-tool{flex:none;max-width:52%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;color:var(--skp-text);}
 /* 详情页的「查看工具与参数」结果区：与上方字段用一条分隔线隔开。 */
 .skp-detail-inspect{margin-top:14px;padding-top:14px;border-top:1px solid var(--skp-border);display:flex;flex-direction:column;gap:8px;min-width:0;}
 .skp-detail-inspect-head{display:flex;align-items:center;justify-content:space-between;gap:8px;}

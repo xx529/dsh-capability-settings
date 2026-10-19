@@ -29,6 +29,7 @@ import type {} from "@deepseek-ai/dsh-skill";
 import { createService } from "./skills/manager.js";
 import { createMcpLoader } from "./mcp/loader.js";
 import { createMcpManager } from "./mcp/manager.js";
+import { createMcpUsageLog, registerMcpUsageGuard } from "./mcp/usage.js";
 import { createQuickMessagesManager } from "./quick-messages/manager.js";
 import { createOverridesManager } from "./overrides/manager.js";
 import type { OverrideToggleInput } from "./overrides/manager.js";
@@ -104,14 +105,18 @@ export function apply(ctx: any, config: Config = {}) {
       return result;
     },
   };
+  // MCP 工具调用的内存使用记录（只读、不落盘）：通过 root 作用域的 tools.guard
+  // 旁路记录 mcp__* 调用，供面板详情页的「使用记录」展示。disposer 随插件卸载。
+  const mcpUsage = createMcpUsageLog();
+  const disposeUsageGuard = registerMcpUsageGuard(ctx, mcpUsage);
   const service: CapabilityPanelService = {
     skills: createService(ctx, config),
-    mcp: createMcpManager({ dshHome: config.dshHome, agentsHome: config.agentsHome }, loader, overrides, imports),
+    mcp: createMcpManager({ dshHome: config.dshHome, agentsHome: config.agentsHome, usage: mcpUsage }, loader, overrides, imports),
     quickMessages: createQuickMessagesManager({ dshHome: config.dshHome, agentsHome: config.agentsHome }, overrides, imports),
     overrides,
   };
   ctx.provide("capabilityPanel", () => service);
-  const disposers: Array<() => void> = [];
+  const disposers: Array<() => void> = [disposeUsageGuard];
   if (config.mountRpc !== false) {
     const dispose = mountRpcChannel(ctx, service);
     if (typeof dispose === "function") disposers.push(dispose);

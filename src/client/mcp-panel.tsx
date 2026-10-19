@@ -14,7 +14,15 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CapabilityPanelApi, ClientMcpServer, ClientMcpTool, McpApi, McpTestResult, OpResult } from "./api.js";
+import type {
+  CapabilityPanelApi,
+  ClientMcpServer,
+  ClientMcpTool,
+  ClientMcpUsageView,
+  McpApi,
+  McpTestResult,
+  OpResult,
+} from "./api.js";
 import { summarizeEntry, transportOf, validateEntry } from "../mcp/entry-util.js";
 import type { McpScope, McpServerEntry } from "../mcp/types.js";
 import { Modal } from "./modal.js";
@@ -357,10 +365,40 @@ function McpDetail({
     open: false,
     testing: false,
   });
+  // 「使用记录」：宿主内存里的 MCP 工具调用记录（只读、不落盘）。
+  // 打开时拉一次，打开期间每 2s 刷新；关闭/切服务器即停。
+  const [usageOpen, setUsageOpen] = useState(false);
+  const [usageView, setUsageView] = useState<ClientMcpUsageView | undefined>(undefined);
+  const [usageError, setUsageError] = useState<string | undefined>(undefined);
   // 换选中的服务器时收起并丢弃上一次的结果，避免把 A 的清单显示在 B 上。
   useEffect(() => {
     setInspect({ open: false, testing: false });
+    setUsageOpen(false);
+    setUsageView(undefined);
+    setUsageError(undefined);
   }, [server.key, server.scope]);
+  useEffect(() => {
+    if (!usageOpen) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const load = async () => {
+      try {
+        const view = await api.usage({ serverName: server.serverName });
+        if (cancelled) return;
+        setUsageView(view);
+        setUsageError(undefined);
+      } catch (error) {
+        if (cancelled) return;
+        setUsageError(String(error));
+      }
+      if (!cancelled) timer = window.setTimeout(() => void load(), 2000);
+    };
+    void load();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [usageOpen, api, server.serverName]);
 
   /** 跑一次探测；失败以 `{ ok:false, errors }` 归一（不抛异常，就地展示）。 */
   const runInspect = async () => {
@@ -470,6 +508,20 @@ function McpDetail({
         >
           {inspect.testing ? "连接中…" : inspect.open ? "收起工具列表" : "查看工具与参数"}
         </button>
+        {/* 使用记录：最近谁（哪个 session）在什么时候调用了这个 server 的哪个 tool。
+            数据只在宿主内存里，插件/进程重载即清空——纯只读，不落盘。 */}
+        <button
+          type="button"
+          className="skp-btn"
+          title="查看最近哪个会话在什么时候调用了这个 MCP 的哪个工具（仅本次运行的内存记录，不落盘）"
+          onClick={() => {
+            setUsageOpen((open) => !open);
+            setUsageView(undefined);
+            setUsageError(undefined);
+          }}
+        >
+          {usageOpen ? "收起使用记录" : "使用记录"}
+        </button>
         {/* 二次确认：confirmingDelete 时按钮变红并显示确认文案。 */}
         <button
           type="button"
@@ -522,6 +574,43 @@ function McpDetail({
       </dl>
       {/* 「查看工具与参数」的结果：与上方字段用分隔线隔开，报告自身滚动，
           不会把详情页顶长到看不见操作按钮。 */}
+      {usageOpen && (
+        <div className="skp-detail-inspect">
+          <div className="skp-detail-inspect-head">
+            <span className="skp-field-label">使用记录</span>
+            <span className="skp-test-stat">
+              仅本次运行 · 不落盘{usageView === undefined ? "" : ` · 最近 ${usageView.limit} 条`}
+            </span>
+          </div>
+          {usageError !== undefined && <div className="skp-error">{usageError}</div>}
+          {usageView === undefined ? (
+            <div className="skp-note">读取中…</div>
+          ) : usageView.entries.length === 0 ? (
+            <div className="skp-note">本次运行还没有调用记录。</div>
+          ) : (
+            <ul className="skp-usage">
+              {/* 最新在上 */}
+              {usageView.entries
+                .slice()
+                .reverse()
+                .map((entry, index) => (
+                  <li key={`${entry.time}-${entry.tool}-${index}`} className="skp-usage-row">
+                    <span className="skp-usage-time" title={new Date(entry.time).toLocaleString()}>
+                      {formatUsageTime(entry.time)}
+                    </span>
+                    <span className="skp-usage-session" title={entry.sessionId === "" ? undefined : entry.sessionId}>
+                      {entry.sessionTitle ??
+                        (entry.sessionId.length > 0 ? `会话 ${entry.sessionId.slice(-8)}` : "—")}
+                    </span>
+                    <code className="skp-usage-tool" title={entry.serverName}>
+                      {entry.tool}
+                    </code>
+                  </li>
+                ))}
+            </ul>
+          )}
+        </div>
+      )}
       {inspect.open && (
         <div className="skp-detail-inspect">
           <div className="skp-detail-inspect-head">
@@ -796,6 +885,21 @@ interface ToolParameter {
   type: string;
   required: boolean;
   description?: string;
+}
+
+/**
+ * 使用记录的时间列：当天只显示 `HH:mm:ss`，跨天补上 `MM-DD `（避免不同日期的
+ * 记录看起来一样）。时间来自宿主 `Date.now()`，客户端本地时区格式化。
+ */
+function formatUsageTime(time: number): string {
+  if (!Number.isFinite(time) || time <= 0) return "—";
+  const date = new Date(time);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const clock = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  const now = new Date();
+  const sameDay =
+    date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+  return sameDay ? clock : `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${clock}`;
 }
 
 /**

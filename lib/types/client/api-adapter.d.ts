@@ -27,6 +27,12 @@ export interface AdapterDeps {
     selectedProject(): string | undefined;
     /** 钉选/取消钉选项目作用域。 */
     selectProject(path: string | undefined): void;
+    /**
+     * 把 session id 解析成侧栏显示的会话标题（本地同步查询客户端会话快照，
+     * 不产生 RPC）。拿不到时返回 undefined，面板会退化成显示会话 id 尾部。
+     * 使用记录里只有 sessionId——宿主侧 `SessionHeader` 没有标题字段。
+     */
+    sessionTitle?(sessionId: string): string | undefined;
 }
 /** 构建传输无关的面板 API（RPC 实现）。 */
 export declare function createPanelApi(deps: AdapterDeps): CapabilityPanelApi;

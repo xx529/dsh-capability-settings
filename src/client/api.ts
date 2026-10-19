@@ -223,6 +223,31 @@ export interface ClientMcpStatus {
   settling?: boolean;
 }
 
+/**
+ * 一条 MCP 工具调用记录（宿主内存内、不落盘）。
+ *
+ * 适配器已把 `sessionId` 解析成侧栏标题（`sessionTitle`）；拿不到时缺省，
+ * 面板退化为显示会话 id 尾部。
+ */
+export interface ClientMcpUsageEntry {
+  /** 调用时间（epoch 毫秒）。 */
+  time: number;
+  /** 桥接层 serverName（与 `ClientMcpServer.serverName` 对应）。 */
+  serverName: string;
+  /** 已去掉 `mcp__<serverName>__` 前缀的工具名。 */
+  tool: string;
+  /** 调用方 session id。 */
+  sessionId: string;
+  /** 会话标题（侧栏显示的那个）；拿不到时缺省。 */
+  sessionTitle?: string;
+}
+
+/** `mcp.usage` 的返回：最近若干条记录 + 本次生效的条数上限。 */
+export interface ClientMcpUsageView {
+  entries: ClientMcpUsageEntry[];
+  limit: number;
+}
+
 /** 新增/更新一条 server 的入参。 */
 export interface McpUpsertInput {
   scope: McpScope;
@@ -282,6 +307,12 @@ export interface McpApi {
    * `{ ok:false, errors }` 返回（不抛异常），由面板就地展示。
    */
   test(input: { entry: McpServerEntry; key?: string; timeoutMs?: number }): Promise<McpTestResult>;
+  /**
+   * 最近 MCP 工具调用记录（**只读、内存内、不落盘**）：什么时候、哪个 session
+   * 调用了哪个 server 的哪个 tool。传 `serverName` 只取该 server 的记录。
+   * 记录在插件/进程重载后清空——这是刻意的，不做任何持久化。
+   */
+  usage(input?: { serverName?: string; limit?: number }): Promise<ClientMcpUsageView>;
 }
 
 // ---------------------------------------------------------------------------

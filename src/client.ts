@@ -115,6 +115,7 @@ export function apply(ctx: any) {
       selection.cwd = path;
       notifyWorkspaceListeners();
     },
+    sessionTitle: (sessionId) => sessionTitleOf(ctx, sessionId),
   });
 
   // composer（输入框工具行：快捷消息 / Skills / MCP 三个按钮与弹层）专用
@@ -145,6 +146,7 @@ export function apply(ctx: any) {
     selectProject: () => {
       /* composer 不钉选项目：项目作用域恒跟随所在 session */
     },
+    sessionTitle: (sessionId) => sessionTitleOf(ctx, sessionId),
   });
   const sessionApiCache = new Map<string, ReturnType<typeof createPanelApi>>();
   /** 取该 session 自己的 composer api；拿不到 sessionId 时退回无钉选实例。 */
@@ -161,6 +163,7 @@ export function apply(ctx: any) {
       selectProject: () => {
         /* composer 不钉选项目：项目作用域恒跟随所在 session */
       },
+      sessionTitle: (sessionId) => sessionTitleOf(ctx, sessionId),
     });
     sessionApiCache.set(sessionId, created);
     return created;
@@ -284,6 +287,28 @@ export function apply(ctx: any) {
   ctx.effect?.(() => () => {
     for (const dispose of disposers) dispose();
   }, "capability-panel: client");
+}
+
+/**
+ * 把 session id 解析成**侧栏显示的会话标题**（本地同步读客户端会话快照，不产生 RPC）。
+ *
+ * 主机侧 `SessionHeader` 只有 id/cwd 等字段、没有标题（标题由客户端按会话事件
+ * 派生），所以 MCP「使用记录」里的 sessionId 只能在客户端这一步换成标题。
+ * 依次尝试 `displayTitle`（侧栏用的就是它）→ `title` → `summary`；都拿不到时
+ * 返回 undefined，面板退化为显示会话 id 尾部。
+ */
+function sessionTitleOf(ctx: any, sessionId: string): string | undefined {
+  if (typeof sessionId !== "string" || sessionId.length === 0) return undefined;
+  try {
+    const record = ctx.get("sessions")?.list?.getSnapshot?.()?.byId?.[sessionId];
+    for (const field of ["displayTitle", "title", "summary"] as const) {
+      const value = record?.[field];
+      if (typeof value === "string" && value.trim().length > 0) return value.trim();
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

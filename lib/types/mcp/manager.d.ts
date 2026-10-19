@@ -7,6 +7,8 @@
  *
  * @module @chengdb/capability-panel/mcp/manager
  */
+import { type McpUsageView } from "./types.js";
+import type { McpUsageLog } from "./usage.js";
 import { type McpProbeResult } from "./probe.js";
 import type { OverridesManager } from "../overrides/manager.js";
 import type { ImportsManager } from "../imports/manager.js";
@@ -16,6 +18,11 @@ import type { McpLoader } from "./loader.js";
 export interface McpManagerDeps {
     dshHome?: string;
     agentsHome?: string;
+    /**
+     * MCP 工具调用的内存使用记录（只读展示，不落盘）。缺省时 `usage()` 返回空，
+     * 其余功能不受影响——便于单测/无宿主环境构造 manager。
+     */
+    usage?: McpUsageLog;
 }
 /** 一次写操作的最小入参（scope + 目标文件定位）。 */
 export interface McpWriteInput {
@@ -63,6 +70,10 @@ export declare function createMcpManager(deps: McpManagerDeps, loader: McpLoader
     }>;
     status: (cwd?: string) => McpStatusView[];
     test: (input: McpTestInput) => Promise<McpProbeResult>;
+    usage: (input?: {
+        serverName?: string;
+        limit?: number;
+    }) => McpUsageView;
 };
 /** 管理服务的完整类型（构造函数的返回值）。 */
 export type McpManager = ReturnType<typeof createMcpManager>;

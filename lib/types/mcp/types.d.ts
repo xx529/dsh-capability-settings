@@ -154,3 +154,29 @@ export interface McpStatusView {
      */
     settling?: boolean;
 }
+/** 环形缓冲容量：进程内最多保留多少条调用记录（超出丢弃最旧的）。 */
+export declare const MCP_USAGE_CAPACITY = 200;
+/** 面板一次最多展示多少条（"只显示最近的 n 条"）。 */
+export declare const MCP_USAGE_VIEW_LIMIT = 50;
+/**
+ * 一条 MCP 工具调用记录。
+ *
+ * 语义边界：记录的是**调用尝试**（在 `tools.guard` 里、执行前同步记录），
+ * 不代表工具执行成功；只用于"最近谁在什么时候调了什么"的只读展示。
+ */
+export interface McpUsageEntry {
+    /** 调用时间（epoch 毫秒）。 */
+    time: number;
+    /** 桥接层 serverName（对应面板视图的 `serverName`）。 */
+    serverName: string;
+    /** 已去掉 `mcp__<serverName>__` 前缀的工具名。 */
+    tool: string;
+    /** 调用方 session id（非 agent 发起的调用为空串）。 */
+    sessionId: string;
+}
+/** `mcp.usage` 的返回：最近若干条记录 + 本次生效的条数上限。 */
+export interface McpUsageView {
+    entries: McpUsageEntry[];
+    /** 本次返回实际使用的"最近 n 条"上限（面板据此显示文案）。 */
+    limit: number;
+}

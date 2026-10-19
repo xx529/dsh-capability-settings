@@ -15,6 +15,7 @@ import type {
   ClientMcpList,
   ClientMcpStatus,
   ClientMcpTool,
+  ClientMcpUsageEntry,
   ClientOverrides,
   ClientQuickMessagesList,
   ClientSkillDetail,
@@ -45,6 +46,12 @@ export interface AdapterDeps {
   selectedProject(): string | undefined;
   /** 钉选/取消钉选项目作用域。 */
   selectProject(path: string | undefined): void;
+  /**
+   * 把 session id 解析成侧栏显示的会话标题（本地同步查询客户端会话快照，
+   * 不产生 RPC）。拿不到时返回 undefined，面板会退化成显示会话 id 尾部。
+   * 使用记录里只有 sessionId——宿主侧 `SessionHeader` 没有标题字段。
+   */
+  sessionTitle?(sessionId: string): string | undefined;
 }
 
 /** 构建传输无关的面板 API（RPC 实现）。 */
@@ -248,6 +255,34 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
       async test(input) {
         const cwd = deps.currentWorkspaceCwd();
         return toMcpTestResult(unwrap(await rpc("mcp.test", { ...input, cwd })));
+      },
+
+      /**
+       * 最近 MCP 工具调用记录（只读、内存内、不落盘）。
+       * 宿主的 `sessionId` 在这里就地解析成会话标题，面板直接展示。
+       */
+      async usage(input) {
+        const result = await rpc("mcp.usage", { ...(input ?? {}) });
+        if (!result.ok) throw new Error(result.errors.join("; "));
+        const view = (result.value ?? { entries: [], limit: 0 }) as { entries?: unknown; limit?: unknown };
+        const entries = Array.isArray(view.entries) ? view.entries : [];
+        return {
+          limit: typeof view.limit === "number" ? view.limit : entries.length,
+          entries: entries
+            .map((raw) => {
+              const entry = (raw ?? {}) as Record<string, unknown>;
+              const sessionId = typeof entry.sessionId === "string" ? entry.sessionId : "";
+              const title = sessionId.length > 0 ? deps.sessionTitle?.(sessionId) : undefined;
+              return {
+                time: typeof entry.time === "number" ? entry.time : 0,
+                serverName: typeof entry.serverName === "string" ? entry.serverName : "",
+                tool: typeof entry.tool === "string" ? entry.tool : "",
+                sessionId,
+                ...(typeof title === "string" && title.length > 0 ? { sessionTitle: title } : {}),
+              };
+            })
+            .filter((entry) => entry.serverName.length > 0 && entry.tool.length > 0) as ClientMcpUsageEntry[],
+        };
       },
     },
 
