@@ -302,9 +302,17 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
     const globalEnabled = (key: string): boolean => Object.hasOwn(globalServers, key) && globalServers[key].disabled !== true;
     const session: Array<{ key: string; entry: McpServerEntry }> = [];
     const restrict = new Map<string, RestrictTarget>();
-    /** 登记一条"本项目屏蔽全局同名 server"（全局层没挂这个 key 时无意义，跳过）。 */
-    const restrictKey = (key: string): void => {
-      if (!globalEnabled(key)) return;
+    /**
+     * 登记一条"本项目屏蔽全局 server"。
+     *
+     * - 配置文件里的 key：只有全局层真挂了才需要屏蔽（原逻辑）。
+     * - `externalCandidate`：overrides 里的键也可能指向**运行时注入**的实例（不在
+     *   我们的全局文件里，例如别的插件挂的 `figma`）。这类也要登记为候选，
+     *   `applyRestrictions` 会按 `mcp__<serverName>__*` 去全局工具视图找名字——
+     *   找不到就自动降级成 skipped（契约规定空 filter 会失败），不会误调用。
+     */
+    const restrictKey = (key: string, externalCandidate = false): void => {
+      if (!globalEnabled(key) && !externalCandidate) return;
       restrict.set(key, { key, serverName: sanitizeServerName(key) });
     };
     for (const [key, entry] of Object.entries(projectServers)) {
@@ -324,7 +332,8 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
       // 自身 `disabled: true`（全局层不会挂它）时才在会话内补挂。
       if (globalServers[key].disabled === true) session.push({ key, entry: globalServers[key] });
     }
-    for (const key of disabledByProject) restrictKey(key);
+    // 项目级禁用声明：含外部注入实例的 serverName（见 restrictKey 注释）。
+    for (const key of disabledByProject) restrictKey(key, true);
     return { session, restrict: [...restrict.values()] };
   }
 

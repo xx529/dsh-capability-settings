@@ -18,6 +18,7 @@ import type {
   CapabilityPanelApi,
   ClientMcpServer,
   ClientMcpTool,
+  ClientMcpRuntimeServer,
   ClientMcpUsageView,
   McpApi,
   McpTestResult,
@@ -57,6 +58,8 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
   const [zone, setZone] = useState<PanelZone>("project");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string | undefined>(undefined);
+  /** 选中的「外部注入」实例（serverName）；与 selected 互斥。 */
+  const [selectedExternalName, setSelectedExternalName] = useState<string | undefined>(undefined);
   // 编辑态：undefined = 空闲；非空 = 正在弹窗里编辑这条 server（McpEditDialog）。
   const [editServer, setEditServer] = useState<ClientMcpServer | undefined>(undefined);
   // 新增弹窗开关（表单 / JSON 两种模式见 McpAddDialog）。
@@ -77,7 +80,7 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
         mcpApi.list(),
         mcpApi.status().catch(() => []),
         // 运行时注入的 MCP（其它插件/profile 挂的 mcp-client）：只读展示，失败不影响主列表。
-        mcpApi.runtime().catch(() => ({ servers: [] })),
+        mcpApi.runtime({ cwd: workspace }).catch(() => ({ servers: [] })),
       ]);
       return {
         servers: list.servers,
@@ -94,9 +97,8 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
   const listErrors = data?.listErrors ?? [];
   const mounts = data?.mounts ?? {};
   const settling = data?.settling === true;
-  /** 外部注入（非本插件配置）的 MCP；只读，默认折叠。 */
+  /** 外部注入（非本插件配置）的 MCP：与配置条目同列表展示，只读。 */
   const runtimeServers = data?.runtimeServers ?? [];
-  const [runtimeOpen, setRuntimeOpen] = useState(false);
 
   /**
    * 写操作返回时宿主可能还在后台重挂（全局换代要逐条起进程 + 握手）：只要
@@ -132,6 +134,21 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
   }, [servers, zone, query]);
 
   const selectedServer = servers.find((s) => rowId(s) === selected);
+
+  /** 外部注入的实例只在「全局」区展示（它们是运行时全局挂载，不属于任何项目配置）。 */
+  const visibleExternal = useMemo(() => {
+    if (zone !== "global") return [];
+    const q = query.trim().toLowerCase();
+    return runtimeServers.filter(
+      (server) =>
+        q.length === 0 ||
+        server.serverName.toLowerCase().includes(q) ||
+        (server.source ?? "").toLowerCase().includes(q) ||
+        (server.summary ?? "").toLowerCase().includes(q),
+    );
+  }, [runtimeServers, zone, query]);
+  const selectedExternal =
+    selectedExternalName === undefined ? undefined : runtimeServers.find((s) => s.serverName === selectedExternalName);
   const noWorkspace = !hasWorkspaceLabel(workspace);
 
   /** 执行一次写操作：失败写 opError；成功清错误并重拉列表。返回是否成功。 */
@@ -196,6 +213,7 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
           onChange={(z) => {
             setZone(z);
             setSelected(undefined);
+            setSelectedExternalName(undefined);
             setConfirmDelete(undefined);
             setConfirmImport(undefined);
           }}
@@ -226,52 +244,6 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
       {listErrors.length > 0 && <div className="skp-error">{listErrors.join("\n")}</div>}
       {opError && <div className="skp-error">{opError}</div>}
       {error && <div className="skp-error">{error}</div>}
-      {/* 外部注入的 MCP（只读）：不是本插件配置文件里的条目，而是其它插件/profile
-          在运行时直接挂载的 mcp-client。默认折叠；只展示、不提供编辑/卸载。 */}
-      {runtimeServers.length > 0 && (
-        <div className="skp-runtime">
-          <button
-            type="button"
-            className="skp-runtime-head"
-            aria-expanded={runtimeOpen}
-            title="这些 MCP 由其它插件或 profile 在运行时注入，不在能力面板的配置文件里；面板只读展示"
-            onClick={() => setRuntimeOpen((open) => !open)}
-          >
-            <span className="skp-tag skp-tag-flat">外部注入</span>
-            <span>{runtimeServers.length} 个 MCP（只读）</span>
-            <span className="skp-runtime-chevron">{runtimeOpen ? "收起" : "展开"}</span>
-          </button>
-          {runtimeOpen && (
-            <div className="skp-runtime-body">
-              <div className="skp-note">
-                这些 MCP 由其它插件或 profile 在运行时注入，不在能力面板的配置文件里；面板只读展示，编辑/卸载请到注入方。
-              </div>
-              {runtimeServers.map((server) => (
-                <section key={server.serverName} className="skp-tool">
-                  <div className="skp-tool-head">
-                    <code className="skp-tool-name">{server.serverName}</code>
-                    <span className="skp-test-stat">
-                      {server.tools.length > 0
-                        ? `${server.tools.length} 个工具`
-                        : "工具清单不可见（按会话作用域注入，调用过才可统计）"}
-                      {server.calls > 0 ? ` · 本次运行调用 ${server.calls} 次` : ""}
-                    </span>
-                  </div>
-                  {server.tools.length > 0 && (
-                    <div className="skp-runtime-tools">
-                      {server.tools.map((tool) => (
-                        <code key={tool.name} className="skp-tag skp-tag-flat" title={tool.description}>
-                          {tool.name}
-                        </code>
-                      ))}
-                    </div>
-                  )}
-                </section>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
       {loading && <div className="skp-status">加载中…</div>}
 
       {!loading && (
@@ -286,6 +258,7 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
                     className={selected === id ? "skp-row skp-row-active" : "skp-row"}
                     onClick={() => {
                       setSelected(id);
+                      setSelectedExternalName(undefined);
                       setEditServer(undefined);
                       setConfirmDelete(undefined);
                       setConfirmImport(undefined);
@@ -302,6 +275,10 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
                         />
                       )}
                       {server.key}
+                      {/* 来源标记（需求：每个 MCP 名称旁标出来源）：全局 / 项目 / 引用 / 导入 */}
+                      <span className={server.scope === "global" || server.reference === true ? "skp-tag skp-tag-flat" : "skp-tag skp-tag-directory"}>
+                        {server.reference === true ? "引用" : server.importedFromGlobal === true ? "导入" : server.scope === "global" ? "全局" : "项目"}
+                      </span>
                     </span>
                     <span className="skp-row-meta">
                       <span className="skp-tag skp-tag-flat">{server.transport}</span>
@@ -319,7 +296,38 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
                 </li>
               );
             })}
-            {visible.length === 0 && (
+            {/* 外部注入的 MCP：与配置条目同列表展示，标「外部 · 来源」，只读。 */}
+            {visibleExternal.map((server) => {
+              const id = `external:${server.serverName}`;
+              return (
+                <li key={id}>
+                  <button
+                    className={selectedExternalName === server.serverName ? "skp-row skp-row-active" : "skp-row"}
+                    onClick={() => {
+                      setSelectedExternalName(server.serverName);
+                      setSelected(undefined);
+                      setEditServer(undefined);
+                      setConfirmDelete(undefined);
+                      setConfirmImport(undefined);
+                    }}
+                  >
+                    <span className="skp-row-name">
+                      {server.serverName}
+                      <span className="skp-tag skp-tag-readonly">外部</span>
+                      {server.source !== undefined && <span className="skp-tag skp-tag-flat">{server.source}</span>}
+                      {server.disabledInProject === true && <span className="skp-tag skp-tag-warn">本项目已禁用</span>}
+                    </span>
+                    <span className="skp-row-meta">
+                      {server.transport !== undefined && <span className="skp-tag skp-tag-flat">{server.transport}</span>}
+                      <span className="skp-test-stat">{server.tools.length > 0 ? `${server.tools.length} 个工具` : "工具不可见"}</span>
+                      {server.calls > 0 && <span className="skp-test-stat">调用 {server.calls} 次</span>}
+                    </span>
+                    <span className="skp-row-desc">{server.summary ?? "运行时注入，不由能力面板管理（只读）"}</span>
+                  </button>
+                </li>
+              );
+            })}
+            {visible.length === 0 && visibleExternal.length === 0 && (
               <li className="skp-empty">
                 {zone === "project"
                   ? "本项目还没有 MCP 服务器。可到「全局」区导入，或点「+ 添加到项目」。"
@@ -329,7 +337,9 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
           </ul>
 
           <div className="skp-detail">
-            {selectedServer ? (
+            {selectedExternal !== undefined ? (
+              <McpExternalDetail api={mcpApi} server={selectedExternal} />
+            ) : selectedServer ? (
               <McpDetail
                 api={mcpApi}
                 server={selectedServer}
@@ -383,6 +393,139 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
  *  确认）；**全局区**条目 = 「导入到本项目」（物理复制快照，项目内已有
  *  同名时两击确认覆盖）、编辑、删除——全局条目不在面板里启停，需要
  *  项目级控制时先导入再在项目副本上操作。 */
+/**
+ * 「使用记录」只读区：最近谁（哪个 session）在什么时候调用了该 server 的哪个 tool。
+ *
+ * 数据来自宿主内存（`tools.guard` 旁路记录，见 `mcp/usage.ts`）——插件/进程重载即
+ * 清空、**不落盘**；打开期间每 2s 静默刷新。详情卡与「外部注入」详情共用这一块。
+ */
+function McpUsageSection({ api, serverName }: { api: McpApi; serverName: string }) {
+  const [view, setView] = useState<ClientMcpUsageView | undefined>(undefined);
+  const [error, setError] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+    const load = async () => {
+      try {
+        const next = await api.usage({ serverName });
+        if (cancelled) return;
+        setView(next);
+        setError(undefined);
+      } catch (err) {
+        if (cancelled) return;
+        setError(String(err));
+      }
+      if (!cancelled) timer = window.setTimeout(() => void load(), 2000);
+    };
+    void load();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [api, serverName]);
+  return (
+    <>
+      <div className="skp-detail-inspect-head">
+        <span className="skp-field-label">使用记录</span>
+        <span className="skp-test-stat">仅本次运行 · 不落盘{view === undefined ? "" : ` · 最近 ${view.limit} 条`}</span>
+      </div>
+      {error !== undefined && <div className="skp-error">{error}</div>}
+      {view === undefined ? (
+        <div className="skp-note">读取中…</div>
+      ) : view.entries.length === 0 ? (
+        <div className="skp-note">本次运行还没有调用记录。</div>
+      ) : (
+        <ul className="skp-usage">
+          {/* 最新在上 */}
+          {view.entries
+            .slice()
+            .reverse()
+            .map((entry, index) => (
+              <li key={`${entry.time}-${entry.tool}-${index}`} className="skp-usage-row">
+                <span className="skp-usage-time" title={new Date(entry.time).toLocaleString()}>
+                  {formatUsageTime(entry.time)}
+                </span>
+                <span className="skp-usage-session" title={entry.sessionId === "" ? undefined : entry.sessionId}>
+                  {entry.sessionTitle ?? (entry.sessionId.length > 0 ? `会话 ${entry.sessionId.slice(-8)}` : "—")}
+                </span>
+                <code className="skp-usage-tool" title={entry.serverName}>
+                  {entry.tool}
+                </code>
+              </li>
+            ))}
+        </ul>
+      )}
+    </>
+  );
+}
+
+/**
+ * 「外部注入」MCP 的**只读**详情。
+ *
+ * 这些实例不在本插件配置文件里（其它插件/profile 在运行时挂的 mcp-client），所以
+ * 只展示能观察到的信息：来源插件、注入方式、命名空间、传输/命令摘要（能读到才有）、
+ * 每个工具的**说明与参数**（与「查看工具与参数」同源：来自工具注册表），以及使用记录。
+ * 不提供编辑/删除/测试——配置与生命周期都在注入方。
+ */
+function McpExternalDetail({ api, server }: { api: McpApi; server: ClientMcpRuntimeServer }) {
+  return (
+    <div className="skp-detail-card">
+      <div className="skp-detail-head">
+        <h3>{server.serverName}</h3>
+        <span className="skp-tag skp-tag-readonly">外部注入</span>
+      </div>
+      <dl className="skp-detail-fields">
+        <dt>来源</dt>
+        <dd>{server.source ?? "运行时注入（来源不可识别）"}</dd>
+        <dt>注入方式</dt>
+        <dd>{server.origin === "entry" ? "loader 条目（profile patch insert）" : "动态 fiber（其它插件在 apply 中挂载）"}</dd>
+        <dt>命名空间</dt>
+        <dd>
+          <code>mcp__{server.serverName}__*</code>
+        </dd>
+        {server.transport !== undefined && (
+          <>
+            <dt>传输方式</dt>
+            <dd>
+              {server.transport}
+              {server.summary !== undefined ? ` · ${server.summary}` : ""}
+            </dd>
+          </>
+        )}
+        <dt>本项目开关</dt>
+        <dd>
+          {server.restrictable
+            ? "可在对话框的 MCP 弹层里按项目启用/禁用（走项目级声明 + tools.restrict 屏蔽，不卸载实例）。"
+            : "该实例按会话作用域注入，无法按项目禁用。"}
+          {server.disabledInProject === true ? "当前：本项目已禁用。" : ""}
+        </dd>
+        <dt>本次运行调用</dt>
+        <dd>{server.calls > 0 ? `${server.calls} 次` : "还没有调用记录"}</dd>
+        <dt>管理</dt>
+        <dd>由注入方管理；能力面板只读展示，不提供编辑/删除/卸载。</dd>
+      </dl>
+      <div className="skp-detail-inspect">
+        <div className="skp-detail-inspect-head">
+          <span className="skp-field-label">工具与参数</span>
+          <span className="skp-test-stat">{server.tools.length} 个工具</span>
+        </div>
+        {server.tools.length === 0 ? (
+          <div className="skp-note">工具清单不可见（该实例按会话作用域注入，只能统计调用次数）。</div>
+        ) : (
+          <div className="skp-test-tools">
+            {server.tools.map((tool) => (
+              <McpToolCard key={tool.name} tool={{ name: tool.name, ...(tool.description !== undefined ? { description: tool.description } : {}), ...(tool.parameters !== undefined ? { parameters: tool.parameters } : {}) }} />
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="skp-detail-inspect">
+        <McpUsageSection api={api} serverName={server.serverName} />
+      </div>
+    </div>
+  );
+}
+
 function McpDetail({
   api,
   server,
@@ -423,37 +566,11 @@ function McpDetail({
   // 「使用记录」：宿主内存里的 MCP 工具调用记录（只读、不落盘）。
   // 打开时拉一次，打开期间每 2s 刷新；关闭/切服务器即停。
   const [usageOpen, setUsageOpen] = useState(false);
-  const [usageView, setUsageView] = useState<ClientMcpUsageView | undefined>(undefined);
-  const [usageError, setUsageError] = useState<string | undefined>(undefined);
   // 换选中的服务器时收起并丢弃上一次的结果，避免把 A 的清单显示在 B 上。
   useEffect(() => {
     setInspect({ open: false, testing: false });
     setUsageOpen(false);
-    setUsageView(undefined);
-    setUsageError(undefined);
   }, [server.key, server.scope]);
-  useEffect(() => {
-    if (!usageOpen) return;
-    let cancelled = false;
-    let timer: number | undefined;
-    const load = async () => {
-      try {
-        const view = await api.usage({ serverName: server.serverName });
-        if (cancelled) return;
-        setUsageView(view);
-        setUsageError(undefined);
-      } catch (error) {
-        if (cancelled) return;
-        setUsageError(String(error));
-      }
-      if (!cancelled) timer = window.setTimeout(() => void load(), 2000);
-    };
-    void load();
-    return () => {
-      cancelled = true;
-      if (timer !== undefined) window.clearTimeout(timer);
-    };
-  }, [usageOpen, api, server.serverName]);
 
   /** 跑一次探测；失败以 `{ ok:false, errors }` 归一（不抛异常，就地展示）。 */
   const runInspect = async () => {
@@ -569,11 +686,7 @@ function McpDetail({
           type="button"
           className="skp-btn"
           title="查看最近哪个会话在什么时候调用了这个 MCP 的哪个工具（仅本次运行的内存记录，不落盘）"
-          onClick={() => {
-            setUsageOpen((open) => !open);
-            setUsageView(undefined);
-            setUsageError(undefined);
-          }}
+          onClick={() => setUsageOpen((open) => !open)}
         >
           {usageOpen ? "收起使用记录" : "使用记录"}
         </button>
@@ -631,39 +744,7 @@ function McpDetail({
           不会把详情页顶长到看不见操作按钮。 */}
       {usageOpen && (
         <div className="skp-detail-inspect">
-          <div className="skp-detail-inspect-head">
-            <span className="skp-field-label">使用记录</span>
-            <span className="skp-test-stat">
-              仅本次运行 · 不落盘{usageView === undefined ? "" : ` · 最近 ${usageView.limit} 条`}
-            </span>
-          </div>
-          {usageError !== undefined && <div className="skp-error">{usageError}</div>}
-          {usageView === undefined ? (
-            <div className="skp-note">读取中…</div>
-          ) : usageView.entries.length === 0 ? (
-            <div className="skp-note">本次运行还没有调用记录。</div>
-          ) : (
-            <ul className="skp-usage">
-              {/* 最新在上 */}
-              {usageView.entries
-                .slice()
-                .reverse()
-                .map((entry, index) => (
-                  <li key={`${entry.time}-${entry.tool}-${index}`} className="skp-usage-row">
-                    <span className="skp-usage-time" title={new Date(entry.time).toLocaleString()}>
-                      {formatUsageTime(entry.time)}
-                    </span>
-                    <span className="skp-usage-session" title={entry.sessionId === "" ? undefined : entry.sessionId}>
-                      {entry.sessionTitle ??
-                        (entry.sessionId.length > 0 ? `会话 ${entry.sessionId.slice(-8)}` : "—")}
-                    </span>
-                    <code className="skp-usage-tool" title={entry.serverName}>
-                      {entry.tool}
-                    </code>
-                  </li>
-                ))}
-            </ul>
-          )}
+          <McpUsageSection api={api} serverName={server.serverName} />
         </div>
       )}
       {inspect.open && (

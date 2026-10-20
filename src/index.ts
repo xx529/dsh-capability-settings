@@ -30,6 +30,7 @@ import { createService } from "./skills/manager.js";
 import { createMcpLoader } from "./mcp/loader.js";
 import { createMcpManager } from "./mcp/manager.js";
 import { createMcpUsageLog, registerMcpUsageGuard } from "./mcp/usage.js";
+import { scanInjectedMcpInstances } from "./mcp/runtime.js";
 import { createQuickMessagesManager } from "./quick-messages/manager.js";
 import { createOverridesManager } from "./overrides/manager.js";
 import type { OverrideToggleInput } from "./overrides/manager.js";
@@ -113,7 +114,15 @@ export function apply(ctx: any, config: Config = {}) {
     skills: createService(ctx, config),
     mcp: createMcpManager(
       // tools 访问器用于反推"运行时注入"的 MCP 实例（见 manager.runtime）。
-      { dshHome: config.dshHome, agentsHome: config.agentsHome, usage: mcpUsage, tools: () => ctx.get?.("tools") },
+      {
+        dshHome: config.dshHome,
+        agentsHome: config.agentsHome,
+        usage: mcpUsage,
+        tools: () => ctx.get?.("tools"),
+        // 运行时注入的 mcp-client：cordis 注册表里的动态 fiber + loader 条目
+        // （见 mcp/runtime.ts）。只读，用来给出「来源插件」与桥接层配置。
+        scanInjected: () => [...scanInjectedMcpInstances(ctx).values()],
+      },
       loader,
       overrides,
       imports,

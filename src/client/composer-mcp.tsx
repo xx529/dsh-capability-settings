@@ -27,7 +27,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import type { CapabilityPanelApi, ClientMcpList, ClientMcpServer, OpResult } from "./api.js";
+import type { CapabilityPanelApi, ClientMcpList, ClientMcpRuntimeServer, ClientMcpServer, OpResult } from "./api.js";
 import {
   composerPopStyle,
   createComposerStore,
@@ -193,6 +193,8 @@ export function ComposerMcpOverlay({ api }: { api: CapabilityPanelApi }) {
   const state = useComposerStore(store);
   const workspace = useWorkspaceLabel(api);
   const [servers, setServers] = useState<ClientMcpServer[]>([]);
+  /** 运行时注入（其它插件/profile 挂的 mcp-client）：只读展示 + 本项目开关。 */
+  const [externals, setExternals] = useState<ClientMcpRuntimeServer[]>([]);
   const [mounts, setMounts] = useState<Record<string, MountInfo>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -208,13 +210,19 @@ export function ComposerMcpOverlay({ api }: { api: CapabilityPanelApi }) {
     let cancelled = false;
     setLoading(true);
     setError(undefined);
-    Promise.all([api.mcp.list(), api.mcp.status().catch(() => [])])
-      .then(([list, statuses]) => {
+    Promise.all([
+      api.mcp.list(),
+      api.mcp.status().catch(() => []),
+      // 外部注入的实例：与配置条目同组展示，开关写项目级声明（不卸载实例）。
+      api.mcp.runtime({ cwd: workspace }).catch(() => ({ servers: [] })),
+    ])
+      .then(([list, statuses, runtime]) => {
         if (cancelled) return;
         // list 写回数据槽：按钮直接消费同一份列表，不再各自拉取。
         store.setData(workspace, list);
         setServers(list.servers);
         setMounts(aggregateMounts(statuses));
+        setExternals(runtime.servers);
       })
       .catch((err) => {
         if (!cancelled) setError(String(err));
@@ -236,6 +244,22 @@ export function ComposerMcpOverlay({ api }: { api: CapabilityPanelApi }) {
     setBusyRow(id);
     setError(undefined);
     const result = await toggleServer(api, server);
+    if (!result.ok) setError(result.errors.join("; "));
+    setBusyRow(undefined);
+    refreshComposerMcp();
+  };
+
+  /**
+   * 外部注入实例的本项目开关：写项目级禁用声明（`.agents/capability-overrides.json`）。
+   * 宿主不会卸载该实例（它由别的插件/profile 管理），而是对该项目的 session
+   * 调 `tools.restrict({ deny: ['mcp__<serverName>__*'] })` 屏蔽其工具。
+   * 仅当实例工具在全局注册表可见（`restrictable`）时可切；按会话注入的实例无法屏蔽。
+   */
+  const onToggleExternal = async (server: ClientMcpRuntimeServer) => {
+    const id = `external:${server.serverName}`;
+    setBusyRow(id);
+    setError(undefined);
+    const result = await api.overrides.toggle("mcp", server.serverName);
     if (!result.ok) setError(result.errors.join("; "));
     setBusyRow(undefined);
     refreshComposerMcp();
@@ -274,6 +298,39 @@ export function ComposerMcpOverlay({ api }: { api: CapabilityPanelApi }) {
     );
   };
 
+  /** 外部注入实例的行：与配置条目同款布局 + 「外部/来源」标记。 */
+  const renderExternalRow = (server: ClientMcpRuntimeServer) => {
+    const id = `external:${server.serverName}`;
+    const busy = busyRow === id;
+    const checked = server.restrictable ? server.disabledInProject !== true : true;
+    return (
+      <div key={id} className="skp-composer-row">
+        <span
+          className="skp-composer-dot skp-composer-dot-mounted"
+          title={server.restrictable ? "运行时注入，全局工具可见（可按项目屏蔽）" : "运行时注入（按会话作用域，无法按项目屏蔽）"}
+        />
+        <span className="skp-composer-name">
+          {server.serverName}
+          <span className="skp-tag skp-tag-readonly">外部</span>
+          {server.source !== undefined && <span className="skp-composer-source">{server.source}</span>}
+        </span>
+        <label
+          className="skp-switch"
+          title={
+            server.restrictable
+              ? checked
+                ? "点击在本项目禁用（不卸载实例，只屏蔽其工具）"
+                : "点击在本项目启用（移除项目级禁用声明）"
+              : "该实例按会话注入，无法按项目禁用"
+          }
+        >
+          <input type="checkbox" checked={checked} disabled={busy || !server.restrictable} onChange={() => void onToggleExternal(server)} />
+          <span className="skp-switch-track" />
+        </label>
+      </div>
+    );
+  };
+
   return (
     // 弹层右下角贴能力工具组右上角（上方间隔 4px）；无锚点时退化为锚点左上方位（CSS 类默认值）。
     <div
@@ -291,7 +348,7 @@ export function ComposerMcpOverlay({ api }: { api: CapabilityPanelApi }) {
 
       {loading && servers.length === 0 ? (
         <div className="skp-composer-empty">加载中…</div>
-      ) : servers.length === 0 ? (
+      ) : servers.length === 0 && externals.length === 0 ? (
         <div className="skp-composer-empty">
           未发现 MCP 服务器配置。
           <br />
@@ -305,10 +362,12 @@ export function ComposerMcpOverlay({ api }: { api: CapabilityPanelApi }) {
               {project.map(renderRow)}
             </>
           )}
-          {globalList.length > 0 && (
+          {(globalList.length > 0 || externals.length > 0) && (
             <>
               <div className="skp-composer-group">全局</div>
               {globalList.map(renderRow)}
+              {/* 外部注入的实例（其它插件/profile 挂的）：同样可在这里按项目启停。 */}
+              {externals.map(renderExternalRow)}
             </>
           )}
         </div>

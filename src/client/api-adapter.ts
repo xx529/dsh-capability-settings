@@ -290,8 +290,9 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
        * 运行时注入的 MCP（只读）：宿主的 `{servers:[{serverName,tools,calls}]}` 直接
        * 投影成客户端类型；脏数据丢弃。
        */
-      async runtime() {
-        const result = await rpc("mcp.runtime", {});
+      async runtime(input) {
+        // cwd 用于宿主机判断"本项目是否已禁用"（项目级 overrides）。
+        const result = await rpc("mcp.runtime", { cwd: input?.cwd ?? deps.currentWorkspaceCwd() });
         if (!result.ok) throw new Error(result.errors.join("; "));
         const view = (result.value ?? { servers: [] }) as { servers?: unknown };
         const servers = Array.isArray(view.servers) ? view.servers : [];
@@ -302,6 +303,12 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
               const tools = Array.isArray(server.tools) ? server.tools : [];
               return {
                 serverName: typeof server.serverName === "string" ? server.serverName : "",
+                ...(typeof server.source === "string" && server.source.length > 0 ? { source: server.source } : {}),
+                origin: server.origin === "entry" ? ("entry" as const) : ("fiber" as const),
+                ...(server.transport === "stdio" || server.transport === "http" ? { transport: server.transport } : {}),
+                ...(typeof server.summary === "string" && server.summary.length > 0 ? { summary: server.summary } : {}),
+                ...(server.disabledInProject === true ? { disabledInProject: true } : {}),
+                restrictable: server.restrictable === true,
                 calls: typeof server.calls === "number" ? server.calls : 0,
                 tools: tools
                   .map((item) => {
@@ -309,6 +316,7 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
                     return {
                       name: typeof tool.name === "string" ? tool.name : "",
                       ...(typeof tool.description === "string" && tool.description.length > 0 ? { description: tool.description } : {}),
+                      ...(tool.parameters !== null && typeof tool.parameters === "object" ? { parameters: tool.parameters as Record<string, unknown> } : {}),
                     };
                   })
                   .filter((tool) => tool.name.length > 0),

@@ -190,10 +190,32 @@ export interface McpUsageView {
 export interface McpRuntimeServerView {
     /** 实例的 serverName（工具名 `mcp__<serverName>__<tool>` 里的那段）。 */
     serverName: string;
-    /** 从全局工具注册表反推到的工具（agent 作用域注入的实例可能为空）。 */
+    /**
+     * 来源：注入它的插件显示名（cordis `Fiber.name`，继承自最近具名祖先）或
+     * loader 条目 id；识别不到时缺省（面板显示「运行时注入」）。
+     */
+    source?: string;
+    /** 发现路径：loader 条目 / 动态 fiber。仅用于文案与诊断。 */
+    origin: "entry" | "fiber";
+    /** 桥接层配置里能读到的传输方式（与配置条目同形；读不到时缺省）。 */
+    transport?: "stdio" | "http";
+    /** 与配置条目同款的摘要（命令/URL）。 */
+    summary?: string;
+    /**
+     * 本项目是否已被声明禁用（走项目级 overrides + `tools.restrict` 屏蔽其工具）。
+     * 仅当该实例工具在**全局**注册表里可见（restrictable）时才有意义。
+     */
+    disabledInProject?: boolean;
+    /** 是否能按项目屏蔽：其工具在全局工具视图里可见（agent 作用域注入的不可）。 */
+    restrictable: boolean;
+    /**
+     * 从全局工具注册表反推到的工具（含**参数 JSON Schema**，与「查看工具与参数」
+     * 的报告同源；agent 作用域注入的实例可能为空）。
+     */
     tools: Array<{
         name: string;
         description?: string;
+        parameters?: Record<string, unknown>;
     }>;
     /** 本次运行被调用过的次数（来自内存使用记录；0 = 没调用过或不可见）。 */
     calls: number;

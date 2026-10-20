@@ -17,15 +17,24 @@
   tools 注册表**，探测结束无残留子进程。RPC endpoint `mcp.test`，静态校验
   （`validateEntry`）失败时直接返回、不发连接。新增依赖
   `@modelcontextprotocol/client@2.0.0`（与宿主 `dsh-mcp-client` 同版本）。
-- **MCP 管理新增「外部注入的 MCP」（只读）**：以前只能看到**本插件配置文件**里的
-  条目（`~/.agents/mcp.json`、项目 `.mcp.json`、项目引用）。现在会额外发现并只读展示
-  **其它插件或 profile 在运行时直接挂载的 `@deepseek-ai/dsh-mcp-client` 实例**（典型是
-  profile 的 `cordis.patch.yml` 里 `insert:` 的 mcp-client 条目，或别的插件在 root/agent
-  作用域自己挂的实例）：MCP 域顶部出现「外部注入 · N 个 MCP（只读）」条，展开后按
-  `serverName` 列出**工具清单**（从全局工具注册表 `mcp__<serverName>__*` 反推）与
-  **本次运行调用次数**（来自内存使用记录；按 agent 作用域注入的实例只能统计调用、
-  看不到工具清单）。本插件自己管理/配置文件里声明过的 serverName 一律排除，避免与
-  「项目 / 全局」两区重复；这些条目**不可编辑/卸载**，请到注入方修改。
+- **MCP 管理支持「外部注入的 MCP」**（其它插件/profile 在运行时挂载的
+  `@deepseek-ai/dsh-mcp-client`，不在本插件配置文件里）。以前完全看不到，只有与自己的
+  条目撞名时显示 `conflict`。现在与配置条目**同列表展示、只读**：
+  - **发现**：① cordis 插件注册表（`ctx.registry` 的 `Plugin.Runtime.fibers`）拿动态
+    fiber 实例与**来源插件**——`Fiber.name` 的语义是「inherited from the nearest named
+    ancestor」，所以 `dsh-to-figma` 挂的 `figma` 会显示来源 `dsh-to-figma`；② cordis
+    loader 条目（profile `cordis.patch.yml` 里 `insert:` 的 mcp-client，来源=条目 id）；
+    ③ 全局工具注册表按 `mcp__<serverName>__*` 反推**工具与参数 Schema**；④ 内存使用记录
+    补上只在 agent 作用域可见的实例与调用次数。本插件自己管理的 serverName 一律排除。
+  - **展示**：外部实例以普通行出现在「全局」区（名称旁 `外部` + 来源标记），详情卡只读
+    展示来源插件 / 注入方式（loader 条目 or 动态 fiber）/ 命名空间 / 传输与命令摘要 /
+    **每个工具及其参数**（名字、类型、必填、说明）/ 本次运行调用次数 / 使用记录；
+    不提供编辑、删除、卸载。
+  - **每个 MCP 名称旁都有来源标记**：`全局` / `项目` / `引用` / `导入` / `外部 · <来源>`。
+  - **输入框的 MCP 弹层**同样列出外部实例（`外部` + 来源），并支持**按项目手动启用/禁用**：
+    开关写项目级声明（`.agents/capability-overrides.json`），宿主不会卸载实例，而是对该项目
+    的 session 调 `tools.restrict({ deny: ['mcp__<serverName>__*'] })` 屏蔽其工具；按会话
+    作用域注入的实例无法屏蔽，开关置灰并给出说明。
 - **MCP 详情卡新增「使用记录」（只读、不落盘）**：选中某个 server 后点「使用记录」，
   就地列出**最近的调用**——什么时候、哪个 session（显示侧栏的会话标题）、调用了
   这个 server 的哪个 tool；只显示最近 50 条（宿主内存里最多留 200 条），打开期间每

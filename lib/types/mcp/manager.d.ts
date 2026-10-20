@@ -31,6 +31,17 @@ export interface McpManagerDeps {
      * 的 MCP 清单（缺省时该视图为空，其余功能不受影响）。
      */
     tools?: () => any;
+    /**
+     * 「运行时注入」实例的发现器（由 index.ts 提供：cordis 插件注册表 + loader 条目）。
+     * 返回 serverName / 来源插件名 / 桥接层配置；缺省时外部清单只靠工具注册表与
+     * 使用记录反推（来源未知）。
+     */
+    scanInjected?: () => Array<{
+        serverName: string;
+        source?: string;
+        origin: "entry" | "fiber";
+        config?: Record<string, unknown>;
+    }>;
 }
 /** 一次写操作的最小入参（scope + 目标文件定位）。 */
 export interface McpWriteInput {
@@ -82,7 +93,9 @@ export declare function createMcpManager(deps: McpManagerDeps, loader: McpLoader
         serverName?: string;
         limit?: number;
     }) => McpUsageView;
-    runtime: () => Promise<McpRuntimeView>;
+    runtime: (input?: {
+        cwd?: string;
+    }) => Promise<McpRuntimeView>;
 };
 /** 管理服务的完整类型（构造函数的返回值）。 */
 export type McpManager = ReturnType<typeof createMcpManager>;

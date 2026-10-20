@@ -273,10 +273,23 @@ export interface ClientMcpUsageView {
 export interface ClientMcpRuntimeServer {
     /** 实例的 serverName（工具名 `mcp__<serverName>__*` 里的那段）。 */
     serverName: string;
-    /** 从工具注册表反推到的工具（agent 作用域注入的实例可能为空）。 */
+    /** 来源：注入它的插件显示名 / loader 条目 id；识别不到时缺省。 */
+    source?: string;
+    /** 发现路径：loader 条目 / 动态 fiber（用于文案与诊断）。 */
+    origin: "entry" | "fiber";
+    /** 桥接层配置里读到的传输方式（与配置条目同形）。 */
+    transport?: "stdio" | "http";
+    /** 与配置条目同款的命令/URL 摘要。 */
+    summary?: string;
+    /** 本项目已禁用（走项目级 overrides → tools.restrict 屏蔽其工具）。 */
+    disabledInProject?: boolean;
+    /** 能否按项目屏蔽（工具在全局注册表可见才可；agent 作用域注入的不可）。 */
+    restrictable: boolean;
+    /** 从工具注册表反推到的工具（含参数 JSON Schema）。 */
     tools: Array<{
         name: string;
         description?: string;
+        parameters?: Record<string, unknown>;
     }>;
     /** 本次运行被调用次数（内存使用记录；0 = 未调用或不可见）。 */
     calls: number;
@@ -372,7 +385,9 @@ export interface McpApi {
      * mcp-client，不在能力面板的配置文件里。按工具注册表（`mcp__*`）与内存使用记录
      * 反推，只用于展示；编辑/卸载请去注入方。
      */
-    runtime(): Promise<ClientMcpRuntimeView>;
+    runtime(input?: {
+        cwd?: string;
+    }): Promise<ClientMcpRuntimeView>;
 }
 /** 面板视角下的一条快捷消息（跨作用域合并后的视图）。 */
 export interface ClientQuickMessage {

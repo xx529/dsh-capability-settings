@@ -69,7 +69,9 @@ export const SKP_CSS = `
 .skp-row{position:relative;display:flex;flex-direction:column;gap:5px;width:100%;text-align:left;background:none;border:none;border-radius:var(--skp-radius);padding:10px 14px;cursor:pointer;font:inherit;color:inherit;transition:background-color .12s var(--skp-ease);}
 .skp-row:hover{background:var(--skp-hover);}
 .skp-row-active,.skp-row-active:hover{background:var(--dsw-alias-interactive-bg-active,rgba(20,28,40,.08));}
-.skp-row-name{display:flex;align-items:center;min-width:0;font-size:14px;font-weight:600;color:var(--skp-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.skp-row-name{display:flex;align-items:center;gap:6px;min-width:0;font-size:14px;font-weight:600;color:var(--skp-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* 行名旁的来源标记（全局/项目/引用/导入/外部·来源）不要被压缩。 */
+.skp-row-name>.skp-tag{flex:none;}
 .skp-row-meta{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:12px;color:var(--skp-text-3);}
 .skp-tag{flex:none;padding:0 8px;border-radius:6px;font-size:11px;font-weight:600;line-height:19px;letter-spacing:.02em;}
 .skp-tag-project{color:var(--skp-accent);background:var(--skp-accent-soft);}
@@ -232,7 +234,9 @@ export const SKP_CSS = `
 .skp-composer-dot-mounted{background:var(--dsw-alias-state-success-primary,#189a52);}
 .skp-composer-dot-failed{background:var(--dsw-alias-state-error-primary,#d64545);}
 .skp-composer-dot-conflict{background:var(--dsw-alias-state-warn-primary,#c26a0a);}
-.skp-composer-name{flex:1;min-width:0;font-size:14px;color:var(--dsw-alias-label-primary,#1b1f26);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.skp-composer-name{flex:1;min-width:0;display:flex;align-items:center;gap:6px;font-size:14px;color:var(--dsw-alias-label-primary,#1b1f26);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* 外部注入条目的来源插件名（弱化、可截断）。 */
+.skp-composer-source{flex:none;max-width:96px;font-size:11px;color:var(--dsw-alias-label-secondary,#6b7280);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .skp-switch{position:relative;flex:none;width:30px;height:18px;}
 .skp-switch input{position:absolute;inset:0;z-index:1;margin:0;opacity:0;cursor:pointer;}
 .skp-switch-track{position:absolute;inset:0;border-radius:999px;background:var(--dsw-alias-border-l2,rgba(20,28,40,.16));transition:background-color .15s ease;}

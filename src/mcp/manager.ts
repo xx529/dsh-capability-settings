@@ -9,7 +9,7 @@
  */
 
 import { findProjectRoot } from "../shared/project-root.js";
-import { MCP_USAGE_VIEW_LIMIT, type McpRuntimeView, type McpUsageView } from "./types.js";
+import { MCP_USAGE_VIEW_LIMIT, type McpRuntimeServerView, type McpRuntimeView, type McpUsageView } from "./types.js";
 import { parseMcpToolName, type McpUsageLog } from "./usage.js";
 import { withFileLock } from "../shared/file-lock.js";
 import { errMessage } from "../shared/errors.js";
@@ -39,6 +39,12 @@ export interface McpManagerDeps {
    * 的 MCP 清单（缺省时该视图为空，其余功能不受影响）。
    */
   tools?: () => any;
+  /**
+   * 「运行时注入」实例的发现器（由 index.ts 提供：cordis 插件注册表 + loader 条目）。
+   * 返回 serverName / 来源插件名 / 桥接层配置；缺省时外部清单只靠工具注册表与
+   * 使用记录反推（来源未知）。
+   */
+  scanInjected?: () => Array<{ serverName: string; source?: string; origin: "entry" | "fiber"; config?: Record<string, unknown> }>;
 }
 
 /** 一次写操作的最小入参（scope + 目标文件定位）。 */
@@ -357,57 +363,86 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
    * **运行时注入**的 MCP 实例（只读）：不是本插件配置文件里的条目，而是其它插件或
    * profile 在运行时挂载的 mcp-client。
    *
-   * 发现方式（两路并集）：
-   *  1. 全局工具注册表：把 `mcp__<serverName>__<tool>` 按 serverName 分组——覆盖
-   *     root 作用域注入的实例（profile `cordis.patch.yml` 插入的 mcp-client 就是这类）；
-   *  2. 内存使用记录：覆盖"按 agent 作用域注入"的实例——它们不进全局工具视图，
-   *     但一旦被调用过就会在记录里留下 serverName（工具列表为空，只能看到调用次数）。
+   * 发现与补全（并集，全部只读）：
+   *  1. `deps.scanInjected()`：cordis 注册表里的动态 fiber + loader 条目 → 拿到
+   *     **来源插件名**与桥接层配置（传输/命令），这是"像自己配置那样展示"的数据源；
+   *  2. 全局工具注册表：按 `mcp__<serverName>__*` 分组 → 工具名/描述/**参数**；
+   *  3. 内存使用记录：补上只在 agent 作用域可见、或只被调用过的实例（并给出调用次数）。
    *
-   * 本插件自己管理（或配置文件里声明过）的 serverName 一律排除，避免和「项目/全局」
-   * 两区重复；返回只读视图，面板不提供任何编辑/卸载入口。
+   * 本插件自己管理（或配置文件里声明过）的 serverName 一律排除；`cwd` 用于判断
+   * "本项目是否已禁用"（项目级 overrides）——外部实例的开关走的就是这条链路。
    */
-  async function runtime(): Promise<McpRuntimeView> {
+  async function runtime(input?: { cwd?: string }): Promise<McpRuntimeView> {
     const owned = new Set<string>();
     try {
       for (const status of loader.status()) for (const server of status.servers) owned.add(server.serverName);
     } catch {
-      /* status 不可用时只靠文件条目 */
+      /* status 不可用：只靠文件条目 */
     }
     try {
-      // 只取全局区：项目条目在下面 loader.status() 的 session 记录里已经覆盖。
       for (const server of (await list()).servers) owned.add(server.serverName);
     } catch {
       /* 文件读失败不影响外部视图 */
     }
-    const groups = new Map<string, { serverName: string; tools: Array<{ name: string; description?: string }>; calls: number }>();
+    // 本项目已禁用的键（overrides）——外部实例的开关写在这里。
+    const disabledByProject = new Set<string>((await overrides?.sets(input?.cwd))?.mcp ?? []);
+    // serverName → 视图（先放发现器给的来源/配置，随后用工具注册表补工具）。
+    const groups = new Map<string, McpRuntimeServerView>();
+    const ensure = (serverName: string, origin: "entry" | "fiber"): McpRuntimeServerView => {
+      const existing = groups.get(serverName);
+      if (existing !== undefined) return existing;
+      const created: McpRuntimeServerView = { serverName, origin, restrictable: false, tools: [], calls: 0 };
+      groups.set(serverName, created);
+      return created;
+    };
+    try {
+      for (const injected of deps.scanInjected?.() ?? []) {
+        if (owned.has(injected.serverName)) continue;
+        const view = ensure(injected.serverName, injected.origin);
+        if (injected.source !== undefined) view.source = injected.source;
+        const config = injected.config as McpServerEntry | undefined;
+        if (config !== undefined) {
+          try {
+            view.transport = transportOf(config);
+            view.summary = summarizeEntry(config);
+          } catch {
+            /* 配置形状异常：只保留来源 */
+          }
+        }
+      }
+    } catch {
+      /* 发现器失败：继续用工具注册表 + 使用记录 */
+    }
     try {
       const schemas = deps.tools?.()?.schemas?.() ?? [];
       for (const schema of Array.isArray(schemas) ? schemas : []) {
         const parsed = parseMcpToolName(typeof schema?.name === "string" ? schema.name : "");
         if (parsed === undefined || owned.has(parsed.serverName)) continue;
-        const group = groups.get(parsed.serverName) ?? { serverName: parsed.serverName, tools: [], calls: 0 };
-        group.tools.push({
+        const view = ensure(parsed.serverName, "fiber");
+        view.tools.push({
           name: parsed.tool,
           ...(typeof schema?.description === "string" && schema.description.length > 0 ? { description: schema.description } : {}),
+          ...(schema?.parameters !== null && typeof schema?.parameters === "object" ? { parameters: schema.parameters as Record<string, unknown> } : {}),
         });
-        groups.set(parsed.serverName, group);
       }
     } catch {
-      /* 工具服务不可用：降级为只用使用记录 */
+      /* 工具服务不可用：降级 */
     }
     try {
       for (const serverName of deps.usage?.serverNames?.() ?? []) {
-        if (owned.has(serverName) || groups.has(serverName)) continue;
-        groups.set(serverName, { serverName, tools: [], calls: 0 });
+        if (owned.has(serverName)) continue;
+        ensure(serverName, "fiber");
       }
     } catch {
       /* 使用记录不可用：忽略 */
     }
-    for (const group of groups.values()) {
+    for (const view of groups.values()) {
+      view.restrictable = view.tools.length > 0;
+      if (view.restrictable && disabledByProject.has(view.serverName)) view.disabledInProject = true;
       try {
-        group.calls = deps.usage?.count?.(group.serverName) ?? 0;
+        view.calls = deps.usage?.count?.(view.serverName) ?? 0;
       } catch {
-        group.calls = 0;
+        view.calls = 0;
       }
     }
     return { servers: [...groups.values()].sort((a, b) => a.serverName.localeCompare(b.serverName)) };

@@ -82,7 +82,7 @@ export interface PanelRpcService {
      * 运行时注入的 MCP 实例（只读）：不是本插件配置文件里的条目，而是其它插件或
      * profile 直接挂载的 mcp-client。按工具注册表 + 内存使用记录反推。
      */
-    runtime(): Promise<unknown>;
+    runtime(input: unknown): Promise<unknown>;
   };
   quickMessages: {
     list(cwd?: string): Promise<unknown>;
@@ -146,7 +146,7 @@ export async function handleEndpoint(service: PanelRpcService, endpoint: string,
       case "mcp.status":
         return { ok: true, value: service.mcp.status(cwd) };
       case "mcp.runtime":
-        return { ok: true, value: await service.mcp.runtime() };
+        return { ok: true, value: await service.mcp.runtime((p ?? {}) as { cwd?: string }) };
       case "mcp.usage":
         // 只读查询：始终返回 { ok:true, value:{ entries, limit } }。
         return { ok: true, value: service.mcp.usage(p) };
