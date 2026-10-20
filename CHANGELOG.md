@@ -17,6 +17,15 @@
   tools 注册表**，探测结束无残留子进程。RPC endpoint `mcp.test`，静态校验
   （`validateEntry`）失败时直接返回、不发连接。新增依赖
   `@modelcontextprotocol/client@2.0.0`（与宿主 `dsh-mcp-client` 同版本）。
+- **MCP 管理新增「外部注入的 MCP」（只读）**：以前只能看到**本插件配置文件**里的
+  条目（`~/.agents/mcp.json`、项目 `.mcp.json`、项目引用）。现在会额外发现并只读展示
+  **其它插件或 profile 在运行时直接挂载的 `@deepseek-ai/dsh-mcp-client` 实例**（典型是
+  profile 的 `cordis.patch.yml` 里 `insert:` 的 mcp-client 条目，或别的插件在 root/agent
+  作用域自己挂的实例）：MCP 域顶部出现「外部注入 · N 个 MCP（只读）」条，展开后按
+  `serverName` 列出**工具清单**（从全局工具注册表 `mcp__<serverName>__*` 反推）与
+  **本次运行调用次数**（来自内存使用记录；按 agent 作用域注入的实例只能统计调用、
+  看不到工具清单）。本插件自己管理/配置文件里声明过的 serverName 一律排除，避免与
+  「项目 / 全局」两区重复；这些条目**不可编辑/卸载**，请到注入方修改。
 - **MCP 详情卡新增「使用记录」（只读、不落盘）**：选中某个 server 后点「使用记录」，
   就地列出**最近的调用**——什么时候、哪个 session（显示侧栏的会话标题）、调用了
   这个 server 的哪个 tool；只显示最近 50 条（宿主内存里最多留 200 条），打开期间每

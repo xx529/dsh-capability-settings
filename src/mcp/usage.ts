@@ -38,6 +38,10 @@ export interface McpUsageLog {
   query(input?: { serverName?: string; limit?: number }): McpUsageView;
   /** 当前保留的记录总数（诊断/测试用）。 */
   size(): number;
+  /** 记录里出现过的 serverName（去重，最近在前的顺序不保证）。 */
+  serverNames(): string[];
+  /** 某个 server 的记录条数（用于"本次运行调用 N 次"）。 */
+  count(serverName: string): number;
 }
 
 /** 工具名前缀：桥接层注册 MCP 工具时的命名空间约定。 */
@@ -91,6 +95,14 @@ export function createMcpUsageLog(capacity: number = MCP_USAGE_CAPACITY): McpUsa
     },
     size() {
       return entries.length;
+    },
+    serverNames() {
+      return [...new Set(entries.map((entry) => entry.serverName))];
+    },
+    count(serverName) {
+      let total = 0;
+      for (const entry of entries) if (entry.serverName === serverName) total += 1;
+      return total;
     },
   };
 }

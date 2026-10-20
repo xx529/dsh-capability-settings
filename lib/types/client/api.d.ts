@@ -266,6 +266,25 @@ export interface ClientMcpUsageView {
     entries: ClientMcpUsageEntry[];
     limit: number;
 }
+/**
+ * 运行时注入的 MCP 实例（**只读**）：不是本插件配置文件里的条目，而是其它插件
+ * 或 profile 直接挂载的 mcp-client。面板只展示，不提供编辑/卸载。
+ */
+export interface ClientMcpRuntimeServer {
+    /** 实例的 serverName（工具名 `mcp__<serverName>__*` 里的那段）。 */
+    serverName: string;
+    /** 从工具注册表反推到的工具（agent 作用域注入的实例可能为空）。 */
+    tools: Array<{
+        name: string;
+        description?: string;
+    }>;
+    /** 本次运行被调用次数（内存使用记录；0 = 未调用或不可见）。 */
+    calls: number;
+}
+/** `mcp.runtime` 的返回。 */
+export interface ClientMcpRuntimeView {
+    servers: ClientMcpRuntimeServer[];
+}
 /** 新增/更新一条 server 的入参。 */
 export interface McpUpsertInput {
     scope: McpScope;
@@ -348,6 +367,12 @@ export interface McpApi {
         serverName?: string;
         limit?: number;
     }): Promise<ClientMcpUsageView>;
+    /**
+     * 运行时注入的 MCP 实例（**只读**）：来自其它插件/profile 在运行时挂载的
+     * mcp-client，不在能力面板的配置文件里。按工具注册表（`mcp__*`）与内存使用记录
+     * 反推，只用于展示；编辑/卸载请去注入方。
+     */
+    runtime(): Promise<ClientMcpRuntimeView>;
 }
 /** 面板视角下的一条快捷消息（跨作用域合并后的视图）。 */
 export interface ClientQuickMessage {

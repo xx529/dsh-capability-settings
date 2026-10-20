@@ -15,6 +15,7 @@ import type {
   ClientMcpList,
   ClientMcpStatus,
   ClientMcpTool,
+  ClientMcpRuntimeServer,
   ClientMcpUsageEntry,
   ClientOverrides,
   ClientQuickMessagesList,
@@ -282,6 +283,38 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
               };
             })
             .filter((entry) => entry.serverName.length > 0 && entry.tool.length > 0) as ClientMcpUsageEntry[],
+        };
+      },
+
+      /**
+       * 运行时注入的 MCP（只读）：宿主的 `{servers:[{serverName,tools,calls}]}` 直接
+       * 投影成客户端类型；脏数据丢弃。
+       */
+      async runtime() {
+        const result = await rpc("mcp.runtime", {});
+        if (!result.ok) throw new Error(result.errors.join("; "));
+        const view = (result.value ?? { servers: [] }) as { servers?: unknown };
+        const servers = Array.isArray(view.servers) ? view.servers : [];
+        return {
+          servers: servers
+            .map((raw) => {
+              const server = (raw ?? {}) as Record<string, unknown>;
+              const tools = Array.isArray(server.tools) ? server.tools : [];
+              return {
+                serverName: typeof server.serverName === "string" ? server.serverName : "",
+                calls: typeof server.calls === "number" ? server.calls : 0,
+                tools: tools
+                  .map((item) => {
+                    const tool = (item ?? {}) as Record<string, unknown>;
+                    return {
+                      name: typeof tool.name === "string" ? tool.name : "",
+                      ...(typeof tool.description === "string" && tool.description.length > 0 ? { description: tool.description } : {}),
+                    };
+                  })
+                  .filter((tool) => tool.name.length > 0),
+              };
+            })
+            .filter((server) => server.serverName.length > 0) as ClientMcpRuntimeServer[],
         };
       },
     },

@@ -7,8 +7,8 @@
  *
  * @module @chengdb/capability-panel/mcp/manager
  */
-import { type McpUsageView } from "./types.js";
-import type { McpUsageLog } from "./usage.js";
+import { type McpRuntimeView, type McpUsageView } from "./types.js";
+import { type McpUsageLog } from "./usage.js";
 import { type McpProbeResult } from "./probe.js";
 import type { OverridesManager } from "../overrides/manager.js";
 import type { ImportsManager } from "../imports/manager.js";
@@ -23,6 +23,14 @@ export interface McpManagerDeps {
      * 其余功能不受影响——便于单测/无宿主环境构造 manager。
      */
     usage?: McpUsageLog;
+    /**
+     * 全局工具服务访问器（`() => ctx.get("tools")`）。
+     *
+     * 用它在「外部注入的 MCP」里反推实例：任何插件/profile 注入的 mcp-client 都会把
+     * 工具注册成 `mcp__<serverName>__<tool>`，按 serverName 分组即得到"非本插件配置"
+     * 的 MCP 清单（缺省时该视图为空，其余功能不受影响）。
+     */
+    tools?: () => any;
 }
 /** 一次写操作的最小入参（scope + 目标文件定位）。 */
 export interface McpWriteInput {
@@ -74,6 +82,7 @@ export declare function createMcpManager(deps: McpManagerDeps, loader: McpLoader
         serverName?: string;
         limit?: number;
     }) => McpUsageView;
+    runtime: () => Promise<McpRuntimeView>;
 };
 /** 管理服务的完整类型（构造函数的返回值）。 */
 export type McpManager = ReturnType<typeof createMcpManager>;

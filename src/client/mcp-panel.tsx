@@ -73,11 +73,17 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
    */
   const { data, loading, error, reload } = useAsyncList(
     async () => {
-      const [list, statuses] = await Promise.all([mcpApi.list(), mcpApi.status().catch(() => [])]);
+      const [list, statuses, runtime] = await Promise.all([
+        mcpApi.list(),
+        mcpApi.status().catch(() => []),
+        // 运行时注入的 MCP（其它插件/profile 挂的 mcp-client）：只读展示，失败不影响主列表。
+        mcpApi.runtime().catch(() => ({ servers: [] })),
+      ]);
       return {
         servers: list.servers,
         listErrors: list.errors,
         mounts: aggregateMounts(statuses),
+        runtimeServers: runtime.servers,
         // 宿主后台还在重挂（写入不再阻塞 RPC，见 manager.reloadFor）→ 面板据此轮询。
         settling: statuses.some((status) => status.settling === true),
       };
@@ -88,6 +94,9 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
   const listErrors = data?.listErrors ?? [];
   const mounts = data?.mounts ?? {};
   const settling = data?.settling === true;
+  /** 外部注入（非本插件配置）的 MCP；只读，默认折叠。 */
+  const runtimeServers = data?.runtimeServers ?? [];
+  const [runtimeOpen, setRuntimeOpen] = useState(false);
 
   /**
    * 写操作返回时宿主可能还在后台重挂（全局换代要逐条起进程 + 握手）：只要
@@ -217,6 +226,52 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
       {listErrors.length > 0 && <div className="skp-error">{listErrors.join("\n")}</div>}
       {opError && <div className="skp-error">{opError}</div>}
       {error && <div className="skp-error">{error}</div>}
+      {/* 外部注入的 MCP（只读）：不是本插件配置文件里的条目，而是其它插件/profile
+          在运行时直接挂载的 mcp-client。默认折叠；只展示、不提供编辑/卸载。 */}
+      {runtimeServers.length > 0 && (
+        <div className="skp-runtime">
+          <button
+            type="button"
+            className="skp-runtime-head"
+            aria-expanded={runtimeOpen}
+            title="这些 MCP 由其它插件或 profile 在运行时注入，不在能力面板的配置文件里；面板只读展示"
+            onClick={() => setRuntimeOpen((open) => !open)}
+          >
+            <span className="skp-tag skp-tag-flat">外部注入</span>
+            <span>{runtimeServers.length} 个 MCP（只读）</span>
+            <span className="skp-runtime-chevron">{runtimeOpen ? "收起" : "展开"}</span>
+          </button>
+          {runtimeOpen && (
+            <div className="skp-runtime-body">
+              <div className="skp-note">
+                这些 MCP 由其它插件或 profile 在运行时注入，不在能力面板的配置文件里；面板只读展示，编辑/卸载请到注入方。
+              </div>
+              {runtimeServers.map((server) => (
+                <section key={server.serverName} className="skp-tool">
+                  <div className="skp-tool-head">
+                    <code className="skp-tool-name">{server.serverName}</code>
+                    <span className="skp-test-stat">
+                      {server.tools.length > 0
+                        ? `${server.tools.length} 个工具`
+                        : "工具清单不可见（按会话作用域注入，调用过才可统计）"}
+                      {server.calls > 0 ? ` · 本次运行调用 ${server.calls} 次` : ""}
+                    </span>
+                  </div>
+                  {server.tools.length > 0 && (
+                    <div className="skp-runtime-tools">
+                      {server.tools.map((tool) => (
+                        <code key={tool.name} className="skp-tag skp-tag-flat" title={tool.description}>
+                          {tool.name}
+                        </code>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {loading && <div className="skp-status">加载中…</div>}
 
       {!loading && (

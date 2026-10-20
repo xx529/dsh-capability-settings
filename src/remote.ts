@@ -78,6 +78,11 @@ export interface PanelRpcService {
      * 传 `serverName` 只返回该 server 的调用；`limit` 控制"最近 n 条"。
      */
     usage(input: unknown): unknown;
+    /**
+     * 运行时注入的 MCP 实例（只读）：不是本插件配置文件里的条目，而是其它插件或
+     * profile 直接挂载的 mcp-client。按工具注册表 + 内存使用记录反推。
+     */
+    runtime(): Promise<unknown>;
   };
   quickMessages: {
     list(cwd?: string): Promise<unknown>;
@@ -140,6 +145,8 @@ export async function handleEndpoint(service: PanelRpcService, endpoint: string,
         return { ok: true, value: await service.mcp.importToProject(p) };
       case "mcp.status":
         return { ok: true, value: service.mcp.status(cwd) };
+      case "mcp.runtime":
+        return { ok: true, value: await service.mcp.runtime() };
       case "mcp.usage":
         // 只读查询：始终返回 { ok:true, value:{ entries, limit } }。
         return { ok: true, value: service.mcp.usage(p) };

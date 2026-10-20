@@ -38,6 +38,10 @@ export interface McpUsageLog {
     }): McpUsageView;
     /** 当前保留的记录总数（诊断/测试用）。 */
     size(): number;
+    /** 记录里出现过的 serverName（去重，最近在前的顺序不保证）。 */
+    serverNames(): string[];
+    /** 某个 server 的记录条数（用于"本次运行调用 N 次"）。 */
+    count(serverName: string): number;
 }
 /**
  * 从桥接层工具名解析出 serverName 与原始工具名。

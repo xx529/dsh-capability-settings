@@ -111,7 +111,13 @@ export function apply(ctx: any, config: Config = {}) {
   const disposeUsageGuard = registerMcpUsageGuard(ctx, mcpUsage);
   const service: CapabilityPanelService = {
     skills: createService(ctx, config),
-    mcp: createMcpManager({ dshHome: config.dshHome, agentsHome: config.agentsHome, usage: mcpUsage }, loader, overrides, imports),
+    mcp: createMcpManager(
+      // tools 访问器用于反推"运行时注入"的 MCP 实例（见 manager.runtime）。
+      { dshHome: config.dshHome, agentsHome: config.agentsHome, usage: mcpUsage, tools: () => ctx.get?.("tools") },
+      loader,
+      overrides,
+      imports,
+    ),
     quickMessages: createQuickMessagesManager({ dshHome: config.dshHome, agentsHome: config.agentsHome }, overrides, imports),
     overrides,
   };

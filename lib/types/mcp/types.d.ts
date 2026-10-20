@@ -180,3 +180,25 @@ export interface McpUsageView {
     /** 本次返回实际使用的"最近 n 条"上限（面板据此显示文案）。 */
     limit: number;
 }
+/**
+ * 一个**运行时注入**的 MCP server 视图。
+ *
+ * 来源：别的插件或 profile 在 root / agent 作用域直接挂 `@deepseek-ai/dsh-mcp-client`
+ * （典型是 profile 的 `cordis.patch.yml` 里插入的 mcp-client 条目）。这类实例不在
+ * 本插件的配置文件里，因此**只读**：面板不管理、不编辑、不卸载它们。
+ */
+export interface McpRuntimeServerView {
+    /** 实例的 serverName（工具名 `mcp__<serverName>__<tool>` 里的那段）。 */
+    serverName: string;
+    /** 从全局工具注册表反推到的工具（agent 作用域注入的实例可能为空）。 */
+    tools: Array<{
+        name: string;
+        description?: string;
+    }>;
+    /** 本次运行被调用过的次数（来自内存使用记录；0 = 没调用过或不可见）。 */
+    calls: number;
+}
+/** `mcp.runtime` 的返回。 */
+export interface McpRuntimeView {
+    servers: McpRuntimeServerView[];
+}
