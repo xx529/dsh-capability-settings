@@ -33,6 +33,11 @@ export interface AdapterDeps {
      * 使用记录里只有 sessionId——宿主侧 `SessionHeader` 没有标题字段。
      */
     sessionTitle?(sessionId: string): string | undefined;
+    /**
+     * 当前 session id（composer 的 api 才有）。带上后 `mcp.list` / `mcp.runtime`
+     * 会多返回 `enabledInSession`，`mcp.setSessionEnabled` 也知道改哪个会话。
+     */
+    sessionId?: string;
 }
 /** 构建传输无关的面板 API（RPC 实现）。 */
 export declare function createPanelApi(deps: AdapterDeps): CapabilityPanelApi;

@@ -53,6 +53,11 @@ export interface AdapterDeps {
    * 使用记录里只有 sessionId——宿主侧 `SessionHeader` 没有标题字段。
    */
   sessionTitle?(sessionId: string): string | undefined;
+  /**
+   * 当前 session id（composer 的 api 才有）。带上后 `mcp.list` / `mcp.runtime`
+   * 会多返回 `enabledInSession`，`mcp.setSessionEnabled` 也知道改哪个会话。
+   */
+  sessionId?: string;
 }
 
 /** 构建传输无关的面板 API（RPC 实现）。 */
@@ -290,9 +295,25 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
        * 运行时注入的 MCP（只读）：宿主的 `{servers:[{serverName,tools,calls}]}` 直接
        * 投影成客户端类型；脏数据丢弃。
        */
+      /**
+       * 设置**当前 session** 的能力开关。sessionId 来自 api 的 deps（composer 的
+       * 每个 session 一份 api），面板侧没有这个入口。
+       */
+      async setSessionEnabled(input) {
+        if (deps.sessionId === undefined) throw new Error("mcp.setSessionEnabled 只能在会话作用域的 api 上调用");
+        const cwd = deps.currentWorkspaceCwd();
+        const result = await rpc("mcp.setSessionEnabled", { ...input, sessionId: deps.sessionId, ...(cwd !== undefined ? { cwd } : {}) });
+        if (!result.ok) throw new Error(result.errors.join("; "));
+        const value = (result.value ?? {}) as { ok?: boolean; errors?: unknown };
+        if (value.ok === false) throw new Error(Array.isArray(value.errors) ? value.errors.join("; ") : "mcp.setSessionEnabled failed");
+      },
+
       async runtime(input) {
-        // cwd 用于宿主机判断"本项目是否已禁用"（项目级 overrides）。
-        const result = await rpc("mcp.runtime", { cwd: input?.cwd ?? deps.currentWorkspaceCwd() });
+        // cwd 用于宿主机判断"本项目是否已禁用"；sessionId 让宿主多返回 enabledInSession。
+        const result = await rpc("mcp.runtime", {
+          cwd: input?.cwd ?? deps.currentWorkspaceCwd(),
+          ...(deps.sessionId !== undefined ? { sessionId: deps.sessionId } : {}),
+        });
         if (!result.ok) throw new Error(result.errors.join("; "));
         const view = (result.value ?? { servers: [] }) as { servers?: unknown };
         const servers = Array.isArray(view.servers) ? view.servers : [];
@@ -309,6 +330,7 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
                 ...(typeof server.summary === "string" && server.summary.length > 0 ? { summary: server.summary } : {}),
                 ...(server.disabledInProject === true ? { disabledInProject: true } : {}),
                 restrictable: server.restrictable === true,
+                ...(typeof server.enabledInSession === "boolean" ? { enabledInSession: server.enabledInSession } : {}),
                 calls: typeof server.calls === "number" ? server.calls : 0,
                 tools: tools
                   .map((item) => {

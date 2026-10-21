@@ -174,13 +174,23 @@ async function toggleServer(api: CapabilityPanelApi, server: ClientMcpServer): P
 }
 
 /** 开关的 tooltip：说明这条切换会作用到哪里。 */
+/** 会话开关的默认值：项目级「默认」开关 + 条目自身的启用状态。 */
+function defaultSessionEnabled(server: ClientMcpServer): boolean {
+  return server.enabled && server.disabledInProject !== true;
+}
+
 function switchTitle(server: ClientMcpServer): string {
-  if (server.shadowed) return "被项目级同名条目遮蔽（切换只影响配置文件，本项目内不生效）";
-  if (server.scope === "project") return server.enabled ? "点击禁用" : "点击启用";
-  // 全局条目：快捷列表只显示全局已启用的；开关只切"本项目生效/本项目禁用"。
-  return server.disabledInProject === true
-    ? "点击在本项目启用（移除项目级禁用声明，全局配置不变）"
-    : "点击在本项目禁用（全局配置不变，其他项目不受影响）";
+  if (server.shadowed) return "被项目级同名条目遮蔽（会话开关只影响本会话的可见性）";
+  const enabled = server.enabledInSession ?? defaultSessionEnabled(server);
+  if (server.scope === "project") {
+    return enabled
+      ? "点击在**当前对话**禁用（只影响本会话；项目默认开关在能力面板里）"
+      : "点击在**当前对话**启用（只影响本会话；项目默认开关在能力面板里）";
+  }
+  // 全局条目：会话开关 = 用 tools.restrict 屏蔽/恢复其全局工具，不卸载共享实例。
+  return enabled
+    ? "点击在**当前对话**禁用（共享实例不卸载，只屏蔽本会话的工具；项目默认开关在能力面板里）"
+    : "点击在**当前对话**启用（恢复本会话对该 MCP 工具的使用）";
 }
 
 /**
@@ -237,30 +247,46 @@ export function ComposerMcpOverlay({ api }: { api: CapabilityPanelApi }) {
 
   if (!state.open) return null;
 
-  /** 启用/禁用：项目条目写项目配置文件；全局条目切本项目启用/禁用（项目级覆写）。
-   *  落盘后宿主自动重挂受影响 session，再 bump 修订号让弹层与按钮一起重拉。 */
+  /**
+   * 当前对话的能力开关（**只影响本会话、不落盘**）：
+   *  - 项目条目 → 本会话按需挂载/卸载（`kind: "project"`）；
+   *  - 全局/外部实例 → `tools.restrict` 屏蔽或恢复其工具（`kind: "server"`，不卸载实例）。
+   * 项目级「默认」开关在能力面板里（写 `.agents/capability-overrides.json`）。
+   */
   const onToggle = async (server: ClientMcpServer) => {
     const id = rowId(server);
     setBusyRow(id);
     setError(undefined);
-    const result = await toggleServer(api, server);
-    if (!result.ok) setError(result.errors.join("; "));
+    const enabled = !(server.enabledInSession ?? defaultSessionEnabled(server));
+    try {
+      await api.mcp.setSessionEnabled({
+        target: server.scope === "project" ? server.key : server.serverName,
+        kind: server.scope === "project" ? "project" : "server",
+        enabled,
+      });
+    } catch (error) {
+      setError(String(error));
+    }
     setBusyRow(undefined);
     refreshComposerMcp();
   };
 
   /**
-   * 外部注入实例的本项目开关：写项目级禁用声明（`.agents/capability-overrides.json`）。
-   * 宿主不会卸载该实例（它由别的插件/profile 管理），而是对该项目的 session
-   * 调 `tools.restrict({ deny: ['mcp__<serverName>__*'] })` 屏蔽其工具。
-   * 仅当实例工具在全局注册表可见（`restrictable`）时可切；按会话注入的实例无法屏蔽。
+   * 外部注入实例的**当前对话**开关：调 `tools.restrict` 屏蔽/恢复其全局工具
+   * （实例由别的插件/profile 管理，不卸载）。仅当工具在全局注册表可见
+   * （`restrictable`）时可切；按会话注入的实例无法屏蔽。
+   * 项目级默认开关在能力面板里。
    */
   const onToggleExternal = async (server: ClientMcpRuntimeServer) => {
     const id = `external:${server.serverName}`;
     setBusyRow(id);
     setError(undefined);
-    const result = await api.overrides.toggle("mcp", server.serverName);
-    if (!result.ok) setError(result.errors.join("; "));
+    const enabled = !(server.enabledInSession ?? (server.restrictable ? server.disabledInProject !== true : true));
+    try {
+      await api.mcp.setSessionEnabled({ target: server.serverName, kind: "server", enabled });
+    } catch (error) {
+      setError(String(error));
+    }
     setBusyRow(undefined);
     refreshComposerMcp();
   };
@@ -275,8 +301,8 @@ export function ComposerMcpOverlay({ api }: { api: CapabilityPanelApi }) {
     const id = rowId(server);
     const mount = mounts[server.key];
     const busy = busyRow === id;
-    // 开关状态 = 在本项目生效（全局条目同时看全局启用与项目级禁用）。
-    const checked = server.scope === "project" ? server.enabled : server.enabled && server.disabledInProject !== true;
+    // 开关状态 = 在**当前对话**是否生效：显式会话开关优先，否则跟随项目默认。
+    const checked = server.enabledInSession ?? defaultSessionEnabled(server);
     return (
       <div key={id} className="skp-composer-row">
         <span
@@ -302,7 +328,7 @@ export function ComposerMcpOverlay({ api }: { api: CapabilityPanelApi }) {
   const renderExternalRow = (server: ClientMcpRuntimeServer) => {
     const id = `external:${server.serverName}`;
     const busy = busyRow === id;
-    const checked = server.restrictable ? server.disabledInProject !== true : true;
+    const checked = server.enabledInSession ?? (server.restrictable ? server.disabledInProject !== true : true);
     return (
       <div key={id} className="skp-composer-row">
         <span
@@ -319,9 +345,9 @@ export function ComposerMcpOverlay({ api }: { api: CapabilityPanelApi }) {
           title={
             server.restrictable
               ? checked
-                ? "点击在本项目禁用（不卸载实例，只屏蔽其工具）"
-                : "点击在本项目启用（移除项目级禁用声明）"
-              : "该实例按会话注入，无法按项目禁用"
+                ? "点击在**当前对话**禁用（共享实例不卸载，只屏蔽本会话的工具；项目默认开关在能力面板里）"
+                : "点击在**当前对话**启用（恢复本会话对该 MCP 工具的使用）"
+              : "该实例按会话注入，无法在当前对话禁用"
           }
         >
           <input type="checkbox" checked={checked} disabled={busy || !server.restrictable} onChange={() => void onToggleExternal(server)} />

@@ -86,6 +86,23 @@ export interface McpLoader {
     status(cwd?: string): McpStatusView[];
     /** 重新读配置并重挂匹配的 session（省略 projectRoot 时全局层 + 全部 session）。 */
     reload(projectRoot?: string): Promise<void>;
+    /**
+     * 设置某个 session 的手动开关（**内存内、不落盘**）。
+     *
+     * - `kind: "project"` + `target: configKey`：项目 `.mcp.json` 条目 → 按需挂载/卸载；
+     * - `kind: "server"` + `target: serverName`：全局配置条目或外部注入实例 → 用
+     *   `tools.restrict` 屏蔽/恢复其全局工具（共享实例不卸载）。
+     * - `enabled === undefined`：清掉显式覆盖、重新跟随项目默认（面板「默认」开关）。
+     */
+    setSessionEnabled(input: {
+        sessionId: string;
+        cwd?: string;
+        target: string;
+        kind: "project" | "server";
+        enabled: boolean | undefined;
+    }): Promise<void>;
+    /** 该 session 的显式开关快照（键带 `project:` / `server:` 前缀）。 */
+    sessionToggleState(sessionId?: string): Record<string, boolean>;
 }
 /** 创建挂载器：注册 agent 生命周期监听 + 全局层首轮挂载 + 存量 agent 补挂。 */
 export declare function createMcpLoader(ctx: any, deps?: McpLoaderDeps): McpLoader;

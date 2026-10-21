@@ -214,11 +214,16 @@ export interface ClientMcpServer {
      */
     reference?: boolean;
     /**
-     * 为 true 表示这个**全局** server 被当前项目在项目级声明为禁用：
-     * 本项目的 session 不会挂载它。面板已改为「项目 / 全局」两区 + 导入制，
-     * 不再展示该标记；输入框快捷弹层（composer-mcp）仍用它过滤与切换。
+     * 为 true 表示这个 server 被当前项目在项目级声明为**默认关闭**
+     * （`.agents/capability-overrides.json` 的 mcp 列表）。面板「默认」列的开关
+     * = `!disabledInProject`；新建对话按它来。
      */
     disabledInProject?: boolean;
+    /**
+     * 本会话的生效开关（composer 的 api 带了 sessionId 时由宿主投影）：显式会话
+     * 开关优先，否则跟随项目默认。内存内、不落盘。
+     */
+    enabledInSession?: boolean;
 }
 /** 合并列表结果：servers + 非致命的读取错误。 */
 export interface ClientMcpList {
@@ -285,6 +290,8 @@ export interface ClientMcpRuntimeServer {
     disabledInProject?: boolean;
     /** 能否按项目屏蔽（工具在全局注册表可见才可；agent 作用域注入的不可）。 */
     restrictable: boolean;
+    /** 本会话的生效开关（传 sessionId 时才有；restrictable 才有意义）。 */
+    enabledInSession?: boolean;
     /** 从工具注册表反推到的工具（含参数 JSON Schema）。 */
     tools: Array<{
         name: string;
@@ -388,6 +395,16 @@ export interface McpApi {
     runtime(input?: {
         cwd?: string;
     }): Promise<ClientMcpRuntimeView>;
+    /**
+     * 设置**当前 session** 的能力开关（内存内、不落盘）：项目条目按需挂载/卸载，
+     * 全局与外部注入实例用 `tools.restrict` 屏蔽/恢复其工具（不卸载实例）。
+     * `enabled: undefined` = 清掉显式覆盖、重新跟随项目默认。
+     */
+    setSessionEnabled(input: {
+        target: string;
+        kind: "project" | "server";
+        enabled: boolean | undefined;
+    }): Promise<void>;
 }
 /** 面板视角下的一条快捷消息（跨作用域合并后的视图）。 */
 export interface ClientQuickMessage {

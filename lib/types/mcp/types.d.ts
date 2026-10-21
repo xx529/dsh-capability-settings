@@ -88,11 +88,17 @@ export interface McpServerView {
      */
     importedFromGlobal?: boolean;
     /**
-     * 为 true 表示这个**全局** server 被当前项目（list 的 cwd）在项目级声明为
-     * 禁用：本项目的 session 不会挂载它（loader 跳过），面板保留展示（带
-     * "本项目禁用"标记）。只对全局条目设置；项目条目恒缺省。
+     * 为 true 表示这个 server 被当前项目（list 的 cwd）在项目级声明为**默认关闭**
+     * （`.agents/capability-overrides.json` 的 mcp 列表）：新会话默认不启用它，
+     * 但单个会话可以手动打开。面板上「默认」列的开关 = `!disabledInProject`。
+     * 全局条目、项目条目、引用条目都适用。
      */
     disabledInProject?: boolean;
+    /**
+     * 传了 sessionId 时给出的**本会话生效开关**：显式会话开关优先，否则跟随项目
+     * 默认。composer 里的开关显示/更新这个值（内存内，不落盘）。
+     */
+    enabledInSession?: boolean;
 }
 /** 合并列表操作的结果；单个文件解析失败不致命，收集到 errors 里。 */
 export interface McpListResult {
@@ -217,6 +223,8 @@ export interface McpRuntimeServerView {
         description?: string;
         parameters?: Record<string, unknown>;
     }>;
+    /** 本会话的生效开关（传 sessionId 时才有；`restrictable` 才有意义）。 */
+    enabledInSession?: boolean;
     /** 本次运行被调用过的次数（来自内存使用记录；0 = 没调用过或不可见）。 */
     calls: number;
 }

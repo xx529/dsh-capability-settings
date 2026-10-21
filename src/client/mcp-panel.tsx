@@ -60,6 +60,8 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
   const [selected, setSelected] = useState<string | undefined>(undefined);
   /** 选中的「外部注入」实例（serverName）；与 selected 互斥。 */
   const [selectedExternalName, setSelectedExternalName] = useState<string | undefined>(undefined);
+  /** 默认开关（项目级 overrides）最近一次操作失败的错误。 */
+  const [defaultError, setDefaultError] = useState<string | undefined>(undefined);
   // 编辑态：undefined = 空闲；非空 = 正在弹窗里编辑这条 server（McpEditDialog）。
   const [editServer, setEditServer] = useState<ClientMcpServer | undefined>(undefined);
   // 新增弹窗开关（表单 / JSON 两种模式见 McpAddDialog）。
@@ -93,6 +95,18 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
     },
     [mcpApi, workspace],
   );
+  /**
+   * 面板「默认」开关：写项目级 `.agents/capability-overrides.json` 的 mcp 列表。
+   *
+   * 语义 = **新建对话的默认开关**：会话没有手动覆盖时跟随它；已有会话可以在输入框
+   * 的 MCP 弹层里按当前对话手动覆盖（内存内）。切换后静默重拉列表刷新标记。
+   */
+  const toggleDefault = async (key: string) => {
+    setDefaultError(undefined);
+    const result = await api.overrides.toggle("mcp", key);
+    if (!result.ok) setDefaultError(result.errors.join("; "));
+    reload({ silent: true });
+  };
   const servers = data?.servers ?? [];
   const listErrors = data?.listErrors ?? [];
   const mounts = data?.mounts ?? {};
@@ -244,6 +258,7 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
       {listErrors.length > 0 && <div className="skp-error">{listErrors.join("\n")}</div>}
       {opError && <div className="skp-error">{opError}</div>}
       {error && <div className="skp-error">{error}</div>}
+      {defaultError !== undefined && <div className="skp-error">{defaultError}</div>}
       {loading && <div className="skp-status">加载中…</div>}
 
       {!loading && (
@@ -253,7 +268,7 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
               const id = rowId(server);
               const mount = mounts[server.key];
               return (
-                <li key={id}>
+                <li key={id} className="skp-row-wrap">
                   <button
                     className={selected === id ? "skp-row skp-row-active" : "skp-row"}
                     onClick={() => {
@@ -293,6 +308,28 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
                     </span>
                     <span className="skp-row-desc">{server.summary}</span>
                   </button>
+                  {/* 默认开关：决定"新建对话"是否启用；可在对话框里按当前对话覆盖。 */}
+                  <label
+                    className="skp-row-default"
+                    title={
+                      server.enabled === false
+                        ? "该条目在配置里被禁用（到编辑表单里启用）"
+                        : server.disabledInProject === true
+                          ? "默认关闭：新建对话不启用；点此改为默认开启"
+                          : "默认开启：新建对话启用；点此改为默认关闭"
+                    }
+                  >
+                    <span className="skp-row-default-label">默认</span>
+                    <span className="skp-switch">
+                      <input
+                        type="checkbox"
+                        checked={server.enabled !== false && server.disabledInProject !== true}
+                        disabled={server.enabled === false}
+                        onChange={() => void toggleDefault(server.key)}
+                      />
+                      <span className="skp-switch-track" />
+                    </span>
+                  </label>
                 </li>
               );
             })}
@@ -300,7 +337,7 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
             {visibleExternal.map((server) => {
               const id = `external:${server.serverName}`;
               return (
-                <li key={id}>
+                <li key={id} className="skp-row-wrap">
                   <button
                     className={selectedExternalName === server.serverName ? "skp-row skp-row-active" : "skp-row"}
                     onClick={() => {
@@ -324,6 +361,28 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
                     </span>
                     <span className="skp-row-desc">{server.summary ?? "运行时注入，不由能力面板管理（只读）"}</span>
                   </button>
+                  {/* 默认开关：外部实例同样可以在"新建对话"默认关闭（按项目声明 + restrict）。 */}
+                  <label
+                    className="skp-row-default"
+                    title={
+                      server.restrictable
+                        ? server.disabledInProject === true
+                          ? "默认关闭：新建对话不启用；点此改为默认开启"
+                          : "默认开启：新建对话启用；点此改为默认关闭"
+                        : "该实例按会话注入，无法按项目默认关闭"
+                    }
+                  >
+                    <span className="skp-row-default-label">默认</span>
+                    <span className="skp-switch">
+                      <input
+                        type="checkbox"
+                        checked={server.restrictable ? server.disabledInProject !== true : true}
+                        disabled={!server.restrictable}
+                        onChange={() => void toggleDefault(server.serverName)}
+                      />
+                      <span className="skp-switch-track" />
+                    </span>
+                  </label>
                 </li>
               );
             })}

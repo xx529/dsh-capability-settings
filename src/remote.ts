@@ -62,7 +62,7 @@ export interface PanelRpcService {
     export(input: unknown): Promise<unknown>;
   };
   mcp: {
-    list(cwd?: string): Promise<unknown>;
+    list(cwd?: string, sessionId?: string): Promise<unknown>;
     upsert(input: unknown): Promise<unknown>;
     remove(input: unknown): Promise<unknown>;
     setEnabled(input: unknown): Promise<unknown>;
@@ -83,6 +83,12 @@ export interface PanelRpcService {
      * profile 直接挂载的 mcp-client。按工具注册表 + 内存使用记录反推。
      */
     runtime(input: unknown): Promise<unknown>;
+    /**
+     * 设置某个 session 的能力开关（**内存内、不落盘**）：项目条目按需挂载/卸载，
+     * 全局/外部实例用 `tools.restrict` 屏蔽/恢复工具。`enabled: undefined` 清掉
+     * 显式覆盖、重新跟随项目默认。
+     */
+    setSessionEnabled(input: unknown): Promise<unknown>;
   };
   quickMessages: {
     list(cwd?: string): Promise<unknown>;
@@ -107,6 +113,8 @@ export interface PanelRpcService {
 export async function handleEndpoint(service: PanelRpcService, endpoint: string, payload: unknown, _signal?: AbortSignal): Promise<RpcResult> {
   const p = (payload ?? {}) as Record<string, unknown>;
   const cwd = typeof p.cwd === "string" ? p.cwd : undefined;
+  // 会话级能力开关需要 sessionId（面板不传 = 只看项目默认；composer 的 api 会带）。
+  const sessionId = typeof p.sessionId === "string" ? p.sessionId : undefined;
   try {
     switch (endpoint) {
       case "skills.list":
@@ -134,7 +142,7 @@ export async function handleEndpoint(service: PanelRpcService, endpoint: string,
       case "skills.export":
         return { ok: true, value: await service.skills.export(p) };
       case "mcp.list":
-        return { ok: true, value: await service.mcp.list(cwd) };
+        return { ok: true, value: await service.mcp.list(cwd, sessionId) };
       case "mcp.upsert":
         return { ok: true, value: await service.mcp.upsert(p) };
       case "mcp.remove":
@@ -146,7 +154,9 @@ export async function handleEndpoint(service: PanelRpcService, endpoint: string,
       case "mcp.status":
         return { ok: true, value: service.mcp.status(cwd) };
       case "mcp.runtime":
-        return { ok: true, value: await service.mcp.runtime((p ?? {}) as { cwd?: string }) };
+        return { ok: true, value: await service.mcp.runtime({ cwd, sessionId }) };
+      case "mcp.setSessionEnabled":
+        return { ok: true, value: await service.mcp.setSessionEnabled(p) };
       case "mcp.usage":
         // 只读查询：始终返回 { ok:true, value:{ entries, limit } }。
         return { ok: true, value: service.mcp.usage(p) };

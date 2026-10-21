@@ -58,7 +58,7 @@ export interface PanelRpcService {
         export(input: unknown): Promise<unknown>;
     };
     mcp: {
-        list(cwd?: string): Promise<unknown>;
+        list(cwd?: string, sessionId?: string): Promise<unknown>;
         upsert(input: unknown): Promise<unknown>;
         remove(input: unknown): Promise<unknown>;
         setEnabled(input: unknown): Promise<unknown>;
@@ -79,6 +79,12 @@ export interface PanelRpcService {
          * profile 直接挂载的 mcp-client。按工具注册表 + 内存使用记录反推。
          */
         runtime(input: unknown): Promise<unknown>;
+        /**
+         * 设置某个 session 的能力开关（**内存内、不落盘**）：项目条目按需挂载/卸载，
+         * 全局/外部实例用 `tools.restrict` 屏蔽/恢复工具。`enabled: undefined` 清掉
+         * 显式覆盖、重新跟随项目默认。
+         */
+        setSessionEnabled(input: unknown): Promise<unknown>;
     };
     quickMessages: {
         list(cwd?: string): Promise<unknown>;

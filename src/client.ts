@@ -163,7 +163,9 @@ export function apply(ctx: any) {
       selectProject: () => {
         /* composer 不钉选项目：项目作用域恒跟随所在 session */
       },
-      sessionTitle: (sessionId) => sessionTitleOf(ctx, sessionId),
+      sessionTitle: (id) => sessionTitleOf(ctx, id),
+      // 会话级能力开关（composer 的 MCP 弹层）需要知道改哪个会话。
+      sessionId,
     });
     sessionApiCache.set(sessionId, created);
     return created;

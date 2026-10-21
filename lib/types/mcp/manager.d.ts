@@ -74,7 +74,7 @@ export interface McpTestInput {
 }
 /** 创建管理服务；loader 由 index.ts 注入（自动挂载与状态共用同一实例）。 */
 export declare function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overrides?: OverridesManager, imports?: ImportsManager): {
-    list: (cwd?: string) => Promise<McpListResult>;
+    list: (cwd?: string, sessionId?: string) => Promise<McpListResult>;
     upsert: (input: McpUpsertInput) => Promise<McpOpResult>;
     remove: (input: McpWriteInput) => Promise<McpOpResult>;
     setEnabled: (input: McpWriteInput & {
@@ -95,7 +95,15 @@ export declare function createMcpManager(deps: McpManagerDeps, loader: McpLoader
     }) => McpUsageView;
     runtime: (input?: {
         cwd?: string;
+        sessionId?: string;
     }) => Promise<McpRuntimeView>;
+    setSessionEnabled: (input: {
+        sessionId: string;
+        cwd?: string;
+        target: string;
+        kind: "project" | "server";
+        enabled: boolean | undefined;
+    }) => Promise<McpOpResult>;
 };
 /** 管理服务的完整类型（构造函数的返回值）。 */
 export type McpManager = ReturnType<typeof createMcpManager>;
