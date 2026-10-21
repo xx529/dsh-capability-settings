@@ -294,6 +294,11 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
                       <span className={server.scope === "global" || server.reference === true ? "skp-tag skp-tag-flat" : "skp-tag skp-tag-directory"}>
                         {server.reference === true ? "引用" : server.importedFromGlobal === true ? "导入" : server.scope === "global" ? "全局" : "项目"}
                       </span>
+                      {server.enabled !== false && server.disabledInProject === true && (
+                        <span className="skp-tag skp-tag-warn" title="默认关闭：新建对话不启用；可在输入框的 MCP 弹层里按当前对话手动开启">
+                          默认关闭
+                        </span>
+                      )}
                     </span>
                     <span className="skp-row-meta">
                       <span className="skp-tag skp-tag-flat">{server.transport}</span>
@@ -352,7 +357,11 @@ export function McpView({ api, workspace }: { api: CapabilityPanelApi; workspace
                       {server.serverName}
                       <span className="skp-tag skp-tag-readonly">外部</span>
                       {server.source !== undefined && <span className="skp-tag skp-tag-flat">{server.source}</span>}
-                      {server.disabledInProject === true && <span className="skp-tag skp-tag-warn">本项目已禁用</span>}
+                      {server.disabledInProject === true && (
+                        <span className="skp-tag skp-tag-warn" title="默认关闭：新建对话不启用；可在输入框的 MCP 弹层里按当前对话手动开启">
+                          默认关闭
+                        </span>
+                      )}
                     </span>
                     <span className="skp-row-meta">
                       {server.transport !== undefined && <span className="skp-tag skp-tag-flat">{server.transport}</span>}
@@ -551,12 +560,12 @@ function McpExternalDetail({ api, server }: { api: McpApi; server: ClientMcpRunt
             </dd>
           </>
         )}
-        <dt>本项目开关</dt>
+        <dt>默认 / 当前对话</dt>
         <dd>
           {server.restrictable
-            ? "可在对话框的 MCP 弹层里按项目启用/禁用（走项目级声明 + tools.restrict 屏蔽，不卸载实例）。"
-            : "该实例按会话作用域注入，无法按项目禁用。"}
-          {server.disabledInProject === true ? "当前：本项目已禁用。" : ""}
+            ? "面板列表里的「默认」开关决定新建对话是否启用；输入框的 MCP 弹层里可按当前对话单独开启/关闭（用 tools.restrict 屏蔽或恢复其工具，不卸载共享实例）。"
+            : "该实例按会话作用域注入，无法在当前对话里屏蔽。"}
+          {server.disabledInProject === true ? "当前默认：关闭（新建对话不启用）。" : "当前默认：开启。"}
         </dd>
         <dt>本次运行调用</dt>
         <dd>{server.calls > 0 ? `${server.calls} 次` : "还没有调用记录"}</dd>

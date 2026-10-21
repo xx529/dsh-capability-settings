@@ -59,7 +59,7 @@ export function setComposerMcpAnchor(rect: { right: number; top: number }): void
   store.setAnchor(rect);
 }
 
-/** 有"已启用且未被遮蔽、本项目未禁用"的 server 时按钮实心填充。 */
+/** 有"已启用且未被遮蔽、当前对话未关闭"的 server 时按钮实心填充。 */
 function hasEnabledServer(list: ClientMcpList | undefined): boolean {
   return (list?.servers ?? []).some((s) => s.enabled && !s.shadowed && s.disabledInProject !== true);
 }
@@ -203,7 +203,7 @@ export function ComposerMcpOverlay({ api }: { api: CapabilityPanelApi }) {
   const state = useComposerStore(store);
   const workspace = useWorkspaceLabel(api);
   const [servers, setServers] = useState<ClientMcpServer[]>([]);
-  /** 运行时注入（其它插件/profile 挂的 mcp-client）：只读展示 + 本项目开关。 */
+  /** 运行时注入（其它插件/profile 挂的 mcp-client）：只读展示 + 当前对话开关。 */
   const [externals, setExternals] = useState<ClientMcpRuntimeServer[]>([]);
   const [mounts, setMounts] = useState<Record<string, MountInfo>>({});
   const [loading, setLoading] = useState(false);
@@ -309,7 +309,7 @@ export function ComposerMcpOverlay({ api }: { api: CapabilityPanelApi }) {
           className={`skp-composer-dot skp-composer-dot-${mount?.state ?? "none"}`}
           title={
             server.disabledInProject === true
-              ? "本项目禁用（本项目的 session 不挂载）"
+              ? "默认关闭（新建对话不启用；可在此按当前对话打开）"
               : mount === undefined
                 ? "未挂载到当前会话"
                 : mount.error ?? MOUNT_LABEL[mount.state]
@@ -333,7 +333,11 @@ export function ComposerMcpOverlay({ api }: { api: CapabilityPanelApi }) {
       <div key={id} className="skp-composer-row">
         <span
           className="skp-composer-dot skp-composer-dot-mounted"
-          title={server.restrictable ? "运行时注入，全局工具可见（可按项目屏蔽）" : "运行时注入（按会话作用域，无法按项目屏蔽）"}
+          title={
+            server.restrictable
+              ? "运行时注入，全局工具可见（可在此按当前对话开关）"
+              : "运行时注入（按会话作用域，无法在当前对话屏蔽）"
+          }
         />
         <span className="skp-composer-name">
           {server.serverName}

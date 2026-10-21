@@ -286,7 +286,7 @@ export interface ClientMcpRuntimeServer {
     transport?: "stdio" | "http";
     /** 与配置条目同款的命令/URL 摘要。 */
     summary?: string;
-    /** 本项目已禁用（走项目级 overrides → tools.restrict 屏蔽其工具）。 */
+    /** 项目级「默认关闭」（overrides 声明）：新建对话默认不启用，可按当前对话覆盖。 */
     disabledInProject?: boolean;
     /** 能否按项目屏蔽（工具在全局注册表可见才可；agent 作用域注入的不可）。 */
     restrictable: boolean;
