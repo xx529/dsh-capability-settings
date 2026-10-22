@@ -135,7 +135,9 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
   （page `1:2`）保留 v1–v4 历史，不要删。
 - **工具前提**：Figma 桌面打开该文件并运行伴生插件「DSH to Figma · Local」，保持窗口常开。
   先 `figma_status`；断连或多文档时 `figma_select_document <connectionId>` 显式重新绑定，
-  然后才用 `use_figma` / `get_screenshot` / `import_scene` / `download_assets`。连不上时不要拿旧截图冒充新设计。
+  然后才用 `use_figma` / `get_screenshot` / `import_scene` / `download_assets`。画布工具报
+  `unknown tool` 时按「关闭并重开 Figma 伴生插件 → `figma_status`/`figma_select_document`
+  重新绑定 → 仍不行则重启 DSH 会话」排查；连不上时不要拿旧截图冒充新设计。
 - **可重导入的设计源在仓库**：`docs/figma/scenes/*.scene.json`（`import_scene` 契约，可直接
   `import_scene({ nodes: scene.nodes })` 重建可编辑图层）+ `docs/figma/preview/*.png`（视觉对照）。
   重新导出用 `docs/figma/tools/export-scene.js`（`use_figma` 脚本，按 `TARGET_NODE_ID` 与

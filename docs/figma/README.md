@@ -59,6 +59,14 @@ docs/figma/
    ```
    把生成文件复制到 `docs/figma/preview/`。
 
+## 4.1 手动导出（不依赖智能体）
+
+- Figma 里选中 `4:7` / `4:223` → 右侧 Export → 选 `PNG 1x` / `SVG`，即可得到可拖入 Figma
+  （SVG 为可编辑矢量层，文字可能被轮廓化）或用于评审的图片；`docs/figma/preview/` 里已有本次导出的 PNG。
+- 画布工具偶发 `unknown tool`：先 `figma_status` 确认文档已连接；若工具仍未注册，关闭并重开
+  Figma 里的「DSH to Figma · Local」插件，再 `figma_select_document <connectionId>` 后重试；
+  仍失败时重启 DSH 会话再操作（不要用旧截图冒充新设计）。
+
 ## 5. 已知限制（导出/导入）
 
 - scene 契约只支持 `FRAME / TEXT / RECTANGLE / ELLIPSE / COMPONENT / SECTION / STICKY / SHAPE_WITH_TEXT`；
@@ -66,6 +74,9 @@ docs/figma/
 - 只保留 SOLID 填充/描边、圆角、像素行高与自动布局属性；渐变、阴影、模糊、混合模式、图片填充不导出。
 - 文字字体为 `PingFang SC`（Regular/Medium/Semibold），导入前 Figma 需已加载该字体（本机 Figma 已安装）。
 - `import_scene` 不是网页捕获：它只重建显式 layer，不还原交互/运行时逻辑。
+- 已用 2 节点小场景实际调用 `import_scene` 验证 `x/y/width/height/TEXT` 契约可用；**整份
+  307 节点**的导入未在本会话逐字节验证（工具参数量大），首次导入后请用 `preview/*.png` 对照，
+  必要时分两次导入或先导入一个画框。
 
 ## 6. 设计口径（v5 终稿）
 
