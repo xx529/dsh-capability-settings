@@ -7,195 +7,36 @@
 
 ### 新增
 
-- **MCP 服务器配置「测试连接」**：新增/编辑 MCP server 时可以不落盘先试连——
-  表单里点「测试连接」即按当前草稿真连一次（stdio 或 streamable-http），
-  成功后列出该 server 暴露的**工具名 + 参数列表**（参数名 / 类型 / 必填或
-  可选 / 说明）与耗时，失败给出中文文案 + 原始错误（stdio 还会附服务器
-  stderr 尾巴）。实现见 `src/mcp/probe.ts`：一次性 `Client` + transport，
-  `finally` 里 `client.close()` 后兜底 `transport.close()`，超时用
-  `AbortController`（默认 15s，夹在 0.5–60s），**不注册任何工具、不碰宿主
-  tools 注册表**，探测结束无残留子进程。RPC endpoint `mcp.test`，静态校验
-  （`validateEntry`）失败时直接返回、不发连接。新增依赖
-  `@modelcontextprotocol/client@2.0.0`（与宿主 `dsh-mcp-client` 同版本）。
-- **MCP「默认开关」+「当前对话手动开关」**（用户需求：现在所有 MCP 都是默认开启，
-  希望面板能控制每个 MCP 默认开/关、新建对话按默认来，同时能手动调整当前对话）。
-  两级模型：
-  - **默认开关（能力面板）**：MCP 列表每行右侧新增「默认」开关（配置条目与外部注入实例
-    都有）。写入项目级 `.agents/capability-overrides.json` 的 mcp 列表 → **新建对话按它
-    来**，已有对话只要没有手动覆盖也跟随它。外部实例同样支持（共享实例不卸载，靠
-    `tools.restrict` 屏蔽；按会话作用域注入的实例开关置灰）。
-  - **当前对话手动开关（输入框 MCP 弹层）**：开关改为**只影响当前会话**（内存内、
-    不落盘）：项目条目按需挂载/卸载，全局与外部实例用 `tools.restrict` 屏蔽/恢复其
-    工具（不卸载共享实例、不影响其它对话）。显式会话开关优先于默认；清掉显式值即
-    回到跟随默认。按会话注入的外部实例无法屏蔽，开关置灰并说明。
-- **MCP 管理支持「外部注入的 MCP」**（其它插件/profile 在运行时挂载的
-  `@deepseek-ai/dsh-mcp-client`，不在本插件配置文件里）。以前完全看不到，只有与自己的
-  条目撞名时显示 `conflict`。现在与配置条目**同列表展示、只读**：
-  - **发现**：① cordis 插件注册表（`ctx.registry` 的 `Plugin.Runtime.fibers`）拿动态
-    fiber 实例与**来源插件**——`Fiber.name` 的语义是「inherited from the nearest named
-    ancestor」，所以 `dsh-to-figma` 挂的 `figma` 会显示来源 `dsh-to-figma`；② cordis
-    loader 条目（profile `cordis.patch.yml` 里 `insert:` 的 mcp-client，来源=条目 id）；
-    ③ 全局工具注册表按 `mcp__<serverName>__*` 反推**工具与参数 Schema**；④ 内存使用记录
-    补上只在 agent 作用域可见的实例与调用次数。本插件自己管理的 serverName 一律排除。
-  - **展示**：外部实例以普通行出现在「全局」区（名称旁 `外部` + 来源标记），详情卡只读
-    展示来源插件 / 注入方式（loader 条目 or 动态 fiber）/ 命名空间 / 传输与命令摘要 /
-    **每个工具及其参数**（名字、类型、必填、说明）/ 本次运行调用次数 / 使用记录；
-    不提供编辑、删除、卸载。
-  - **每个 MCP 名称旁都有来源标记**：`全局` / `项目` / `引用` / `导入` / `外部 · <来源>`。
-  - **输入框的 MCP 弹层**同样列出外部实例（`外部` + 来源），并支持**默认开关**（面板每行
-    「默认」，新建对话是否启用）与**当前对话开关**（弹层里，内存内）：宿主不会卸载实例，
-    只对该 session 调 `tools.restrict({ deny: ['mcp__<serverName>__*'] })` 屏蔽其工具；
-    按会话作用域注入的实例无法屏蔽，开关置灰并给出说明。
-- **MCP 详情卡新增「使用记录」（只读、不落盘）**：选中某个 server 后点「使用记录」，
-  就地列出**最近的调用**——什么时候、哪个 session（显示侧栏的会话标题）、调用了
-  这个 server 的哪个 tool；只显示最近 50 条（宿主内存里最多留 200 条），打开期间每
-  2s 静默刷新。记录方式是在宿主注册一个**全局 `tools.guard` 旁路**：只观察
-  `mcp__<serverName>__<tool>` 形式的调用、**永远返回 undefined 放行**、任何记录异常
-  都吞掉，因此不影响工具执行、不拦截任何调用、不写任何文件；插件重载/应用重启即
-  清空——这是刻意的（需求就是"不需要持久化"）。会话标题由**客户端**用自己的会话
-  快照解析（宿主 `SessionHeader` 只有 id/cwd、没有标题），拿不到时退化为显示会话
-  id 尾部。注意记录的是**调用尝试**（执行前记录），不代表该次调用成功。
-- **MCP 详情卡新增「查看工具与参数」**：不必进编辑弹窗，选中某个 server 后
-  直接点详情卡上的按钮，即复用同一个 `mcp.test` 探测通道（零副作用）就地展开
-  该 server 的**描述 + 工具 + 参数**，并带「重新测试」与「收起工具列表」；
-  切换选中的 server 会自动丢弃上一次的结果，不会把 A 的清单显示在 B 上。
-- **面板入口上移到侧栏上方、面板改为占据主区域**：入口从
-  `sidebar.footer.action`（Settings 旁）改注册到 `sidebar.panellist`
-  （ui-sidebar 的「全局面板」图标排，位于品牌/新建会话行之下、工作区列表
-  之上），同时把同名 id 注册进 `main` keyed slot——点击入口由布局把主区域
-  切到面板，不再是浮层。两个注册成对（ui-sidebar 明确：选择没有对应 `main`
-  条目的 id 会抛错）。浮层外壳（backdrop / popover / 关闭按钮）与
-  `CapabilitiesFooterAction` 一并删除，`CapabilityPanel` 现在只渲染页面本体。
-
-### 修复
-
-- **能力面板钉选工作区后，其它工作区输入框的 MCP/Skills/快捷消息弹层串味**：
-  面板头部「项目作用域」下拉框的钉选值（`selection.cwd`）此前被 composer
-  三个按钮/弹层的 API 共用，于是在 B 工作区的对话框里会列出 A 工作区的
-  项目级 MCP server（及技能/快捷消息）。现在 composer 使用**独立的
-  `composerApi`**（`currentWorkspaceCwd` 只取当前会话工作区，`selectedProject`
-  恒为 undefined、`selectProject` 空操作），面板继续使用带钉选的那份；
-  两份共用同一份工作区订阅回调集合，所以各自都能随会话切换刷新。
-- **同一 bug 的更深一层成因（真机复现后修复）**：`currentWorkspaceCwd()` 依赖
-  的两个字段在 dsh `0.2.0-rc.2` 外壳里**都不存在**——`sessions.list` 快照形状是
-  `{ ids, byId, phase, projectionsBySession }`（**没有 `current`**），
-  `workspaces.list` 快照是 `{ items, archivedSessionIds, pinnedSessionIds,
-  state, phase, error }`（**没有 `recentWorkspaceId`**）。于是解析退化为
-  `items[0]`（工作区列表第一项）：在 ws-b 的会话里，弹层列出的却是 ws-a 的
-  项目级 server，且切换工作区不会变。现在 composer 槽位直接使用 standardProps
-  提供的 **`sessionId`**（`conversation.input.left` / `conversation.input.overlay`
-  均为 session 作用域，契约里就有 `sessionId: SessionId`）精确解析所在工作区，
-  并按 sessionId 缓存 api 实例；面板侧（root 作用域拿不到 sessionId）在该外壳上
-  退化为「**唯一**被主视图保留（`retainedBy.mainView > 0`）的会话」，只在唯一时
-  采用以免多会话歧义。该成因由隔离实例 + 真实 `dsh 0.2.0-rc.2` 外壳的 GUI
-  实测发现并复验（见 `notes/real-gui-evidence/`）。
-- **连带修复（防回归）**：① `useWorkspaceLabel` 在传入的 api 实例变化时只重新订阅、
-  没有立刻用新实例重算标签，下游 `ComposerMcpButton` 又会用「标签未变」短路掉取数——
-  外壳若复用同一个槽组件实例、只替换 `sessionId` props，切会话后弹层就不会为新会话
-  取数；现在 effect 里先 `setWorkspace(api.workspaceLabel())` 再订阅。
-  ② 工作区变更通知键（`workspaceItemsKey`）此前只含 `id:path:title`，而新建会话时
-  宿主先改的是 `items[].sessionIds`，这次变化不触发通知，新建会话的弹层会停在旧值；
-  现在把每个 Workspace 的 `sessionIds` 纳入通知键。
-- **连带修复**：工作区变化的通知判定此前只比较「钉选优先」的 cwd，面板钉选
-  到 A 时把当前会话从 B 切到 C 不会触发通知，composer 会继续显示 B 的项目级
-  条目。现在同时跟踪「面板侧」与「会话侧」两个 cwd 键。
-- **下拉框在条目多时会顶出屏幕**（用户反馈：工作区 20+ 时点面板头部「项目作用域」，
-  列表显示不全、超出画面范围）。根因在自绘 `SkpSelect`（`src/client/select.tsx`）：
-  弹出层虽是 `position: fixed`，却 `left: rect.left` 不钳制右边界、宽度又由**内容**
-  决定（长工作区名会把它撑宽），只要触发按钮不在窗口最左侧就越过右边界；`top` 也
-  只看下方、不会向上弹，而 `maxHeight` 的 160 下限会在下方空间不足时把列表顶出屏幕
-  底部。现在打开时按视口算下方/上方空间取宽裕一侧（下方 < 舒适高度 240 且上方更宽
-  时**向上弹**，用 `bottom` 贴住按钮），高度夹在 `[120, 480]`；水平按
-  `min(520, vw−16)` 钳制并用 `useLayoutEffect` 按弹层实测宽度二次修正 `left`；
-  CSS 兜底 `.skp-dd-pop{max-width:calc(100vw - 16px)}`、`.skp-dd-opt-label{min-width:0}`
-  （让省略号真正生效）。实测（1400×900、触发按钮贴右缘、23 项）：修复前右边缘
-  1689（超出 +297px）、下边缘 898（超出 +6px）；修复后 1392 / 541，完全在视口内。
-- **下拉框的「列表内部滚动」会把它关掉**（同上场景下等于滚不到底）：关闭监听是
-  `window.addEventListener("scroll", close, true)`，连弹出层自身滚动也命中。现在
-  内部滚动放行，只有面板/页面等其它容器滚动才关闭。
-- **MCP「测试连接」的报告排版凌乱**（用户反馈：服务器描述与工具参数挤成一团、
-  列表被截断）。此前借技能列表的 `skp-import-*` 样式兼职渲染：`max-height:200px`
-  截断列表、参数挤在一行 `flex-wrap` 里、服务器 `instructions` 整段铺开。现在报告
-  顶部只留「连接正常」徽标 + 工具数 / 参数总数 / 耗时；`instructions` 单独成块并
-  **默认折叠 3 行**（带展开/收起）；每个工具一张卡片（等宽工具名 + 参数个数 +
-  描述折叠 3 行、完整文本在 `title`）；参数收成「名字 + 类型 + 必填/可选」一行、
-  **说明另起一行**，`overflow-wrap:anywhere` 让长 URL / 长英文安全换行；工具列表
-  自身滚动 `max-height:min(46vh,420px)`——既不截断内容，也不再把「添加/取消」等
-  操作按钮顶出屏幕。
-- **删除 MCP 后列表不立即消失（要切到别的页面再回来才看到）**（用户反馈）。根因不在
-  面板：`manager` 的写路径 `await reloadFor(...)` → `loader.reload()` →
-  `remountGlobal()` 会 `await fiber` **逐条等每个全局 server 起进程 + MCP 握手**。
-  本机 5 条 stdio server 走 `npx`/`bunx` 冷启动，于是 `mcp.remove` / `mcp.upsert` /
-  `mcp.setEnabled` 这几个 RPC 会卡住数秒到数十秒；面板的刷新跟在 RPC 之后，所以
-  表现为"删掉了但列表不动"（文件其实早就写好，切页触发的重新加载才显示出来）。
-  现在：
-  ① **写入只等文件落盘就返回**（`reloadFor` 改为 fire-and-forget，重挂交给 loader
-  自己的串行队列在后台做），紧随其后的 `mcp.list` 立刻就是新内容；
-  ② 重挂期间 `status()` 带 `settling: true`，面板据此**静默轮询**（每 800ms，上限约
-  16s）让「已挂载/未挂载」自行收敛，并且只刷新数据、不闪「加载中…」；
-  ③ 尚未拿到状态的条目显示「挂载中…」而不是看起来像未挂载；
-  ④ 全局层与 session 层换代都是"新一代状态攒好再整体替换"，重挂中途不会出现
-  "所有 server 都掉了"的假象。
-  真机实测（隔离实例 + 一个 initialize 故意慢 4s 的 MCP）：修复前写入 RPC 会被重挂
-  拖住数秒（塞一个永不响应握手的 server 时，重挂持续 ≥24s，写入就会一直卡着）；
-  修复后 `mcp.remove` **6ms** 返回、行 **260ms** 内从列表消失，`mcp.upsert` 同样 6ms。
-- `src/mcp/loader.ts` 里解释「为何必须用宿主那份 mcp-client」的注释有两处与
-  实测不符（已按 AGENTS.md「结论必须有据可查」纠正）：① 两份副本的预留
-  表达式其实相同，真正的差异是 `@deepseek-ai/dsh-scope` 的
-  `kScope = Symbol("dsh.scope")` 是普通 Symbol（非 `Symbol.for`），插件自带
-  副本读不到宿主打在 agent ctx 上的 scope tag，恒回落 `ctx.root`；② 本机
-  `profiles/desktop` 的 `cordis.patch.yml` 并没有 root 级 mcp-client 条目
-  （只有 `profiles/web` 有），因此全局层撞名是安全网而非必然。
+- **会话能力配置（Skills / MCP）两个入口**：首屏（hero）输入框下方默认展开的能力面板、会话内顶部
+  「能力」Tab（`conversation.view`）整页管理；均为 Tab + 卡片网格，卡片右上角开关只写**当前会话**，
+  附搜索、`恢复默认`、`管理全部`。打开「能力」Tab 时临时隐藏输入框，切回其它 Tab 恢复。
+  - **Skills 会话级开关（关闭 / 恢复）**：宿主 skills 注册表没有按会话禁用 API，改为在
+    `agent.ctx.get("skills")` 上注册同名 runtime shadow（`invocation` 双向 false），从模型目录 /
+    `skill` 工具 / `/name` 注入三条链路隐藏；恢复即解除。只可关闭、不能强制开启文件级禁用项；
+    会话无 live agent 时置灰。纯内存、不落盘。
+  - **MCP 会话级开关（服务器级）**：复用既有 `mcp.setSessionEnabled`（项目条目按需挂载/卸载，
+    global/外部实例 `tools.restrict` 屏蔽），`mcp.list` 带 `sessionId` 投影 `enabledInSession`；
+    写后 `settling` 轮询收敛。
+  - 新增 RPC `skills.sessionList` / `skills.setSessionEnabled`（信封契约不变）；新增
+    `src/skills/session.ts`、`src/client/composer-capability.tsx` 与 `skp-dock-*` / `skp-cap-view`
+    样式（只用宿主 `--dsw-*` token）。
 
 ### 变更
 
-- **全局 MCP 改为整个 harness 复用同一份实例**：`<agentsHome>/mcp.json`
-  （兼容旧位置 dsh home / `~/.claude`）里的 server 不再**每个 session 各起
-  一份进程**，而是逐条挂在插件自己的 Cordis context（`scopeOf(ctx)` 为空 ⇒
-  serverName 按 `ctx.root` 预留）上一次，所有 session 共用；全局配置写入后
-  仍热重挂（`loader.reload()`）。
-- **项目级 MCP 保持每会话隔离**：`<项目根>/.mcp.json` 的原生条目仍挂在
-  `agent.ctx` 上，同一工作区里各 session 各一份、互不冲突；同名项目条目按
-  tools 注册表的「scoped 注册遮蔽全局」规则遮蔽全局那份。
-- **「默认关闭全局 MCP」改用 `tools.restrict` 屏蔽**：全局层既然共享就
-  无法按项目卸载，于是按 session 对该 agent 作用域 `restrict({ deny })`
-  掉该 server 的全局工具（名单从 `ctx.root.get("tools").schemas()` 按
-  `mcp__<serverName>__` 前缀精确取，空名单不调用——`restrict` 契约规定空
-  filter 会失败）。任何失败（宿主无 `restrict`、名字未注册、调用抛错）都
-  降级为「记一条 warning + 状态视图标 `skipped`/`failed`」，**绝不影响
-  session 挂载**。挂载状态视图新增可选 `scope: "global" | "session"` 与
-  `restrictions[]`，全局层以哨兵会话 `sessionId === "*global*"` 出现在
-  `status()` 里（`servers[].{key,serverName,state,error}` 形状不变，客户端
-  聚合逻辑向后兼容）。
-- **行为差异（请留意）**：① 全局 stdio 条目**没有显式写 `cwd`** 时，其工作
-  目录从「各会话的项目根」变成「宿主进程目录」（单例没有"当前项目"；条目
-  自己写了 `cwd` 不受影响）；② 若某个 profile 的 `cordis.patch.yml` 里已经
-  root 级插入了同名 mcp-client（例：`profiles/web` 插了
-  mcp-AnySearch / mcp-tavily / mcp-context7 / mcp-github），本插件不再重复
-  挂载该 serverName：状态显示为 `conflict` 并带友好文案，工具仍由那份实例
-  提供，但**面板里对该条目的编辑不会生效**——请在 profile 里改；③ 宿主没有
-  `loader` 服务（headless 等）时会回落到插件自带的 mcp-client 副本，此时
-  `scopeOf()` 读不到宿主 scope tag，项目级的每会话隔离会降级为「同 cwd 只
-  允许一个 session 挂同名 server」，其余 session 显示 `conflict`。
-- 面板 MCP 行尚未展示宿主的 `restrictions[]`（宿主已提供，客户端类型
-  `ClientMcpStatus` 暂未透出）：`restrict` 降级时面板看不到「本项目屏蔽未
-  生效」的标注，只会在宿主日志里出现 warning。属已知限制。
+- 移除输入框左下角原来的三个快捷按钮（快捷消息 / Skills / MCP）及其弹层；快捷消息仍可在侧栏能力面板
+  管理。旧的 `composer-quick.tsx` / `composer-skills.tsx` / `composer-mcp.tsx` 组件代码保留未注册，
+  便于回退。
+- 移除上一轮原型里的「输入框下方常驻能力条」（`conversation.composer.dock`）与后续临时加的输入框
+  「能力」图标/快捷弹层：会话中只保留顶部「能力」Tab，首屏保留输入框下方内联面板。
+- 移除多重面板头部多余的「仅本会话」标签；hero 收起条宽度与输入卡严格对齐。
 
 ### 内部
 
-- `src/mcp/loader.ts` 顶层架构改为「全局单例层 + 项目级每会话层」两个独立
-  串行队列（互不 await，避免死锁）；`tools/change` 事件用于在工具集合变化
-  后幂等重算屏蔽名单（不让「后注册的工具」漏出）。
-- 验证：三条实现任务各有真实行为脚本（假 cordis ctx 驱动 loader、真实
-  stdio/HTTP MCP 探测、SSR 渲染冒烟），并由独立验证者按六条需求逐条复核
-  （含变异对照证明测试有检测力）；脚本落在 gitignore 的 `notes/` 下，不进版本库。
-- **真机 GUI 验证**：另建完全隔离的 DSH 实例（`DSH_HOME=<repo>/.verify-home`、
-  独立端口、本地装入与桌面应用同版本的 `dsh@0.2.0-rc.2`、夹具工作区与夹具 MCP
-  进程），用真实浏览器逐条复验六项需求，并用进程计数给出逻辑改动的硬证据
-  （3 个真实会话时全局 MCP 进程 = 1，同一工作区两个会话的项目级 MCP 进程 = 2）。
-  证据与复现步骤见 `notes/real-gui-evidence/`。注意：系统里全局安装的
-  `dsh@0.1.2-alpha.2` 外壳**没有** `sidebar.panellist` 槽，用它会误判 UI 改动，
-  验证必须用 0.2.0-rc.2 及以上外壳。
+- 验证：`pnpm typecheck` / `pnpm build` 通过；`notes/verify/session-skills.test.mjs` PASS 11；
+  `notes/verify/capability-dock-render.mjs` 30/30；`notes/verify/run-all.sh` 全绿
+  （bug1-e2e 的 `composerApiFor` 计数断言调整为 ≥3；按钮预取改为能力按钮的计数角标）。
+- 新增 `notes/verify/dock-visual.mjs`：真实 Chromium 视觉 harness，覆盖 hero 收起/展开、快捷弹层、
+  顶部 Tab 整页与窄容器。
 
 ## [1.1.0] - 2026-09-29
 

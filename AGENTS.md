@@ -41,8 +41,8 @@ npm i --prefix notes/verify/tmp/env jsdom      # 重装 jsdom（harness 用绝�
 | `src/channel.ts` | RPC 通道名唯一来源：`CHANNEL = "/capability-panel"`（两端 import，禁止硬编码） |
 | `src/remote.ts` | 宿主 ⇄ 浏览器 RPC：在 `webServer` 挂 `CHANNEL` 前缀路由；endpoint 为 `skills.* / mcp.* / quick.* / overrides.*`（见文件头注释与路由表） |
 | `src/client.ts` | 客户端插件入口：注入样式/语言包，注册 `sidebar.panellist` + `main`（面板）与 `conversation.input.*`（composer），构造面板 api 与**每会话** composer api |
-| `src/client/*.tsx` | UI：`panel.tsx`（skills/quick 共用列表/详情）、`mcp-panel.tsx`、`quick-messages-panel.tsx`、`composer-*.tsx`、`select.tsx`（自绘下拉）、`panel-entry.tsx`（主区域页面 + 侧栏图标）、`styles.ts` |
-| `src/{skills,mcp,quick-messages,overrides,imports}/` | 各域宿主实现（配置读写、CRUD、挂载、探测、声明文件） |
+| `src/client/*.tsx` | UI：`panel.tsx`（skills/quick 共用列表/详情）、`mcp-panel.tsx`、`quick-messages-panel.tsx`、`composer-*.tsx`、`composer-capability.tsx`（会话能力：hero 内联面板 + 顶部「能力」Tab 整页；Tab 打开时隐藏输入框）、`select.tsx`（自绘下拉）、`panel-entry.tsx`（主区域页面 + 侧栏图标）、`styles.ts` |
+| `src/{skills,mcp,quick-messages,overrides,imports}/` | 各域宿主实现（配置读写、CRUD、挂载、探测、声明文件）；`skills/session.ts` = 会话级 Skills 开关（agent 作用域同名 runtime shadow，内存态） |
 | `src/shared/` | 通用：原子写、文件锁、项目根探测、agents home、JSON 配置、skill 定位/来源 |
 
 RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒为 `{ ok: true, value }`；
@@ -127,6 +127,23 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
   已做视口钳制/向上弹/内部滚动放行，别改回朴素的 `left/top` 锚定。
 
 ---
+
+## Figma 原型（dsh-to-figma 本地桥）
+
+- **设计源**：Figma 本地文档 **`dsh`** → 页面 **`Capability Dock · 终稿 v5`**（page `4:2`）：
+  画板 `4:3`、首屏 hero `4:7`、会话内「能力」Tab `4:223`；旧页面 `Capability Dock · 交互原型`
+  （page `1:2`）保留 v1–v4 历史，不要删。
+- **工具前提**：Figma 桌面打开该文件并运行伴生插件「DSH to Figma · Local」，保持窗口常开。
+  先 `figma_status`；断连或多文档时 `figma_select_document <connectionId>` 显式重新绑定，
+  然后才用 `use_figma` / `get_screenshot` / `import_scene` / `download_assets`。连不上时不要拿旧截图冒充新设计。
+- **可重导入的设计源在仓库**：`docs/figma/scenes/*.scene.json`（`import_scene` 契约，可直接
+  `import_scene({ nodes: scene.nodes })` 重建可编辑图层）+ `docs/figma/preview/*.png`（视觉对照）。
+  重新导出用 `docs/figma/tools/export-scene.js`（`use_figma` 脚本，按 `TARGET_NODE_ID` 与
+  `SERIALIZE_RANGE` 分片）。完整流程与已知限制见 `docs/figma/README.md`。
+- **已知限制**：scene 契约不含 VECTOR 图标（导入后图标为空）、只保留 SOLID 填充/描边与圆角/自动布局，
+  渐变/阴影/图片不导出；文字字体为 `PingFang SC`。
+- **变更纪律**：用户可见 UI/交互改动 → 先改代码并跑验证 → 同步 Figma 终稿节点 →
+  重新导出 scene JSON + 预览图 → 与代码一起提交（CHANGELOG 里注明设计变更）。
 
 ## 构建产物 `lib/`（重要）
 

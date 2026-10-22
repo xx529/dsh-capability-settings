@@ -1,0 +1,75 @@
+# Figma 原型（Capability Dock · 终稿 v5）
+
+本目录是「输入框下方会话能力配置区」的 Figma 设计源，供人工查看 / 未来智能体继续改原型。
+设计文档说明见 [`../../notes/design/capability-dock.md`](../../notes/design/capability-dock.md)（本地 notes 目录，不入库）。
+
+## 1. 设计文件与节点
+
+Figma 本地文档：**`dsh`**（DSH to Figma 本地桥，见根 `AGENTS.md`「Figma 原型」一节）。
+
+| 页面 | page id | 画框 | node id |
+|---|---|---|---|
+| Capability Dock · 终稿 v5 | `4:2` | 00 · v5 终稿（画板） | `4:3` |
+| 同上 | | 01 · 首屏 hero · 输入框下方默认展开 | `4:7` |
+| 同上 | | 02 · 会话内 · 能力 Tab（隐藏输入框） | `4:223` |
+| Capability Dock · 交互原型（历史 v1–v4） | `1:2` | 保留不动，仅作演进记录 | — |
+
+## 2. 文件
+
+```
+docs/figma/
+├── README.md                      ← 本文件
+├── scenes/
+│   ├── 01-hero.scene.json         ← import_scene 契约：{ nodes: [FRAME...] }
+│   └── 02-capability-tab.scene.json
+├── preview/
+│   ├── 01-hero.png                ← 导出预览图（1440×900）
+│   └── 02-capability-tab.png
+└── tools/
+    └── export-scene.js            ← 从 Figma 重新导出 scene JSON 的 use_figma 脚本
+```
+
+## 3. 重新导入到 Figma（智能体步骤）
+
+1. `figma_status` 确认 `dsh` 文档已连接；断连时 `figma_select_document <connectionId>` 重新绑定。
+2. 读取 `docs/figma/scenes/*.scene.json`，取 `scene.nodes`。
+3. 调用 Figma MCP 的 `import_scene`：
+   ```jsonc
+   {
+     "nodes": [ /* scene.nodes，最多 500 个节点 */ ],
+     "parentId": "可选：目标画板/页面内父节点 id"
+   }
+   ```
+   - **01 与 02 可一次导入**（165 + 142 = 307 节点 < 500）：画框自带 x/y（01 在 `0,150`，02 在 `1520,150`），会并排出现。
+   - 单次工具参数很大时，分两次导入（每个文件一次）。
+   - 导入后可 `get_screenshot` / `download_assets` 与 `docs/figma/preview/*.png` 对照。
+4. 若导入后想改设计：直接编辑 Figma 节点，然后**重新导出**（见下一节）并覆盖 scene JSON + 预览图。
+
+## 4. 从 Figma 重新导出
+
+1. 把 `docs/figma/tools/export-scene.js` 整段贴进 `use_figma` 执行。
+2. 调整脚本顶部参数：
+   - `TARGET_NODE_ID`：`4:7`（首屏）或 `4:223`（能力 Tab）；
+   - `SERIALIZE_RANGE`：先 `[0, 24000]`，再 `[24000, null]`，分两次拿 `part` 字符串；
+     单次输出过大时 DSH 会存到 spill 文件，可用 `grep` 找到完整 `part`。
+3. 把两次的 `part` 拼接 → `JSON.parse` → 写入 `docs/figma/scenes/*.scene.json`（`{ nodes: [...] }`）。
+4. 重新导出 PNG 预览：
+   ```
+   download_assets({ nodeIds: ["4:7", "4:223"], format: "PNG", scale: 1 })
+   ```
+   把生成文件复制到 `docs/figma/preview/`。
+
+## 5. 已知限制（导出/导入）
+
+- scene 契约只支持 `FRAME / TEXT / RECTANGLE / ELLIPSE / COMPONENT / SECTION / STICKY / SHAPE_WITH_TEXT`；
+  **VECTOR 图标路径会被跳过**（导入后图标为空，需要 `upload_assets` 导入 SVG 或用 `use_figma` 补画）。
+- 只保留 SOLID 填充/描边、圆角、像素行高与自动布局属性；渐变、阴影、模糊、混合模式、图片填充不导出。
+- 文字字体为 `PingFang SC`（Regular/Medium/Semibold），导入前 Figma 需已加载该字体（本机 Figma 已安装）。
+- `import_scene` 不是网页捕获：它只重建显式 layer，不还原交互/运行时逻辑。
+
+## 6. 设计口径（v5 终稿）
+
+- 两个入口：首屏（hero）输入框下方默认展开面板；会话内顶部「能力」Tab。
+- 无「仅本会话」标签、无 Tab 栏「+」、无输入框「能力」图标/快捷弹层、无底部能力条。
+- 「能力」Tab 打开时隐藏输入框；整页右侧预留 64px 外壳浮动控件安全区。
+- Skills 会话级开关 = 关闭/恢复（agent 作用域 runtime shadow）；MCP 只做服务器级。

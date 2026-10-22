@@ -49,6 +49,17 @@ function failure(errors: readonly string[]): RpcResult {
 export interface PanelRpcService {
   skills: {
     list(cwd?: string): Promise<unknown>;
+    /**
+     * 磁盘列表 + **本会话**启用态（内存 shadow）：`enabledInSession` /
+     * `canToggleInSession` 两列，供面板/输入框下方开关消费。
+     */
+    sessionList(cwd?: string, sessionId?: string): Promise<unknown>;
+    /**
+     * 设置某个 session 的 skill 开关（**内存内、不落盘**）：关闭 = 在 agent
+     * 作用域注册同名 runtime shadow（`invocation` 双向 false）；开启 = 解除。
+     * 业务失败（会话无 live agent / skills 服务缺失）走 `value.ok=false` 信封。
+     */
+    setSessionEnabled(input: unknown): Promise<unknown>;
     read(input: unknown): Promise<unknown>;
     create(input: unknown): Promise<unknown>;
     update(input: unknown): Promise<unknown>;
@@ -119,6 +130,12 @@ export async function handleEndpoint(service: PanelRpcService, endpoint: string,
     switch (endpoint) {
       case "skills.list":
         return { ok: true, value: await service.skills.list(cwd) };
+      case "skills.sessionList":
+        // 会话级视图：磁盘列表 + enabledInSession / canToggleInSession。
+        return { ok: true, value: await service.skills.sessionList(cwd, sessionId) };
+      case "skills.setSessionEnabled":
+        // 内存态开关；业务失败在 value.ok=false 里（信封仍恒 ok:true）。
+        return { ok: true, value: await service.skills.setSessionEnabled(p) };
       case "skills.read":
         return { ok: true, value: await service.skills.read(p) };
       case "skills.create":

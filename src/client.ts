@@ -24,9 +24,7 @@ import { createElement } from "react";
 import { createPanelApi } from "./client/api-adapter.js";
 import { installStyles } from "./client/styles.js";
 import { CapabilityPanelNavIcon, CapabilityPanelPage } from "./client/panel-entry.js";
-import { ComposerMcpButton, ComposerMcpOverlay } from "./client/composer-mcp.js";
-import { ComposerSkillsButton, ComposerSkillsOverlay } from "./client/composer-skills.js";
-import { ComposerQuickButton, ComposerQuickOverlay } from "./client/composer-quick.js";
+import { ComposerCapabilityHero, SessionCapabilityView } from "./client/composer-capability.js";
 
 /** locale 字典的命名空间。 */
 const NS = "capabilityPanel";
@@ -224,66 +222,43 @@ export function apply(ctx: any) {
     if (typeof disposePanellist === "function") disposers.push(disposePanellist);
   }
 
-  // 输入框工具行的能力工具组：快捷消息（见 composer-quick.tsx）、
-  // Skills 快捷输入（见 composer-skills.tsx）与 MCP 快捷开关（见
-  // composer-mcp.tsx）三个按钮合并在同一个 `conversation.input.left` 条目里
-  // （圆角容器 + 2px 间距，视觉上是一个按钮组），顺序与面板域 Tab 一致：
-  // 快捷消息 / Skills / MCP。按钮从 owner props（InputZone）读 input
-  // 草稿快照；三个弹层仍分别注册在 `conversation.input.overlay`，开合状态
-  // 各自独立、外部点击互斥关闭。Skills 与快捷消息弹层从 session 标准套件
-  // 读 useInput / inputActions：Skills 点击某行把 `/name ` 追加进草稿（宿主
-  // ui-skill '/' 源的同款口令形式），快捷消息点击把正文追加进草稿。
-  // 三个按钮与三个弹层一律用 `composerApiFor(props.sessionId)`（只跟随**所在
-  // session** 的工作区，不含面板钉选、不退化成列表第一项），切勿换回上面的
-  // `api`——那会造成跨工作区串味。
+  // 会话内能力配置的三个入口：
+  //   1. **顶部 Tab「能力」**（conversation.view）：整页管理本会话 Skills / MCP，
+  //      与「对话 / 轨迹 / 上下文 / 编队」同级；进入该 Tab 时隐藏输入框；
+  //   2. 首屏（hero）输入框下方内联面板（input.dock 零高锚点 + fixed 面板）。
+  // 输入框工具栏的三个快捷按钮与底部能力条、以及后续加过的单个「能力」图标都已
+  // 按产品决定移除；快捷消息仍可在侧栏「能力面板」中管理。
+  //
+  // 三个入口一律用 `composerApiFor(props.sessionId)`（只跟随**所在 session** 的
+  // 工作区，不含面板钉选、不退化成列表第一项），避免跨会话串味。
+  // `conversation.view` 是 session 作用域 list 槽，标准 props 可能只给
+  // inspectCall/openView 等，这里用 props.sessionId 优先、sessions 快照兜底。
   if (ctx.slots?.inject && ctx.slots.register) {
-    const disposeTools = ctx.slots.inject("conversation.input.left", () =>
-      ctx.slots.register({ name: "conversation.input.left", id: "capability-panel-tools", order: 10, label: "能力工具" }, (props: any) => {
-        const composerApi = composerApiFor(props?.sessionId);
-        return createElement(
-          "div",
-          { className: "skp-composer-tools" },
-          ComposerQuickButton(),
-          ComposerSkillsButton({ api: composerApi, draft: typeof props?.input?.draft === "string" ? props.input.draft : "" }),
-          ComposerMcpButton({ api: composerApi }),
-        );
+    const openCapabilityPanel = () => {
+      try {
+        ctx.get("layout")?.selectPanel?.("capability-panel");
+      } catch {
+        /* layout 服务缺失：静默降级 */
+      }
+    };
+
+    const disposeCapabilityView = ctx.slots.inject("conversation.view", () =>
+      ctx.slots.register({ name: "conversation.view", id: "capability", order: 40, label: "能力" }, (props: any) => {
+        const sessionId = resolveViewSessionId(ctx, props);
+        return SessionCapabilityView({ apiFor: composerApiFor, sessionId, onManage: openCapabilityPanel });
       }),
     );
-    if (typeof disposeTools === "function") disposers.push(disposeTools);
-    const disposeSkillsOverlay = ctx.slots.inject("conversation.input.overlay", () =>
-      ctx.slots.register({ name: "conversation.input.overlay", id: "capability-panel-skills", order: 5, label: "Skills" }, (props: any) =>
-        ComposerSkillsOverlay({
-          api: composerApiFor(props?.sessionId),
-          useInput: typeof props?.useInput === "function" ? props.useInput : undefined,
-          inputActions: typeof props?.inputActions?.setDraft === "function" ? props.inputActions : undefined,
-        }),
-      ),
-    );
-    if (typeof disposeSkillsOverlay === "function") disposers.push(disposeSkillsOverlay);
+    if (typeof disposeCapabilityView === "function") disposers.push(disposeCapabilityView);
 
-    // 快捷消息的弹层（按钮已并入上方"能力工具"组条目）：同样注册在
-    // `conversation.input.overlay`，与 Skills 弹层共用 session 标准套件的
-    // useInput / inputActions。
-    const disposeQuickOverlay = ctx.slots.inject("conversation.input.overlay", () =>
-      ctx.slots.register({ name: "conversation.input.overlay", id: "capability-panel-quick", order: 7, label: "快捷消息" }, (props: any) =>
-        ComposerQuickOverlay({
-          api: composerApiFor(props?.sessionId),
-          useInput: typeof props?.useInput === "function" ? props.useInput : undefined,
-          inputActions: typeof props?.inputActions?.setDraft === "function" ? props.inputActions : undefined,
-        }),
+    // 首屏（hero）的能力配置区：外壳 hero 态没有会话 view，用
+    // conversation.input.dock 里的零高锚点 + fixed 面板覆盖到输入卡下方
+    // （见 composer-capability.tsx）。active 相位该组件返回 null。
+    const disposeCapabilityHero = ctx.slots.inject("conversation.input.dock", () =>
+      ctx.slots.register({ name: "conversation.input.dock", id: "capability-panel-hero", order: 60, label: "本会话能力（首屏）" }, (props: any) =>
+        ComposerCapabilityHero({ api: composerApiFor(props?.sessionId), onManage: openCapabilityPanel }),
       ),
     );
-    if (typeof disposeQuickOverlay === "function") disposers.push(disposeQuickOverlay);
-
-    // MCP 快捷开关的弹层（按钮已并入上方"能力工具"组条目）：同样注册在
-    // `conversation.input.overlay`。开合状态由 composer-mcp 模块内的微存储
-    // 跨两棵 React 树共享。
-    const disposeOverlay = ctx.slots.inject("conversation.input.overlay", () =>
-      ctx.slots.register({ name: "conversation.input.overlay", id: "capability-panel-mcp", order: 10, label: "MCP 服务器" }, (props: any) =>
-        ComposerMcpOverlay({ api: composerApiFor(props?.sessionId) }),
-      ),
-    );
-    if (typeof disposeOverlay === "function") disposers.push(disposeOverlay);
+    if (typeof disposeCapabilityHero === "function") disposers.push(disposeCapabilityHero);
   }
 
   ctx.effect?.(() => () => {
@@ -299,6 +274,24 @@ export function apply(ctx: any) {
  * 依次尝试 `displayTitle`（侧栏用的就是它）→ `title` → `summary`；都拿不到时
  * 返回 undefined，面板退化为显示会话 id 尾部。
  */
+/**
+ * 解析 `conversation.view` 条目的当前会话 id：优先用标准 props，其次用
+ * sessions 快照的 current / 唯一 ids 兜底（0.2.0-rc.2 的 sessions 快照没有
+ * current 字段时，view 条目仍能绑定到正确会话）。
+ */
+function resolveViewSessionId(ctx: any, props: any): string | undefined {
+  if (typeof props?.sessionId === "string") return props.sessionId;
+  try {
+    const snapshot = ctx.get("sessions")?.list?.getSnapshot?.();
+    if (typeof snapshot?.current === "string") return snapshot.current;
+    const ids = Array.isArray(snapshot?.ids) ? snapshot.ids : [];
+    if (ids.length === 1 && typeof ids[0] === "string") return ids[0];
+  } catch {
+    /* sessions 服务缺失 */
+  }
+  return undefined;
+}
+
 function sessionTitleOf(ctx: any, sessionId: string): string | undefined {
   if (typeof sessionId !== "string" || sessionId.length === 0) return undefined;
   try {

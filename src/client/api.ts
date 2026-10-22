@@ -44,6 +44,13 @@ export interface ClientSkillSummary {
    * `skill` = 项目区已有同名真实条目（项目副本遮蔽全局）。
    */
   projectShadow?: "stub" | "skill";
+  /**
+   * 本会话是否生效（composer 的 sessionList 投影）：内存态、不落盘。
+   * 缺省 true；本会话关闭后为 false。
+   */
+  enabledInSession?: boolean;
+  /** 当前会话是否有 agent ctx（false 时 UI 会话开关置灰）。 */
+  canToggleInSession?: boolean;
 }
 
 /** skill 详情 = 摘要 + 完整 spec + 正文 + 资源文件列表。 */
@@ -116,6 +123,19 @@ export interface SkillRef {
 export interface SkillsApi {
   /** 列出（合并）当前作用域下所有 skill 摘要。 */
   list(): Promise<ClientSkillSummary[]>;
+  /**
+   * 会话视角的 skill 列表：与 {@link list} 相同，但多返回
+   * `enabledInSession` / `canToggleInSession`（需要 api 带 sessionId，仅
+   * composer 的每会话 api 提供）。用于输入框下方的会话能力配置区。
+   */
+  sessionList(): Promise<ClientSkillSummary[]>;
+  /**
+   * 关闭 / 恢复某个 skill 在**当前会话**的可见性（内存态、不落盘）：
+   * 关闭通过 agent 作用域注册同名 runtime shadow 实现（从模型目录、
+   * `skill` 工具与 `/name` 注入三条链路消失）；恢复即解除 shadow。
+   * 只能「关闭 / 恢复」，不能强制开启文件级已禁用项。
+   */
+  setSessionEnabled(input: { name: string; enabled: boolean }): Promise<OpResult>;
   /** 读取单个 skill 详情；不存在返回 undefined。 */
   read(name: string): Promise<ClientSkillDetail | undefined>;
   create(input: CreateSkillInput): Promise<OpResult>;

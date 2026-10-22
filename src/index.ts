@@ -27,6 +27,8 @@ import type {} from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/dsh-skill";
 
 import { createService } from "./skills/manager.js";
+import { createSkillSessionRegistry } from "./skills/session.js";
+import type { SessionSkillView, SkillSessionRegistry } from "./skills/session.js";
 import { createMcpLoader } from "./mcp/loader.js";
 import { createMcpManager } from "./mcp/manager.js";
 import { createMcpUsageLog, registerMcpUsageGuard } from "./mcp/usage.js";
@@ -56,9 +58,22 @@ export interface Config {
   mountMcp?: boolean;
 }
 
+/**
+ * skills 域服务 = 磁盘 CRUD 管理器 + 会话级开关（内存 shadow）。
+ *
+ * 会话级开关是纯增量：`list` 等原有方法不变，客户端改用 `sessionList`
+ * （多带 enabledInSession / canToggleInSession 两列）。
+ */
+export type SkillsService = ReturnType<typeof createService> & {
+  /** 磁盘列表 + 本会话启用态（见 skills/session.ts）。 */
+  sessionList: (cwd?: string, sessionId?: string) => Promise<SessionSkillView[]>;
+  /** 设置本会话开关（内存态，不落盘）。 */
+  setSessionEnabled: SkillSessionRegistry["setEnabled"];
+};
+
 /** 暴露给宿主调用方的传输无关服务：三个域的合体 + 项目级禁用声明。 */
 export interface CapabilityPanelService {
-  skills: ReturnType<typeof createService>;
+  skills: SkillsService;
   mcp: ReturnType<typeof createMcpManager>;
   quickMessages: ReturnType<typeof createQuickMessagesManager>;
   overrides: ReturnType<typeof createOverridesManager>;
@@ -110,8 +125,16 @@ export function apply(ctx: any, config: Config = {}) {
   // 旁路记录 mcp__* 调用，供面板详情页的「使用记录」展示。disposer 随插件卸载。
   const mcpUsage = createMcpUsageLog();
   const disposeUsageGuard = registerMcpUsageGuard(ctx, mcpUsage);
+  // skills 域 = 磁盘管理器（原有，见 skills/manager.ts）+ 会话级开关
+  // （内存 shadow，见 skills/session.ts）。会话列表复用同一个磁盘 list，
+  // 避免两处读取口径分叉。
+  const skillsBase = createService(ctx, config);
+  const skillSessions = createSkillSessionRegistry(ctx);
   const service: CapabilityPanelService = {
-    skills: createService(ctx, config),
+    skills: Object.assign(skillsBase, {
+      sessionList: (cwd?: string, sessionId?: string) => skillSessions.list(skillsBase.list, cwd, sessionId),
+      setSessionEnabled: skillSessions.setEnabled,
+    }),
     mcp: createMcpManager(
       // tools 访问器用于反推"运行时注入"的 MCP 实例（见 manager.runtime）。
       {
@@ -131,7 +154,7 @@ export function apply(ctx: any, config: Config = {}) {
     overrides,
   };
   ctx.provide("capabilityPanel", () => service);
-  const disposers: Array<() => void> = [disposeUsageGuard];
+  const disposers: Array<() => void> = [disposeUsageGuard, () => skillSessions.dispose()];
   if (config.mountRpc !== false) {
     const dispose = mountRpcChannel(ctx, service);
     if (typeof dispose === "function") disposers.push(dispose);
@@ -148,6 +171,8 @@ export function apply(ctx: any, config: Config = {}) {
 // ---------------------------------------------------------------------------
 
 export { createService, isGlobalSource } from "./skills/manager.js";
+export { createSkillSessionRegistry } from "./skills/session.js";
+export type { SkillSessionRegistry, SessionSkillView, SessionSkillOpResult } from "./skills/session.js";
 export { createMcpLoader } from "./mcp/loader.js";
 export { createMcpManager } from "./mcp/manager.js";
 export { createQuickMessagesManager } from "./quick-messages/manager.js";

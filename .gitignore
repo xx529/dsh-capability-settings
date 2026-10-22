@@ -14,3 +14,6 @@ notes/
 
 # profile 变更前的备份（含依赖/patch），不进版本库
 .profile-backup/
+
+# Figma 导出资源缓存（下载的原始资产），设计源已放 docs/figma/
+.figma/

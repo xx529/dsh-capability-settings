@@ -265,6 +265,30 @@ session 作用域、standardProps 里直接给 `sessionId`，插件按它解析�
 
   ![MCP 快捷开关弹层](docs/screenshots/composer-mcp.png)
 
+### 🎛️ 会话能力配置：首屏内联 + 顶部「能力」Tab
+
+会话能力（Skills / MCP 服务器）的查看与开关分两个入口，**开关全部只作用于当前会话、内存态、不落盘**，优先级
+`显式会话覆盖 > 项目默认 > 配置 disabled`；原输入框左侧的三个快捷按钮（快捷消息 / Skills / MCP）、底部能力条
+以及临时加过的输入框「能力」图标/弹层均已移除，快捷消息仍可在侧栏「能力面板」管理。
+
+- **首屏（hero）默认展开**：新会话首屏在输入框卡片正下方直接展示能力面板（Tab + 卡片网格，默认展开、无需点击）。
+  外壳 hero 相位不渲染 `composer.dock`，这里用 `conversation.input.dock` 的零高锚点 + `position: fixed` 面板，
+  位置由输入卡 `[data-composer-card]` 的 rect + `ResizeObserver` 跟随，宽度与输入卡一致。
+- **会话中：顶部「能力」Tab**（`conversation.view`，与「对话 / 轨迹 / 上下文 / 编队」同级）：整页管理本会话
+  Skills / MCP，Tab 切换能力类型、卡片网格自适应列数、搜索、`恢复默认`。进入该 Tab 时会临时隐藏输入框
+  （只做能力管理、不需要对话输入），切回其它 Tab 自动恢复。
+
+语义（全部会话级）：
+
+- **MCP（服务器级）**：项目条目按需挂载/卸载；global / 外部实例用 `tools.restrict` 屏蔽/恢复工具，不卸载共享
+  实例。写后宿主异步重挂，面板用 `settling` 800ms × 20 静默轮询收敛。
+- **Skills（关闭 / 恢复）**：宿主注册表没有按会话禁用 API，本插件在**该 agent 作用域**注册同名 runtime skill
+  shadow（`invocation` 双向 false），使该 skill 从「模型目录 / `skill` 工具 / `/name` 用户口令」三条链路消失；
+  恢复即解除 shadow。**只可关闭、不能强制开启**文件级已禁用项；会话没有 live agent 时开关置灰。
+- RPC：`skills.sessionList`（磁盘列表 + `enabledInSession` / `canToggleInSession`）、`skills.setSessionEnabled`；
+  `mcp.list` 带上 `sessionId` 后由宿主投影 `enabledInSession`。
+- 切换会话 / 刷新页面 / 宿主重启后会话覆盖即失效，回到项目默认；快捷消息仍可在侧栏「能力面板」中管理。
+
 ## 工作原理
 
 ```

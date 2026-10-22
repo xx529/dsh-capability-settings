@@ -23,6 +23,7 @@
  * @module @chengdb/capability-panel
  */
 import { createService } from "./skills/manager.js";
+import type { SessionSkillView, SkillSessionRegistry } from "./skills/session.js";
 import { createMcpManager } from "./mcp/manager.js";
 import { createQuickMessagesManager } from "./quick-messages/manager.js";
 import { createOverridesManager } from "./overrides/manager.js";
@@ -41,9 +42,21 @@ export interface Config {
     /** 为 false 时不自动把 MCP server 挂载进 agent。缺省 true。 */
     mountMcp?: boolean;
 }
+/**
+ * skills 域服务 = 磁盘 CRUD 管理器 + 会话级开关（内存 shadow）。
+ *
+ * 会话级开关是纯增量：`list` 等原有方法不变，客户端改用 `sessionList`
+ * （多带 enabledInSession / canToggleInSession 两列）。
+ */
+export type SkillsService = ReturnType<typeof createService> & {
+    /** 磁盘列表 + 本会话启用态（见 skills/session.ts）。 */
+    sessionList: (cwd?: string, sessionId?: string) => Promise<SessionSkillView[]>;
+    /** 设置本会话开关（内存态，不落盘）。 */
+    setSessionEnabled: SkillSessionRegistry["setEnabled"];
+};
 /** 暴露给宿主调用方的传输无关服务：三个域的合体 + 项目级禁用声明。 */
 export interface CapabilityPanelService {
-    skills: ReturnType<typeof createService>;
+    skills: SkillsService;
     mcp: ReturnType<typeof createMcpManager>;
     quickMessages: ReturnType<typeof createQuickMessagesManager>;
     overrides: ReturnType<typeof createOverridesManager>;
@@ -62,6 +75,8 @@ declare module "@deepseek-ai/cordis" {
  */
 export declare function apply(ctx: any, config?: Config): void;
 export { createService, isGlobalSource } from "./skills/manager.js";
+export { createSkillSessionRegistry } from "./skills/session.js";
+export type { SkillSessionRegistry, SessionSkillView, SessionSkillOpResult } from "./skills/session.js";
 export { createMcpLoader } from "./mcp/loader.js";
 export { createMcpManager } from "./mcp/manager.js";
 export { createQuickMessagesManager } from "./quick-messages/manager.js";
