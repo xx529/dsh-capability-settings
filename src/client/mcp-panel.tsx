@@ -105,57 +105,6 @@ const INSPECT_HEAD_RIGHT_STYLE: CSSProperties = {
   justifyContent: "flex-end",
 };
 
-/** 工具行公共样式（行高 34；选中态 = 底 + 左蓝条）。 */
-const TOOL_ROW_BASE_STYLE: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  justifyContent: "center",
-  gap: 1,
-  flex: "none",
-  height: 34,
-  boxSizing: "border-box",
-  padding: "2px 8px",
-  border: "none",
-  borderLeft: "2px solid transparent",
-  borderRadius: 4,
-  background: "transparent",
-  color: "inherit",
-  font: "inherit",
-  textAlign: "left",
-  cursor: "pointer",
-  overflow: "hidden",
-};
-
-const TOOL_ROW_IDLE_STYLE: CSSProperties = TOOL_ROW_BASE_STYLE;
-
-const TOOL_ROW_ACTIVE_STYLE: CSSProperties = {
-  ...TOOL_ROW_BASE_STYLE,
-  borderLeftColor: "var(--skp-accent)",
-  background: "var(--skp-accent-soft)",
-};
-
-const TOOL_NAME_STYLE: CSSProperties = {
-  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-  fontSize: 12,
-  fontWeight: 600,
-  color: "var(--skp-text)",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-};
-
-const TOOL_DESC_STYLE: CSSProperties = {
-  fontSize: 11.5,
-  lineHeight: 1.3,
-  color: "var(--skp-text-3)",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-};
-
-/** 右栏工具标题行：等宽工具名 + 参数个数。 */
-const TOOL_HEAD_STYLE: CSSProperties = { display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", minWidth: 0 };
-
 /** 参数表：四列网格（参数 / 类型 / 必填 / 说明）。 */
 const PARAM_GRID_STYLE: CSSProperties = {
   display: "grid",
@@ -1505,100 +1454,78 @@ interface ToolParameter {
   description?: string;
 }
 
-/** 工具描述（去首尾空白；缺省空串）。 */
-function toolDescription(tool: ClientMcpTool): string {
-  return typeof tool.description === "string" ? tool.description.trim() : "";
-}
-
 /**
- * 「工具与参数」两栏检视器（配置条目与外部注入共用）：
- *  - 左栏：工具列表（宽 300、行高 34、可点选，选中态 = 底色 + 左蓝条），
- *    显示工具名 + 描述单行省略；
- *  - 右栏：所选工具的参数表（参数 / 类型 / 必填 / 说明），从
- *    `tool.parameters` 的 `properties` + `required` 展开；无参数显示「无参数」。
+ * 「工具与参数」手风琴检视器（配置条目与外部注入共用）：
+ *  - 每个工具一行，只显示工具名 + 参数个数（不显示 description）；
+ *  - 点工具名在其**下方**展开参数表（参数 / 类型 / 必填 / 说明），再点收起；
+ *    同一时间只展开一个工具；
+ *  - 参数从 `tool.parameters` 的 `properties` + `required` 展开；无参数显示「无参数」。
  *
- * 成功拿到工具清单后默认选中第一个工具；切换工具只换右栏，**不重新探测**
- * （探测由调用方控制）。工具清单变化（重新测试 / 换服务器）时校正选中：
- * 仍在清单里就保留，否则回到第一个。
+ * 展开/收起只改变本地状态，**不重新探测**（探测由调用方控制）；工具清单变化
+ * （重新测试 / 换服务器）时若当前展开项已不存在则自动收起。
  */
 function ToolsInspector({ tools }: { tools: readonly ClientMcpTool[] }) {
-  const [activeName, setActiveName] = useState<string | undefined>(undefined);
+  // 手风琴：默认全部收起；点工具名展开其参数表，再点收起（同一时间只展开一个）。
+  const [expandedName, setExpandedName] = useState<string | undefined>(undefined);
   useEffect(() => {
-    setActiveName((current) => (current !== undefined && tools.some((tool) => tool.name === current) ? current : tools[0]?.name));
+    setExpandedName((current) => (current !== undefined && tools.some((tool) => tool.name === current) ? current : undefined));
   }, [tools]);
-  const active = tools.find((tool) => tool.name === activeName) ?? tools[0];
-  const parameters = active === undefined ? [] : toolParameters(active);
-  const activeDescription = active === undefined ? "" : toolDescription(active);
   return (
-    <div className="skp-inspector">
-      <div role="listbox" aria-label="工具列表" className="skp-inspector-list">
-        {tools.map((tool) => {
-          const selected = active !== undefined && tool.name === active.name;
-          const description = toolDescription(tool);
-          return (
+    <div className="skp-tool-accordion" role="list">
+      {tools.map((tool) => {
+        const open = expandedName === tool.name;
+        const parameters = toolParameters(tool);
+        return (
+          <div key={tool.name} className={open ? "skp-tool-item skp-tool-item-open" : "skp-tool-item"} role="listitem">
             <button
-              key={tool.name}
               type="button"
-              role="option"
-              aria-selected={selected}
-              title={description.length > 0 ? `${tool.name}\n${description}` : tool.name}
-              style={selected ? TOOL_ROW_ACTIVE_STYLE : TOOL_ROW_IDLE_STYLE}
-              onClick={() => setActiveName(tool.name)}
+              className="skp-tool-trigger"
+              aria-expanded={open}
+              title={tool.name}
+              onClick={() => setExpandedName(open ? undefined : tool.name)}
             >
-              <span style={TOOL_NAME_STYLE}>{tool.name}</span>
-              <span style={TOOL_DESC_STYLE}>{description.length > 0 ? description : "无说明"}</span>
+              <span className="skp-tool-chevron" aria-hidden="true">{open ? "▾" : "▸"}</span>
+              <code className="skp-tool-name">{tool.name}</code>
+              <span className="skp-tool-count">{parameters.length > 0 ? `${parameters.length} 个参数` : "无参数"}</span>
             </button>
-          );
-        })}
-      </div>
-      <div className="skp-inspector-pane">
-        {active === undefined ? (
-          <div className="skp-note">没有可查看的工具。</div>
-        ) : (
-          <>
-            <div style={TOOL_HEAD_STYLE}>
-              <code className="skp-tool-name">{active.name}</code>
-              <span className="skp-test-stat">{parameters.length > 0 ? `${parameters.length} 个参数` : "无参数"}</span>
-            </div>
-            {activeDescription.length > 0 && (
-              <p className="skp-tool-desc skp-clamp-3" title={activeDescription}>
-                {activeDescription}
-              </p>
-            )}
-            {parameters.length === 0 ? (
-              <div className="skp-note">无参数</div>
-            ) : (
-              <div style={PARAM_GRID_STYLE}>
-                {["参数", "类型", "必填", "说明"].map((label) => (
-                  <span key={label} className="skp-field-label" style={PARAM_HEAD_CELL_STYLE}>
-                    {label}
-                  </span>
-                ))}
-                {parameters.map((parameter) => (
-                  <Fragment key={parameter.name}>
-                    <code className="skp-param-name" style={PARAM_CELL_STYLE}>
-                      {parameter.name}
-                    </code>
-                    <span className="skp-test-stat" style={PARAM_CELL_STYLE}>
-                      {parameter.type}
-                    </span>
-                    <span style={PARAM_CELL_STYLE}>
-                      <span className={parameter.required ? "skp-tag skp-tag-warn" : "skp-tag skp-tag-flat"}>
-                        {parameter.required ? "必填" : "可选"}
+            {open && (
+              <div className="skp-tool-body">
+                {parameters.length === 0 ? (
+                  <div className="skp-note">无参数</div>
+                ) : (
+                  <div style={PARAM_GRID_STYLE}>
+                    {["参数", "类型", "必填", "说明"].map((label) => (
+                      <span key={label} className="skp-field-label" style={PARAM_HEAD_CELL_STYLE}>
+                        {label}
                       </span>
-                    </span>
-                    <span className="skp-param-desc" style={PARAM_CELL_STYLE}>
-                      {parameter.description !== undefined && parameter.description.trim().length > 0
-                        ? parameter.description
-                        : "—"}
-                    </span>
-                  </Fragment>
-                ))}
+                    ))}
+                    {parameters.map((parameter) => (
+                      <Fragment key={parameter.name}>
+                        <code className="skp-param-name" style={PARAM_CELL_STYLE}>
+                          {parameter.name}
+                        </code>
+                        <span className="skp-test-stat" style={PARAM_CELL_STYLE}>
+                          {parameter.type}
+                        </span>
+                        <span style={PARAM_CELL_STYLE}>
+                          <span className={parameter.required ? "skp-tag skp-tag-warn" : "skp-tag skp-tag-flat"}>
+                            {parameter.required ? "必填" : "可选"}
+                          </span>
+                        </span>
+                        <span className="skp-param-desc" style={PARAM_CELL_STYLE}>
+                          {parameter.description !== undefined && parameter.description.trim().length > 0
+                            ? parameter.description
+                            : "—"}
+                        </span>
+                      </Fragment>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
-          </>
-        )}
-      </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

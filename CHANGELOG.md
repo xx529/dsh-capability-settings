@@ -3,6 +3,33 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.3.4] - 2026-10-23
+
+### 变更
+
+- **MCP「工具与参数」改为手风琴**：工具列表行只显示工具名 + 参数个数（不再显示
+  description）；点击工具名在该行**下方**展开参数表，再点收起，同一时间只展开一个。
+  展开/收起只改本地状态，不重新探测。
+- 工具行显式 `outline:none`（`focus-visible` 用内描边代替），修掉鼠标点击后左侧留下的
+  白色焦点竖条。
+
+### 内部
+
+- `src/client/mcp-panel.tsx`：`ToolsInspector` 由左右两栏改为手风琴；删除两栏相关
+  内联样式常量与 description 渲染。
+- `src/client/styles.ts`：删除 `.skp-inspector*` / `@container` 规则，新增
+  `.skp-tool-accordion` / `.skp-tool-item(-open)` / `.skp-tool-trigger` /
+  `.skp-tool-chevron` / `.skp-tool-count` / `.skp-tool-body`。
+- 构建 / 测试：
+  - `pnpm typecheck` — exit 0，无类型错误。
+  - `pnpm build` — exit 0；`lib/client.js` 343.16 kB（gzip 81.96 kB）、`lib/client.map` 529.28 kB。
+  - `bash notes/verify/run-all.sh` — exit 0（render-smoke 20/20、bug1-e2e 21/21、
+    mutation controlOk:true、loader-behavior 81/81、probe-connectivity 12/12、baseline PASS 等）。
+  - `node notes/verify/panel-upgrade.test.mjs` — **86/86**（8 条手风琴断言：默认收起、
+    行文本不含 description、点击行下展开、再点收起、单开、不重新探测、focus-visible
+    内描边且旧 `.skp-inspector` 规则已移除）。
+- 版本号：`1.3.4`（工具参数面板交互调整）。
+
 ## [1.3.3] - 2026-10-23
 
 ### 修复
@@ -422,6 +449,7 @@
   输出总量上限（对接入的压缩包上限之下再拦一层"膨胀内存"），并修复
   数据区越界被静默截断、短归档负面偏移读越界的问题（zip bomb 防护）。
 
+[1.3.4]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.3.3...v1.3.4
 [1.3.3]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.3.0...v1.3.1
