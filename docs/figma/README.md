@@ -17,17 +17,17 @@
   `~/.dsh/capability-panel/jev.json`（目录 700 / 文件 600）。5 帧：01 `56:7046`、02 `56:7257`、
   03 `56:7468`、04 `56:7679`、05 `56:7890`。
 
-> **2026-10-24 文案精简状态（v11 03/04）**：按用户反馈删除结果/加载帧的说明行
-> （`v11/hdr/desc`），`prototype/v11/03-loading.js`、`04-results.js` **已更新**（状态行/阈值行
-> 上移、骨架/结果行起点 80、行距重算）。但本次会话 Figma 画布 MCP 工具不可用
-> （`figma_status` 正常、`mcp__figma__*` 未暴露），因此
-> **`preview/v11-03-loading.png`、`preview/v11-04-results.png` 仍是删除前版本，待下次重导**；
-> 其余 v11 预览（01/02/05）与脚本一致。重导方式见 §3.1.1。
+> **2026-10-24 文案精简（v11 03/04，已完成）**：按用户反馈删除结果/加载帧的说明行
+> （`v11/hdr/desc`）；`prototype/v11/03-loading.js`、`04-results.js` 已更新并已在画布重跑
+> （状态行/阈值行上移、骨架/结果行起点 80、行距重算），`preview/v11-03-loading.png`
+> （126025 B）、`preview/v11-04-results.png`（153292 B）已重导覆盖。画面核对：03 标题下无说明行、
+> 状态行紧贴标题；04 标题下无说明行、阈值行紧贴标题，列表与底栏正常。
 
-> **v9–v11 的 scene JSON 尚未导出**：`scenes/` 目前只到 v8。这三个页面以
-> `prototype/v9|v10|v11/` 建稿脚本 + `preview/v9-*…v11-*` 预览图为交付物；需要可重导入的
-> scene 时，按对应脚本顺序在 Figma 内重建（见 §3.1），或后续用 `tools/export-scene.js`
-> 补导出后再补 `scenes/v9-*…v11-*`。不要把 v9–v11 当成已有 scene 快照。
+> **v11 已导出可重导入 scene JSON（2026-10-24）**：`scenes/v11-01-entry.scene.json`、
+> `v11-02-pause.scene.json`、`v11-03-loading.scene.json`、`v11-04-results.scene.json`、
+> `v11-05-config.scene.json`，均为 `{ nodes: [FRAME] }` 契约，单帧节点数 170 / 97 / 131 / 158 / 324；
+> 导入方法见 §3.1.2。**v9/v10 仍只有 preview + prototype 脚本，scene JSON 未导出**，
+> 重建按 §3.1 的脚本顺序执行。
 
 设计文档说明见 [`../../notes/design/capability-dock.md`](../../notes/design/capability-dock.md)
 （v5）与 [`../ux/panel-upgrade.md`](../ux/panel-upgrade.md)（能力面板交互规格，入库）。
@@ -78,8 +78,13 @@ docs/figma/
 │   ├── v8-01-skills-project.scene.json  ← v8 四帧（面板终稿，可直接 import_scene）
 │   ├── v8-02-skills-global.scene.json
 │   ├── v8-03-mcp-project.scene.json
-│   └── v8-04-mcp-global.scene.json
-│   # v9/v10/v11：scene JSON 尚未导出（只有 preview + prototype 脚本，见 §3.1）
+│   ├── v8-04-mcp-global.scene.json
+│   ├── v11-01-entry.scene.json     ← v11 五帧（当前基线，可直接 import_scene）
+│   ├── v11-02-pause.scene.json
+│   ├── v11-03-loading.scene.json
+│   ├── v11-04-results.scene.json
+│   └── v11-05-config.scene.json
+│   # v9/v10：scene JSON 未导出（只有 preview + prototype 脚本，见 §3.1）
 ├── preview/
 │   ├── 01-hero.png                ← v5 导出预览图（1440×900）
 │   ├── 02-capability-tab.png
@@ -104,8 +109,8 @@ docs/figma/
 │   ├── v10-05-config.png
 │   ├── v11-01-entry.png           ← v11（**当前基线**）：能力决策
 │   ├── v11-02-pause.png
-│   ├── v11-03-loading.png         ← ⚠ 文案删除前版本，待重导（2026-10-24）
-│   ├── v11-04-results.png         ← ⚠ 文案删除前版本，待重导（2026-10-24）
+│   ├── v11-03-loading.png         ← 2026-10-24 文案精简后重导（126025 B）
+│   ├── v11-04-results.png         ← 2026-10-24 文案精简后重导（153292 B）
 │   └── v11-05-config.png
 ├── prototype/                     ← 建稿脚本（v6 在本目录，v7–v11 在各自子目录）
 │   ├── 00-init.js                 ← 建页 + 4 画框 + 克隆 v5 sidebar
@@ -158,8 +163,9 @@ docs/figma/
 
 1. `figma_status` 确认 `dsh` 文档已连接；断连时 `figma_select_document <connectionId>` 重新绑定。
 2. 读取 `docs/figma/scenes/*.scene.json`，取 `scene.nodes`。
-   > 目前 `scenes/` 只有 v5（`01-hero` / `02-capability-tab`）与 v8（4 帧）；
-   > **v9–v11 没有 scene JSON，不能 import_scene**，请改用 §3.1 的建稿脚本重建。
+   > 目前 `scenes/` 含 v5（`01-hero` / `02-capability-tab`）、v8（4 帧）与 v11（5 帧）；
+   > **v9/v10 没有 scene JSON**，这两页改用 §3.1 的建稿脚本重建；v11 可直接 `import_scene`
+   > （方法见 §3.1.2）。
 3. 调用 Figma MCP 的 `import_scene`：
    ```jsonc
    {
@@ -174,13 +180,18 @@ docs/figma/
      （01/02 在 y=150，03/04 在 y=1200，x=0/1520），合计约 229 个节点 < 500，可一次
      `import_scene({ nodes: [ ...v8-01, ...v8-02, ...v8-03, ...v8-04 ] })` 重建 4 帧；
      也可只导入其中一帧，或分文件导入。对应页面/node id 见 §1，预览见 `preview/v8-*.png`。
+   - **v11（当前基线）按帧导入**：五个 `scenes/v11-*.scene.json` 各含一个独立画框
+     （01 在 `0,150`、02 在 `1520,150`、03 在 `0,1200`、04 在 `1520,1200`、05 在 `0,2250`），
+     单帧节点数 170 / 97 / 131 / 158 / 324，**合计 880 > 500，不能一次全导**；推荐逐帧
+     `import_scene({ nodes: v11_01.nodes, parentId: "56:7043" })`，或按 01+04（328 节点）、
+     02+03（228 节点）、05（324 节点）分三次合并导入。导入后与 `preview/v11-*.png` 对照。
 4. 若导入后想改设计：直接编辑 Figma 节点，然后**重新导出**（见下一节）并覆盖 scene JSON + 预览图。
 
-### 3.1 重建 v9 / v10 / v11（无 scene JSON）
+### 3.1 重建 v9 / v10（v11 已有 scene JSON，也可用脚本重建）
 
-v9–v11 的 scene JSON 尚未导出；这三页以 `prototype/v9|v10|v11/` 建稿脚本为唯一事实源，
-在 Figma 内按脚本顺序执行即可重建可编辑图层（脚本自包含、幂等，含 `v9/`/`v10/`/`v11/`
-前缀清理，克隆底座 4:7 / 42:3376 保留）：
+v9/v10 的 scene JSON 未导出，这两页以 `prototype/v9/v10/` 建稿脚本为唯一事实源；
+v11 推荐直接用 §3.1.2 的 scene JSON 导入，也可按脚本重建。在 Figma 内按脚本顺序执行即可
+重建可编辑图层（脚本自包含、幂等，含 `v9/`/`v10/`/`v11/` 前缀清理，克隆底座 4:7 / 42:3376 保留）：
 
 | 页面 | 执行顺序 |
 |---|---|
@@ -191,7 +202,8 @@ v9–v11 的 scene JSON 尚未导出；这三页以 `prototype/v9|v10|v11/` 建�
 - 每段脚本整体贴进 `use_figma` 执行；`00-init` 会清空并重建对应页面，`01–05` 各自定位页面/帧名。
 - 单独重跑 `01` 会把 capability-panel 复位到 920×320 并恢复底座子节点，之后需按顺序重跑后续帧脚本。
 - 重建后用 `get_screenshot` / `download_assets` 与 `preview/v9-*…v11-*` 对照；
-  若要补 scene JSON，后续用 `tools/export-scene.js` 按帧 id 导出（见 §4）。
+  v11 的 scene JSON 已导出（§3.1.2），若要补 v9/v10 的 scene，后续用 `tools/export-scene.js`
+  按帧 id 导出（见 §4）。
 
 ### 3.1.1 2026-10-24 v11 03/04 文案精简后的重建 / 重导
 
@@ -203,9 +215,25 @@ v9–v11 的 scene JSON 尚未导出；这三页以 `prototype/v9|v10|v11/` 建�
 - **重导预览**：重跑后用
   `download_assets({ nodeIds: ["56:7468","56:7679"], format: "PNG", scale: 1 })`
   重新截图，覆盖 `preview/v11-03-loading.png`、`preview/v11-04-results.png`。
-- **当前状态**：本次会话画布 MCP 不可用（`figma_status` 正常、`mcp__figma__*` 未暴露），
-  上述两张预览仍为**删除前版本**；在重新导出前，不要用它们核对最新 03/04 视觉。
-- **scene JSON**：v9–v11 均未导出（`scenes/` 仍只有 v5/v8），本次不变。
+- **当前状态（2026-10-24 02:27 已完成）**：03/04 已在画布用新脚本重跑，`preview/v11-03-loading.png`
+  （126025 B）与 `preview/v11-04-results.png`（153292 B）已重新导出覆盖；画面核对 03 标题下无说明行、
+  状态行紧贴标题，04 标题下无说明行、阈值行紧贴标题、列表与底栏正常。上面的重跑/重导命令保留，
+  供后续再次修改 03/04 时复用。
+- **scene JSON**：v11 五帧已导出（见 §3.1.2）；v9/v10 仍未导出。
+
+### 3.1.2 2026-10-24 v11 scene JSON 重导入
+
+- **文件与节点数**（均 `{ nodes: [FRAME] }` 契约，单文件一帧）：
+  `scenes/v11-01-entry.scene.json`（170）、`v11-02-pause.scene.json`（97）、
+  `v11-03-loading.scene.json`（131）、`v11-04-results.scene.json`（158）、
+  `v11-05-config.scene.json`（324）。
+- **导入方式**：逐帧 `import_scene({ nodes: [ ...v11_01.nodes ], parentId: "56:7043" })`
+  （`parentId` 可省略或换成目标页面）；也可按 **01+04（328 节点）、02+03（228 节点）、05（324 节点）**
+  分三次导入。**合计 880 节点 > 500，不能一次全导**。
+- 画框自带坐标（01 `0,150`、02 `1520,150`、03 `0,1200`、04 `1520,1200`、05 `0,2250`），
+  导入页面后会与现有 5 帧重叠：先删除/移开原帧，或导入到临时页面做对照。
+- 导入后用 `get_screenshot` / `download_assets` 与 `preview/v11-*.png` 对照；
+  已知限制见 §5（无 VECTOR 图标、仅 SOLID/圆角/自动布局）。
 
 ## 4. 从 Figma 重新导出
 
@@ -291,6 +319,7 @@ v9–v11 的 scene JSON 尚未导出；这三页以 `prototype/v9|v10|v11/` 建�
 | v11（**当前基线**） | **能力决策** | 点按立即决策 + 停顿自动触发（默认关闭） | 默认关闭；三个数值字段：停顿阈值 1000ms、最少触发字数 10、最少修改间隔字符数 4；密钥 `~/.dsh/capability-panel/jev.json`（目录 700 / 文件 600） | 5 |
 
 - 命名演进口径：v9「自动选择」→ v10「自主决策」→ v11「能力决策」（当前）；v9/v10 仅作历史对照。
-- 三页均**只导出预览图与建稿脚本，scene JSON 未导出**；v11 的实现与验收以 `prototype/v11/spec-v11.md` 为准。
-- 2026-10-24：v11 03/04 删除说明行（脚本已更新）；**03/04 两张预览待重导**（画布 MCP 本次不可用），
-  重导步骤见 §3.1.1。
+- **v11 已导出 5 个可重导入 scene JSON**（`scenes/v11-*.scene.json`，见 §3.1.2）；v9/v10 仍只有
+  preview + prototype 脚本、scene JSON 未导出；v11 的实现与验收以 `prototype/v11/spec-v11.md` 为准。
+- 2026-10-24：v11 03/04 删除说明行——脚本已更新、画布已重跑、预览已重导（`v11-03-loading.png`
+  126025 B / `v11-04-results.png` 153292 B），scene JSON 已同步导出。

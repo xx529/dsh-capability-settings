@@ -1,0 +1,4053 @@
+{
+  "nodes": [
+    {
+      "type": "FRAME",
+      "props": {
+        "name": "04 · 能力决策 · 结果",
+        "x": 1520,
+        "y": 1200,
+        "width": 1440,
+        "height": 900,
+        "fills": [
+          {
+            "type": "SOLID",
+            "color": {
+              "r": 0.11764705926179886,
+              "g": 0.13333334028720856,
+              "b": 0.16862745583057404
+            },
+            "opacity": 1
+          }
+        ],
+        "clipsContent": true,
+        "children": [
+          {
+            "type": "FRAME",
+            "props": {
+              "name": "base-4-7",
+              "x": 0,
+              "y": 0,
+              "width": 1440,
+              "height": 900,
+              "fills": [
+                {
+                  "type": "SOLID",
+                  "color": {
+                    "r": 0.11764705926179886,
+                    "g": 0.13333334028720856,
+                    "b": 0.16862745583057404
+                  },
+                  "opacity": 1
+                }
+              ],
+              "clipsContent": true,
+              "children": [
+                {
+                  "type": "FRAME",
+                  "props": {
+                    "name": "sidebar",
+                    "x": 0,
+                    "y": 0,
+                    "width": 256,
+                    "height": 900,
+                    "fills": [
+                      {
+                        "type": "SOLID",
+                        "color": {
+                          "r": 0.09803921729326248,
+                          "g": 0.10980392247438431,
+                          "b": 0.13333334028720856
+                        },
+                        "opacity": 1
+                      }
+                    ],
+                    "clipsContent": true,
+                    "children": [
+                      {
+                        "type": "RECTANGLE",
+                        "props": {
+                          "name": "side-border",
+                          "x": 255,
+                          "y": 0,
+                          "width": 1,
+                          "height": 900,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 1,
+                                "g": 1,
+                                "b": 1
+                              },
+                              "opacity": 0.05098039284348488
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "type": "FRAME",
+                        "props": {
+                          "name": "Frame",
+                          "x": 18,
+                          "y": 20,
+                          "width": 18,
+                          "height": 18,
+                          "clipsContent": true
+                        }
+                      },
+                      {
+                        "type": "TEXT",
+                        "props": {
+                          "name": "deepseek",
+                          "x": 44,
+                          "y": 17,
+                          "width": 64,
+                          "height": 20,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.8745098114013672,
+                                "g": 0.8941176533699036,
+                                "b": 0.9254902005195618
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "characters": "deepseek",
+                          "fontName": {
+                            "family": "PingFang SC",
+                            "style": "Semibold"
+                          },
+                          "fontSize": 14,
+                          "textAutoResize": "WIDTH_AND_HEIGHT",
+                          "textAlignHorizontal": "LEFT",
+                          "textAlignVertical": "TOP"
+                        }
+                      },
+                      {
+                        "type": "FRAME",
+                        "props": {
+                          "name": "harness-badge",
+                          "x": 124,
+                          "y": 21,
+                          "width": 60,
+                          "height": 17,
+                          "strokes": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 1,
+                                "g": 1,
+                                "b": 1
+                              },
+                              "opacity": 0.1411764770746231
+                            }
+                          ],
+                          "strokeWeight": 1,
+                          "strokeAlign": "INSIDE",
+                          "cornerRadius": 4,
+                          "clipsContent": true,
+                          "children": [
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "HARNESS",
+                                "x": 8,
+                                "y": 2,
+                                "width": 46,
+                                "height": 13,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.615686297416687,
+                                      "g": 0.6470588445663452,
+                                      "b": 0.7058823704719543
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "HARNESS",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Medium"
+                                },
+                                "fontSize": 9.5,
+                                "textAutoResize": "WIDTH_AND_HEIGHT",
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "TOP"
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "type": "FRAME",
+                        "props": {
+                          "name": "Frame",
+                          "x": 224,
+                          "y": 20,
+                          "width": 14,
+                          "height": 14,
+                          "clipsContent": true
+                        }
+                      },
+                      {
+                        "type": "FRAME",
+                        "props": {
+                          "name": "new-session",
+                          "x": 14,
+                          "y": 54,
+                          "width": 228,
+                          "height": 34,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.14901961386203766,
+                                "g": 0.16862745583057404,
+                                "b": 0.20392157137393951
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "strokes": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 1,
+                                "g": 1,
+                                "b": 1
+                              },
+                              "opacity": 0.12156862765550613
+                            }
+                          ],
+                          "strokeWeight": 1,
+                          "strokeAlign": "INSIDE",
+                          "cornerRadius": 10,
+                          "clipsContent": true,
+                          "children": [
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "＋",
+                                "x": 12,
+                                "y": 7,
+                                "width": 14,
+                                "height": 20,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.7882353067398071,
+                                      "g": 0.8078431487083435,
+                                      "b": 0.8470588326454163
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "＋",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Regular"
+                                },
+                                "fontSize": 14,
+                                "textAutoResize": "WIDTH_AND_HEIGHT",
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "TOP"
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "新会话",
+                                "x": 34,
+                                "y": 7,
+                                "width": 39,
+                                "height": 18,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.8745098114013672,
+                                      "g": 0.8941176533699036,
+                                      "b": 0.9254902005195618
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "新会话",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Medium"
+                                },
+                                "fontSize": 13,
+                                "textAutoResize": "WIDTH_AND_HEIGHT",
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "TOP"
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "type": "RECTANGLE",
+                        "props": {
+                          "name": "menu-dot-插件",
+                          "x": 20,
+                          "y": 113,
+                          "width": 11,
+                          "height": 11,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 1,
+                                "g": 1,
+                                "b": 1
+                              },
+                              "opacity": 0.0784313753247261
+                            }
+                          ],
+                          "cornerRadius": 3
+                        }
+                      },
+                      {
+                        "type": "TEXT",
+                        "props": {
+                          "name": "› 插件",
+                          "x": 42,
+                          "y": 108,
+                          "width": 36,
+                          "height": 18,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.615686297416687,
+                                "g": 0.6470588445663452,
+                                "b": 0.7058823704719543
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "characters": "› 插件",
+                          "fontName": {
+                            "family": "PingFang SC",
+                            "style": "Regular"
+                          },
+                          "fontSize": 13,
+                          "textAutoResize": "WIDTH_AND_HEIGHT",
+                          "textAlignHorizontal": "LEFT",
+                          "textAlignVertical": "TOP"
+                        }
+                      },
+                      {
+                        "type": "RECTANGLE",
+                        "props": {
+                          "name": "menu-dot-自动化任务",
+                          "x": 20,
+                          "y": 143,
+                          "width": 11,
+                          "height": 11,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 1,
+                                "g": 1,
+                                "b": 1
+                              },
+                              "opacity": 0.0784313753247261
+                            }
+                          ],
+                          "cornerRadius": 3
+                        }
+                      },
+                      {
+                        "type": "TEXT",
+                        "props": {
+                          "name": "› 自动化任务",
+                          "x": 42,
+                          "y": 138,
+                          "width": 75,
+                          "height": 18,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.615686297416687,
+                                "g": 0.6470588445663452,
+                                "b": 0.7058823704719543
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "characters": "› 自动化任务",
+                          "fontName": {
+                            "family": "PingFang SC",
+                            "style": "Regular"
+                          },
+                          "fontSize": 13,
+                          "textAutoResize": "WIDTH_AND_HEIGHT",
+                          "textAlignHorizontal": "LEFT",
+                          "textAlignVertical": "TOP"
+                        }
+                      },
+                      {
+                        "type": "RECTANGLE",
+                        "props": {
+                          "name": "menu-dot-上下文洞察",
+                          "x": 20,
+                          "y": 173,
+                          "width": 11,
+                          "height": 11,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 1,
+                                "g": 1,
+                                "b": 1
+                              },
+                              "opacity": 0.0784313753247261
+                            }
+                          ],
+                          "cornerRadius": 3
+                        }
+                      },
+                      {
+                        "type": "TEXT",
+                        "props": {
+                          "name": "› 上下文洞察",
+                          "x": 42,
+                          "y": 168,
+                          "width": 75,
+                          "height": 18,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.615686297416687,
+                                "g": 0.6470588445663452,
+                                "b": 0.7058823704719543
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "characters": "› 上下文洞察",
+                          "fontName": {
+                            "family": "PingFang SC",
+                            "style": "Regular"
+                          },
+                          "fontSize": 13,
+                          "textAutoResize": "WIDTH_AND_HEIGHT",
+                          "textAlignHorizontal": "LEFT",
+                          "textAlignVertical": "TOP"
+                        }
+                      },
+                      {
+                        "type": "RECTANGLE",
+                        "props": {
+                          "name": "menu-dot-能力面板",
+                          "x": 20,
+                          "y": 203,
+                          "width": 11,
+                          "height": 11,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 1,
+                                "g": 1,
+                                "b": 1
+                              },
+                              "opacity": 0.0784313753247261
+                            }
+                          ],
+                          "cornerRadius": 3
+                        }
+                      },
+                      {
+                        "type": "TEXT",
+                        "props": {
+                          "name": "› 能力面板",
+                          "x": 42,
+                          "y": 198,
+                          "width": 62,
+                          "height": 18,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.615686297416687,
+                                "g": 0.6470588445663452,
+                                "b": 0.7058823704719543
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "characters": "› 能力面板",
+                          "fontName": {
+                            "family": "PingFang SC",
+                            "style": "Regular"
+                          },
+                          "fontSize": 13,
+                          "textAutoResize": "WIDTH_AND_HEIGHT",
+                          "textAlignHorizontal": "LEFT",
+                          "textAlignVertical": "TOP"
+                        }
+                      },
+                      {
+                        "type": "TEXT",
+                        "props": {
+                          "name": "工作区",
+                          "x": 18,
+                          "y": 246,
+                          "width": 34,
+                          "height": 16,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.43529412150382996,
+                                "g": 0.46666666865348816,
+                                "b": 0.529411792755127
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "characters": "工作区",
+                          "fontName": {
+                            "family": "PingFang SC",
+                            "style": "Medium"
+                          },
+                          "fontSize": 11,
+                          "textAutoResize": "WIDTH_AND_HEIGHT",
+                          "lineHeight": {
+                            "unit": "PIXELS",
+                            "value": 16
+                          },
+                          "letterSpacing": {
+                            "unit": "PIXELS",
+                            "value": 0.4000000059604645
+                          },
+                          "textAlignHorizontal": "LEFT",
+                          "textAlignVertical": "TOP"
+                        }
+                      },
+                      {
+                        "type": "FRAME",
+                        "props": {
+                          "name": "Frame",
+                          "x": 190,
+                          "y": 246,
+                          "width": 14,
+                          "height": 14,
+                          "clipsContent": true
+                        }
+                      },
+                      {
+                        "type": "FRAME",
+                        "props": {
+                          "name": "Frame",
+                          "x": 212,
+                          "y": 246,
+                          "width": 14,
+                          "height": 14,
+                          "clipsContent": true
+                        }
+                      },
+                      {
+                        "type": "FRAME",
+                        "props": {
+                          "name": "Frame",
+                          "x": 232,
+                          "y": 246,
+                          "width": 14,
+                          "height": 14,
+                          "clipsContent": true
+                        }
+                      },
+                      {
+                        "type": "FRAME",
+                        "props": {
+                          "name": "Frame",
+                          "x": 20,
+                          "y": 278,
+                          "width": 13,
+                          "height": 13,
+                          "clipsContent": true
+                        }
+                      },
+                      {
+                        "type": "TEXT",
+                        "props": {
+                          "name": "192.168.98.152 - mira-ai",
+                          "x": 40,
+                          "y": 276,
+                          "width": 139,
+                          "height": 17,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.5607843399047852,
+                                "g": 0.5921568870544434,
+                                "b": 0.6509804129600525
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "characters": "192.168.98.152 - mira-ai",
+                          "fontName": {
+                            "family": "PingFang SC",
+                            "style": "Regular"
+                          },
+                          "fontSize": 12,
+                          "textAutoResize": "WIDTH_AND_HEIGHT",
+                          "textAlignHorizontal": "LEFT",
+                          "textAlignVertical": "TOP"
+                        }
+                      },
+                      {
+                        "type": "RECTANGLE",
+                        "props": {
+                          "name": "active-row",
+                          "x": 12,
+                          "y": 294,
+                          "width": 232,
+                          "height": 30,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.14901961386203766,
+                                "g": 0.16862745583057404,
+                                "b": 0.20392157137393951
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "cornerRadius": 8
+                        }
+                      },
+                      {
+                        "type": "RECTANGLE",
+                        "props": {
+                          "name": "sess-dot",
+                          "x": 24,
+                          "y": 306,
+                          "width": 6,
+                          "height": 6,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.5960784554481506,
+                                "g": 0.7647058963775635,
+                                "b": 0.4745098054409027
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "cornerRadius": 3
+                        }
+                      },
+                      {
+                        "type": "TEXT",
+                        "props": {
+                          "name": "多能力会话配置",
+                          "x": 40,
+                          "y": 300,
+                          "width": 88,
+                          "height": 18,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.8745098114013672,
+                                "g": 0.8941176533699036,
+                                "b": 0.9254902005195618
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "characters": "多能力会话配置",
+                          "fontName": {
+                            "family": "PingFang SC",
+                            "style": "Medium"
+                          },
+                          "fontSize": 12.5,
+                          "textAutoResize": "WIDTH_AND_HEIGHT",
+                          "textAlignHorizontal": "LEFT",
+                          "textAlignVertical": "TOP"
+                        }
+                      },
+                      {
+                        "type": "RECTANGLE",
+                        "props": {
+                          "name": "sess-dot",
+                          "x": 24,
+                          "y": 336,
+                          "width": 6,
+                          "height": 6,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.3607843220233917,
+                                "g": 0.38823530077934265,
+                                "b": 0.43921568989753723
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "cornerRadius": 3
+                        }
+                      },
+                      {
+                        "type": "TEXT",
+                        "props": {
+                          "name": "渠道接入改造",
+                          "x": 40,
+                          "y": 330,
+                          "width": 75,
+                          "height": 18,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.615686297416687,
+                                "g": 0.6470588445663452,
+                                "b": 0.7058823704719543
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "characters": "渠道接入改造",
+                          "fontName": {
+                            "family": "PingFang SC",
+                            "style": "Regular"
+                          },
+                          "fontSize": 12.5,
+                          "textAutoResize": "WIDTH_AND_HEIGHT",
+                          "textAlignHorizontal": "LEFT",
+                          "textAlignVertical": "TOP"
+                        }
+                      },
+                      {
+                        "type": "FRAME",
+                        "props": {
+                          "name": "Frame",
+                          "x": 20,
+                          "y": 368,
+                          "width": 13,
+                          "height": 13,
+                          "clipsContent": true
+                        }
+                      },
+                      {
+                        "type": "TEXT",
+                        "props": {
+                          "name": "192.168.98.152 - mira-live",
+                          "x": 40,
+                          "y": 366,
+                          "width": 147,
+                          "height": 17,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.5607843399047852,
+                                "g": 0.5921568870544434,
+                                "b": 0.6509804129600525
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "characters": "192.168.98.152 - mira-live",
+                          "fontName": {
+                            "family": "PingFang SC",
+                            "style": "Regular"
+                          },
+                          "fontSize": 12,
+                          "textAutoResize": "WIDTH_AND_HEIGHT",
+                          "textAlignHorizontal": "LEFT",
+                          "textAlignVertical": "TOP"
+                        }
+                      },
+                      {
+                        "type": "RECTANGLE",
+                        "props": {
+                          "name": "sess-dot",
+                          "x": 24,
+                          "y": 396,
+                          "width": 6,
+                          "height": 6,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.3607843220233917,
+                                "g": 0.38823530077934265,
+                                "b": 0.43921568989753723
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "cornerRadius": 3
+                        }
+                      },
+                      {
+                        "type": "TEXT",
+                        "props": {
+                          "name": "会话上下文洞察",
+                          "x": 40,
+                          "y": 390,
+                          "width": 88,
+                          "height": 18,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.615686297416687,
+                                "g": 0.6470588445663452,
+                                "b": 0.7058823704719543
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "characters": "会话上下文洞察",
+                          "fontName": {
+                            "family": "PingFang SC",
+                            "style": "Regular"
+                          },
+                          "fontSize": 12.5,
+                          "textAutoResize": "WIDTH_AND_HEIGHT",
+                          "textAlignHorizontal": "LEFT",
+                          "textAlignVertical": "TOP"
+                        }
+                      },
+                      {
+                        "type": "FRAME",
+                        "props": {
+                          "name": "Frame",
+                          "x": 20,
+                          "y": 428,
+                          "width": 13,
+                          "height": 13,
+                          "clipsContent": true
+                        }
+                      },
+                      {
+                        "type": "TEXT",
+                        "props": {
+                          "name": "192.168.99.179 - OmniJev",
+                          "x": 40,
+                          "y": 426,
+                          "width": 145,
+                          "height": 17,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.5607843399047852,
+                                "g": 0.5921568870544434,
+                                "b": 0.6509804129600525
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "characters": "192.168.99.179 - OmniJev",
+                          "fontName": {
+                            "family": "PingFang SC",
+                            "style": "Regular"
+                          },
+                          "fontSize": 12,
+                          "textAutoResize": "WIDTH_AND_HEIGHT",
+                          "textAlignHorizontal": "LEFT",
+                          "textAlignVertical": "TOP"
+                        }
+                      },
+                      {
+                        "type": "RECTANGLE",
+                        "props": {
+                          "name": "sess-dot",
+                          "x": 24,
+                          "y": 456,
+                          "width": 6,
+                          "height": 6,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.3607843220233917,
+                                "g": 0.38823530077934265,
+                                "b": 0.43921568989753723
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "cornerRadius": 3
+                        }
+                      },
+                      {
+                        "type": "TEXT",
+                        "props": {
+                          "name": "MCP 工具治理",
+                          "x": 40,
+                          "y": 450,
+                          "width": 83,
+                          "height": 18,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.615686297416687,
+                                "g": 0.6470588445663452,
+                                "b": 0.7058823704719543
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "characters": "MCP 工具治理",
+                          "fontName": {
+                            "family": "PingFang SC",
+                            "style": "Regular"
+                          },
+                          "fontSize": 12.5,
+                          "textAutoResize": "WIDTH_AND_HEIGHT",
+                          "textAlignHorizontal": "LEFT",
+                          "textAlignVertical": "TOP"
+                        }
+                      },
+                      {
+                        "type": "TEXT",
+                        "props": {
+                          "name": "更多",
+                          "x": 20,
+                          "y": 856,
+                          "width": 25,
+                          "height": 18,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.49803921580314636,
+                                "g": 0.5176470875740051,
+                                "b": 0.5568627715110779
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "characters": "更多",
+                          "fontName": {
+                            "family": "PingFang SC",
+                            "style": "Regular"
+                          },
+                          "fontSize": 12.5,
+                          "textAutoResize": "WIDTH_AND_HEIGHT",
+                          "textAlignHorizontal": "LEFT",
+                          "textAlignVertical": "TOP"
+                        }
+                      },
+                      {
+                        "type": "FRAME",
+                        "props": {
+                          "name": "version",
+                          "x": 196,
+                          "y": 852,
+                          "width": 46,
+                          "height": 20,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.3803921639919281,
+                                "g": 0.686274528503418,
+                                "b": 0.9372549057006836
+                              },
+                              "opacity": 0.12156862765550613
+                            }
+                          ],
+                          "cornerRadius": 999,
+                          "clipsContent": true,
+                          "children": [
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "新版本",
+                                "x": 8,
+                                "y": 2,
+                                "width": 32,
+                                "height": 15,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.5607843399047852,
+                                      "g": 0.7372549176216125,
+                                      "b": 1
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "新版本",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Medium"
+                                },
+                                "fontSize": 10.5,
+                                "textAutoResize": "WIDTH_AND_HEIGHT",
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "TOP"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "FRAME",
+                  "props": {
+                    "name": "header",
+                    "x": 256,
+                    "y": 0,
+                    "width": 1184,
+                    "height": 48,
+                    "fills": [
+                      {
+                        "type": "SOLID",
+                        "color": {
+                          "r": 0.11764705926179886,
+                          "g": 0.13333334028720856,
+                          "b": 0.16862745583057404
+                        },
+                        "opacity": 1
+                      }
+                    ],
+                    "clipsContent": true,
+                    "children": [
+                      {
+                        "type": "RECTANGLE",
+                        "props": {
+                          "name": "header-line",
+                          "x": 0,
+                          "y": 47,
+                          "width": 1184,
+                          "height": 1,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 1,
+                                "g": 1,
+                                "b": 1
+                              },
+                              "opacity": 0.05098039284348488
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "type": "TEXT",
+                        "props": {
+                          "name": "dsh-capability-settings",
+                          "x": 24,
+                          "y": 15,
+                          "width": 152,
+                          "height": 19,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.7882353067398071,
+                                "g": 0.8078431487083435,
+                                "b": 0.8470588326454163
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "characters": "dsh-capability-settings",
+                          "fontName": {
+                            "family": "PingFang SC",
+                            "style": "Medium"
+                          },
+                          "fontSize": 13.5,
+                          "textAutoResize": "WIDTH_AND_HEIGHT",
+                          "textAlignHorizontal": "LEFT",
+                          "textAlignVertical": "TOP"
+                        }
+                      },
+                      {
+                        "type": "FRAME",
+                        "props": {
+                          "name": "Frame",
+                          "x": 197,
+                          "y": 18,
+                          "width": 12,
+                          "height": 12,
+                          "clipsContent": true
+                        }
+                      },
+                      {
+                        "type": "TEXT",
+                        "props": {
+                          "name": "标准模式",
+                          "x": 220,
+                          "y": 15,
+                          "width": 50,
+                          "height": 18,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.49803921580314636,
+                                "g": 0.5176470875740051,
+                                "b": 0.5568627715110779
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "characters": "标准模式",
+                          "fontName": {
+                            "family": "PingFang SC",
+                            "style": "Regular"
+                          },
+                          "fontSize": 12.5,
+                          "textAutoResize": "WIDTH_AND_HEIGHT",
+                          "textAlignHorizontal": "LEFT",
+                          "textAlignVertical": "TOP"
+                        }
+                      },
+                      {
+                        "type": "FRAME",
+                        "props": {
+                          "name": "Frame",
+                          "x": 273,
+                          "y": 18,
+                          "width": 12,
+                          "height": 12,
+                          "clipsContent": true
+                        }
+                      },
+                      {
+                        "type": "FRAME",
+                        "props": {
+                          "name": "Frame",
+                          "x": 1060,
+                          "y": 16,
+                          "width": 15,
+                          "height": 15,
+                          "clipsContent": true
+                        }
+                      },
+                      {
+                        "type": "FRAME",
+                        "props": {
+                          "name": "Frame",
+                          "x": 1092,
+                          "y": 16,
+                          "width": 15,
+                          "height": 15,
+                          "clipsContent": true
+                        }
+                      },
+                      {
+                        "type": "FRAME",
+                        "props": {
+                          "name": "Frame",
+                          "x": 1124,
+                          "y": 16,
+                          "width": 15,
+                          "height": 15,
+                          "clipsContent": true
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "FRAME",
+                  "props": {
+                    "name": "main",
+                    "x": 256,
+                    "y": 48,
+                    "width": 1184,
+                    "height": 852,
+                    "fills": [
+                      {
+                        "type": "SOLID",
+                        "color": {
+                          "r": 0.11764705926179886,
+                          "g": 0.13333334028720856,
+                          "b": 0.16862745583057404
+                        },
+                        "opacity": 1
+                      }
+                    ],
+                    "clipsContent": true,
+                    "children": [
+                      {
+                        "type": "TEXT",
+                        "props": {
+                          "name": "探索未至之境",
+                          "x": 476,
+                          "y": 168,
+                          "width": 156,
+                          "height": 36,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.8745098114013672,
+                                "g": 0.8941176533699036,
+                                "b": 0.9254902005195618
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "characters": "探索未至之境",
+                          "fontName": {
+                            "family": "PingFang SC",
+                            "style": "Semibold"
+                          },
+                          "fontSize": 26,
+                          "textAutoResize": "WIDTH_AND_HEIGHT",
+                          "lineHeight": {
+                            "unit": "PIXELS",
+                            "value": 36
+                          },
+                          "textAlignHorizontal": "LEFT",
+                          "textAlignVertical": "TOP"
+                        }
+                      },
+                      {
+                        "type": "FRAME",
+                        "props": {
+                          "name": "Frame",
+                          "x": 442,
+                          "y": 174,
+                          "width": 24,
+                          "height": 24,
+                          "clipsContent": true
+                        }
+                      },
+                      {
+                        "type": "FRAME",
+                        "props": {
+                          "name": "preview-tag",
+                          "x": 642,
+                          "y": 176,
+                          "width": 66,
+                          "height": 24,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.3803921639919281,
+                                "g": 0.686274528503418,
+                                "b": 0.9372549057006836
+                              },
+                              "opacity": 0.12156862765550613
+                            }
+                          ],
+                          "cornerRadius": 999,
+                          "clipsContent": true,
+                          "children": [
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "预览版",
+                                "x": 12,
+                                "y": 1,
+                                "width": 33,
+                                "height": 18,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.5607843399047852,
+                                      "g": 0.7372549176216125,
+                                      "b": 1
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "预览版",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Medium"
+                                },
+                                "fontSize": 11,
+                                "textAutoResize": "WIDTH_AND_HEIGHT",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 18
+                                },
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "TOP"
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "type": "FRAME",
+                        "props": {
+                          "name": "workspace-row",
+                          "x": 459,
+                          "y": 236,
+                          "width": 300,
+                          "height": 26,
+                          "cornerRadius": 8,
+                          "clipsContent": true,
+                          "children": [
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "Frame",
+                                "x": 4,
+                                "y": 6,
+                                "width": 13,
+                                "height": 13,
+                                "clipsContent": true
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "dsh-capability-settings",
+                                "x": 23,
+                                "y": 4,
+                                "width": 132,
+                                "height": 18,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.7882353067398071,
+                                      "g": 0.8078431487083435,
+                                      "b": 0.8470588326454163
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "dsh-capability-settings",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Regular"
+                                },
+                                "fontSize": 12,
+                                "textAutoResize": "WIDTH_AND_HEIGHT",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 18
+                                },
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "TOP"
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "Frame",
+                                "x": 178,
+                                "y": 9,
+                                "width": 10,
+                                "height": 10,
+                                "clipsContent": true
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "标准模式",
+                                "x": 200,
+                                "y": 4,
+                                "width": 48,
+                                "height": 18,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.615686297416687,
+                                      "g": 0.6470588445663452,
+                                      "b": 0.7058823704719543
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "标准模式",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Regular"
+                                },
+                                "fontSize": 12,
+                                "textAutoResize": "WIDTH_AND_HEIGHT",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 18
+                                },
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "TOP"
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "Frame",
+                                "x": 254,
+                                "y": 9,
+                                "width": 10,
+                                "height": 10,
+                                "clipsContent": true
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "type": "FRAME",
+                        "props": {
+                          "name": "composer-card",
+                          "x": 132,
+                          "y": 300,
+                          "width": 920,
+                          "height": 124,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.1568627506494522,
+                                "g": 0.1725490242242813,
+                                "b": 0.20392157137393951
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "strokes": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 1,
+                                "g": 1,
+                                "b": 1
+                              },
+                              "opacity": 0.07058823853731155
+                            }
+                          ],
+                          "strokeWeight": 1,
+                          "strokeAlign": "INSIDE",
+                          "cornerRadius": 28,
+                          "clipsContent": true,
+                          "children": [
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "描述你想要构建的内容，/ 调用指令，@ 文件或对话",
+                                "x": 16,
+                                "y": 16,
+                                "width": 323,
+                                "height": 22,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.43529412150382996,
+                                      "g": 0.46666666865348816,
+                                      "b": 0.529411792755127
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "描述你想要构建的内容，/ 调用指令，@ 文件或对话",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Regular"
+                                },
+                                "fontSize": 14,
+                                "textAutoResize": "WIDTH_AND_HEIGHT",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 22
+                                },
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "TOP"
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "add",
+                                "x": 12,
+                                "y": 74,
+                                "width": 28,
+                                "height": 28,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.2078431397676468,
+                                      "g": 0.21176470816135406,
+                                      "b": 0.21960784494876862
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "cornerRadius": 14,
+                                "clipsContent": true,
+                                "children": [
+                                  {
+                                    "type": "FRAME",
+                                    "props": {
+                                      "name": "Frame",
+                                      "x": 7,
+                                      "y": 7,
+                                      "width": 14,
+                                      "height": 14,
+                                      "clipsContent": true
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "worktree",
+                                "x": 48,
+                                "y": 76,
+                                "width": 118,
+                                "height": 24,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 1,
+                                      "g": 1,
+                                      "b": 1
+                                    },
+                                    "opacity": 0.05098039284348488
+                                  }
+                                ],
+                                "cornerRadius": 999,
+                                "clipsContent": true,
+                                "children": [
+                                  {
+                                    "type": "FRAME",
+                                    "props": {
+                                      "name": "Frame",
+                                      "x": 8,
+                                      "y": 6,
+                                      "width": 12,
+                                      "height": 12,
+                                      "clipsContent": true
+                                    }
+                                  },
+                                  {
+                                    "type": "TEXT",
+                                    "props": {
+                                      "name": "工作区内修改",
+                                      "x": 24,
+                                      "y": 3,
+                                      "width": 72,
+                                      "height": 17,
+                                      "fills": [
+                                        {
+                                          "type": "SOLID",
+                                          "color": {
+                                            "r": 0.615686297416687,
+                                            "g": 0.6470588445663452,
+                                            "b": 0.7058823704719543
+                                          },
+                                          "opacity": 1
+                                        }
+                                      ],
+                                      "characters": "工作区内修改",
+                                      "fontName": {
+                                        "family": "PingFang SC",
+                                        "style": "Regular"
+                                      },
+                                      "fontSize": 12,
+                                      "textAutoResize": "WIDTH_AND_HEIGHT",
+                                      "textAlignHorizontal": "LEFT",
+                                      "textAlignVertical": "TOP"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "自动继续",
+                                "x": 186,
+                                "y": 76,
+                                "width": 50,
+                                "height": 20,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.615686297416687,
+                                      "g": 0.6470588445663452,
+                                      "b": 0.7058823704719543
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "自动继续",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Regular"
+                                },
+                                "fontSize": 12.5,
+                                "textAutoResize": "WIDTH_AND_HEIGHT",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 20
+                                },
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "TOP"
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "auto-continue-switch",
+                                "x": 246,
+                                "y": 79,
+                                "width": 30,
+                                "height": 18,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.3803921639919281,
+                                      "g": 0.686274528503418,
+                                      "b": 0.9372549057006836
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "cornerRadius": 999,
+                                "clipsContent": true,
+                                "children": [
+                                  {
+                                    "type": "RECTANGLE",
+                                    "props": {
+                                      "name": "knob",
+                                      "x": 14,
+                                      "y": 2,
+                                      "width": 14,
+                                      "height": 14,
+                                      "fills": [
+                                        {
+                                          "type": "SOLID",
+                                          "color": {
+                                            "r": 1,
+                                            "g": 1,
+                                            "b": 1
+                                          },
+                                          "opacity": 1
+                                        }
+                                      ],
+                                      "cornerRadius": 7
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "Frame",
+                                "x": 296,
+                                "y": 79,
+                                "width": 15,
+                                "height": 15,
+                                "clipsContent": true
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "Frame",
+                                "x": 324,
+                                "y": 79,
+                                "width": 15,
+                                "height": 15,
+                                "clipsContent": true
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "Frame",
+                                "x": 352,
+                                "y": 79,
+                                "width": 15,
+                                "height": 15,
+                                "clipsContent": true
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "deepseek-flash",
+                                "x": 752,
+                                "y": 76,
+                                "width": 91,
+                                "height": 20,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.615686297416687,
+                                      "g": 0.6470588445663452,
+                                      "b": 0.7058823704719543
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "deepseek-flash",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Regular"
+                                },
+                                "fontSize": 12.5,
+                                "textAutoResize": "WIDTH_AND_HEIGHT",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 20
+                                },
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "TOP"
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "Frame",
+                                "x": 840,
+                                "y": 80,
+                                "width": 12,
+                                "height": 12,
+                                "clipsContent": true
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "send",
+                                "x": 870,
+                                "y": 71,
+                                "width": 34,
+                                "height": 34,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.3803921639919281,
+                                      "g": 0.686274528503418,
+                                      "b": 0.9372549057006836
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "cornerRadius": 17,
+                                "clipsContent": true,
+                                "children": [
+                                  {
+                                    "type": "FRAME",
+                                    "props": {
+                                      "name": "Frame",
+                                      "x": 9,
+                                      "y": 9,
+                                      "width": 16,
+                                      "height": 16,
+                                      "clipsContent": true
+                                    }
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "type": "FRAME",
+                        "props": {
+                          "name": "capability-panel",
+                          "x": 132,
+                          "y": 432,
+                          "width": 920,
+                          "height": 394,
+                          "fills": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 0.13725490868091583,
+                                "g": 0.15294118225574493,
+                                "b": 0.18431372940540314
+                              },
+                              "opacity": 1
+                            }
+                          ],
+                          "strokes": [
+                            {
+                              "type": "SOLID",
+                              "color": {
+                                "r": 1,
+                                "g": 1,
+                                "b": 1
+                              },
+                              "opacity": 0.10196078568696976
+                            }
+                          ],
+                          "strokeWeight": 1,
+                          "strokeAlign": "INSIDE",
+                          "cornerRadius": 16,
+                          "clipsContent": true,
+                          "children": [
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/hdr/title",
+                                "x": 20,
+                                "y": 12,
+                                "width": 180,
+                                "height": 22,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.8901960849761963,
+                                      "g": 0.9019607901573181,
+                                      "b": 0.9176470637321472
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "✦ 能力决策",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Semibold"
+                                },
+                                "fontSize": 13.5,
+                                "textAutoResize": "NONE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 22
+                                },
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/hdr/badge",
+                                "x": 124,
+                                "y": 15,
+                                "width": 68,
+                                "height": 18,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.3803921639919281,
+                                      "g": 0.686274528503418,
+                                      "b": 0.9372549057006836
+                                    },
+                                    "opacity": 0.11999999731779099
+                                  }
+                                ],
+                                "cornerRadius": 4,
+                                "clipsContent": true,
+                                "children": [
+                                  {
+                                    "type": "TEXT",
+                                    "props": {
+                                      "name": "v11/hdr/badge-t",
+                                      "x": 0,
+                                      "y": 0,
+                                      "width": 68,
+                                      "height": 18,
+                                      "fills": [
+                                        {
+                                          "type": "SOLID",
+                                          "color": {
+                                            "r": 0.5607843399047852,
+                                            "g": 0.7372549176216125,
+                                            "b": 1
+                                          },
+                                          "opacity": 1
+                                        }
+                                      ],
+                                      "characters": "jev-latest",
+                                      "fontName": {
+                                        "family": "Menlo",
+                                        "style": "Regular"
+                                      },
+                                      "fontSize": 10,
+                                      "textAutoResize": "NONE",
+                                      "lineHeight": {
+                                        "unit": "PIXELS",
+                                        "value": 18
+                                      },
+                                      "textAlignHorizontal": "CENTER",
+                                      "textAlignVertical": "CENTER"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/hdr/close",
+                                "x": 872,
+                                "y": 12,
+                                "width": 28,
+                                "height": 28,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.49803921580314636,
+                                      "g": 0.529411792755127,
+                                      "b": 0.5803921818733215
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "×",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Regular"
+                                },
+                                "fontSize": 18,
+                                "textAutoResize": "NONE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 28
+                                },
+                                "textAlignHorizontal": "CENTER",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/thr/label",
+                                "x": 20,
+                                "y": 40,
+                                "width": 32,
+                                "height": 28,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.49803921580314636,
+                                      "g": 0.529411792755127,
+                                      "b": 0.5803921818733215
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "阈值",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Regular"
+                                },
+                                "fontSize": 11,
+                                "textAutoResize": "NONE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 28
+                                },
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/thr/track",
+                                "x": 58,
+                                "y": 52,
+                                "width": 180,
+                                "height": 4,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 1,
+                                      "g": 1,
+                                      "b": 1
+                                    },
+                                    "opacity": 0.11999999731779099
+                                  }
+                                ],
+                                "cornerRadius": 2
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/thr/fill",
+                                "x": 58,
+                                "y": 52,
+                                "width": 90,
+                                "height": 4,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.3803921639919281,
+                                      "g": 0.686274528503418,
+                                      "b": 0.9372549057006836
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "cornerRadius": 2
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/thr/knob",
+                                "x": 142,
+                                "y": 48,
+                                "width": 12,
+                                "height": 12,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.8901960849761963,
+                                      "g": 0.9019607901573181,
+                                      "b": 0.9176470637321472
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "cornerRadius": 6
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/thr/value",
+                                "x": 244,
+                                "y": 40,
+                                "width": 40,
+                                "height": 28,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.8901960849761963,
+                                      "g": 0.9019607901573181,
+                                      "b": 0.9176470637321472
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "0.50",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Medium"
+                                },
+                                "fontSize": 11.5,
+                                "textAutoResize": "NONE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 28
+                                },
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/thr/selected",
+                                "x": 740,
+                                "y": 40,
+                                "width": 160,
+                                "height": 28,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.615686297416687,
+                                      "g": 0.6470588445663452,
+                                      "b": 0.7058823704719543
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "已选 5 / 37",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Regular"
+                                },
+                                "fontSize": 11.5,
+                                "textAutoResize": "NONE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 28
+                                },
+                                "textAlignHorizontal": "RIGHT",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/line/head",
+                                "x": 20,
+                                "y": 74,
+                                "width": 880,
+                                "height": 1,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 1,
+                                      "g": 1,
+                                      "b": 1
+                                    },
+                                    "opacity": 0.05999999865889549
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/0/check",
+                                "x": 20,
+                                "y": 91,
+                                "width": 16,
+                                "height": 16,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.3803921639919281,
+                                      "g": 0.686274528503418,
+                                      "b": 0.9372549057006836
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "cornerRadius": 4,
+                                "children": [
+                                  {
+                                    "type": "TEXT",
+                                    "props": {
+                                      "name": "v11/row/0/check-t",
+                                      "x": 0,
+                                      "y": 0,
+                                      "width": 16,
+                                      "height": 16,
+                                      "fills": [
+                                        {
+                                          "type": "SOLID",
+                                          "color": {
+                                            "r": 0.05882352963089943,
+                                            "g": 0.06666667014360428,
+                                            "b": 0.08235294371843338
+                                          },
+                                          "opacity": 1
+                                        }
+                                      ],
+                                      "characters": "√",
+                                      "fontName": {
+                                        "family": "PingFang SC",
+                                        "style": "Regular"
+                                      },
+                                      "fontSize": 10,
+                                      "textAutoResize": "NONE",
+                                      "lineHeight": {
+                                        "unit": "PIXELS",
+                                        "value": 16
+                                      },
+                                      "textAlignHorizontal": "CENTER",
+                                      "textAlignVertical": "CENTER"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/0/type",
+                                "x": 46,
+                                "y": 91,
+                                "width": 38,
+                                "height": 16,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.3803921639919281,
+                                      "g": 0.686274528503418,
+                                      "b": 0.9372549057006836
+                                    },
+                                    "opacity": 0.11999999731779099
+                                  }
+                                ],
+                                "cornerRadius": 4,
+                                "clipsContent": true,
+                                "children": [
+                                  {
+                                    "type": "TEXT",
+                                    "props": {
+                                      "name": "v11/row/0/type-t",
+                                      "x": 0,
+                                      "y": 0,
+                                      "width": 38,
+                                      "height": 16,
+                                      "fills": [
+                                        {
+                                          "type": "SOLID",
+                                          "color": {
+                                            "r": 0.5607843399047852,
+                                            "g": 0.7372549176216125,
+                                            "b": 1
+                                          },
+                                          "opacity": 1
+                                        }
+                                      ],
+                                      "characters": "技能",
+                                      "fontName": {
+                                        "family": "PingFang SC",
+                                        "style": "Medium"
+                                      },
+                                      "fontSize": 9.5,
+                                      "textAutoResize": "NONE",
+                                      "lineHeight": {
+                                        "unit": "PIXELS",
+                                        "value": 16
+                                      },
+                                      "textAlignHorizontal": "CENTER",
+                                      "textAlignVertical": "CENTER"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/row/0/name",
+                                "x": 92,
+                                "y": 80,
+                                "width": 190,
+                                "height": 37.33,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.8901960849761963,
+                                      "g": 0.9019607901573181,
+                                      "b": 0.9176470637321472
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "agent-orchestration-advisor",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Medium"
+                                },
+                                "fontSize": 13,
+                                "textAutoResize": "TRUNCATE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 37.33333206176758
+                                },
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/row/0/desc",
+                                "x": 290,
+                                "y": 80,
+                                "width": 370,
+                                "height": 37.33,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.615686297416687,
+                                      "g": 0.6470588445663452,
+                                      "b": 0.7058823704719543
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "设计多 agent 工作流与交接边界",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Regular"
+                                },
+                                "fontSize": 11.5,
+                                "textAutoResize": "TRUNCATE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 37.33333206176758
+                                },
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/0/bar",
+                                "x": 680,
+                                "y": 96,
+                                "width": 160,
+                                "height": 6,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 1,
+                                      "g": 1,
+                                      "b": 1
+                                    },
+                                    "opacity": 0.07999999821186066
+                                  }
+                                ],
+                                "cornerRadius": 3
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/0/bar-fill",
+                                "x": 680,
+                                "y": 96,
+                                "width": 149,
+                                "height": 6,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.5960784554481506,
+                                      "g": 0.7647058963775635,
+                                      "b": 0.4745098054409027
+                                    },
+                                    "opacity": 0.8500000238418579
+                                  }
+                                ],
+                                "cornerRadius": 3
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/row/0/score",
+                                "x": 848,
+                                "y": 80,
+                                "width": 52,
+                                "height": 37.33,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.5960784554481506,
+                                      "g": 0.7647058963775635,
+                                      "b": 0.4745098054409027
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "0.93",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Medium"
+                                },
+                                "fontSize": 12,
+                                "textAutoResize": "NONE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 37.33333206176758
+                                },
+                                "textAlignHorizontal": "RIGHT",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/0/line",
+                                "x": 20,
+                                "y": 117.33,
+                                "width": 880,
+                                "height": 1,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 1,
+                                      "g": 1,
+                                      "b": 1
+                                    },
+                                    "opacity": 0.03999999910593033
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/1/check",
+                                "x": 20,
+                                "y": 132.33,
+                                "width": 16,
+                                "height": 16,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.3803921639919281,
+                                      "g": 0.686274528503418,
+                                      "b": 0.9372549057006836
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "cornerRadius": 4,
+                                "children": [
+                                  {
+                                    "type": "TEXT",
+                                    "props": {
+                                      "name": "v11/row/1/check-t",
+                                      "x": 0,
+                                      "y": 0,
+                                      "width": 16,
+                                      "height": 16,
+                                      "fills": [
+                                        {
+                                          "type": "SOLID",
+                                          "color": {
+                                            "r": 0.05882352963089943,
+                                            "g": 0.06666667014360428,
+                                            "b": 0.08235294371843338
+                                          },
+                                          "opacity": 1
+                                        }
+                                      ],
+                                      "characters": "√",
+                                      "fontName": {
+                                        "family": "PingFang SC",
+                                        "style": "Regular"
+                                      },
+                                      "fontSize": 10,
+                                      "textAutoResize": "NONE",
+                                      "lineHeight": {
+                                        "unit": "PIXELS",
+                                        "value": 16
+                                      },
+                                      "textAlignHorizontal": "CENTER",
+                                      "textAlignVertical": "CENTER"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/1/type",
+                                "x": 46,
+                                "y": 132.33,
+                                "width": 38,
+                                "height": 16,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.3803921639919281,
+                                      "g": 0.686274528503418,
+                                      "b": 0.9372549057006836
+                                    },
+                                    "opacity": 0.11999999731779099
+                                  }
+                                ],
+                                "cornerRadius": 4,
+                                "clipsContent": true,
+                                "children": [
+                                  {
+                                    "type": "TEXT",
+                                    "props": {
+                                      "name": "v11/row/1/type-t",
+                                      "x": 0,
+                                      "y": 0,
+                                      "width": 38,
+                                      "height": 16,
+                                      "fills": [
+                                        {
+                                          "type": "SOLID",
+                                          "color": {
+                                            "r": 0.5607843399047852,
+                                            "g": 0.7372549176216125,
+                                            "b": 1
+                                          },
+                                          "opacity": 1
+                                        }
+                                      ],
+                                      "characters": "技能",
+                                      "fontName": {
+                                        "family": "PingFang SC",
+                                        "style": "Medium"
+                                      },
+                                      "fontSize": 9.5,
+                                      "textAutoResize": "NONE",
+                                      "lineHeight": {
+                                        "unit": "PIXELS",
+                                        "value": 16
+                                      },
+                                      "textAlignHorizontal": "CENTER",
+                                      "textAlignVertical": "CENTER"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/row/1/name",
+                                "x": 92,
+                                "y": 121.33,
+                                "width": 190,
+                                "height": 37.33,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.8901960849761963,
+                                      "g": 0.9019607901573181,
+                                      "b": 0.9176470637321472
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "live-shopping-ops",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Medium"
+                                },
+                                "fontSize": 13,
+                                "textAutoResize": "TRUNCATE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 37.33333206176758
+                                },
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/row/1/desc",
+                                "x": 290,
+                                "y": 121.33,
+                                "width": 370,
+                                "height": 37.33,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.615686297416687,
+                                      "g": 0.6470588445663452,
+                                      "b": 0.7058823704719543
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "大促页面巡检与价格监控",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Regular"
+                                },
+                                "fontSize": 11.5,
+                                "textAutoResize": "TRUNCATE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 37.33333206176758
+                                },
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/1/bar",
+                                "x": 680,
+                                "y": 137.33,
+                                "width": 160,
+                                "height": 6,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 1,
+                                      "g": 1,
+                                      "b": 1
+                                    },
+                                    "opacity": 0.07999999821186066
+                                  }
+                                ],
+                                "cornerRadius": 3
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/1/bar-fill",
+                                "x": 680,
+                                "y": 137.33,
+                                "width": 141,
+                                "height": 6,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.5960784554481506,
+                                      "g": 0.7647058963775635,
+                                      "b": 0.4745098054409027
+                                    },
+                                    "opacity": 0.8500000238418579
+                                  }
+                                ],
+                                "cornerRadius": 3
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/row/1/score",
+                                "x": 848,
+                                "y": 121.33,
+                                "width": 52,
+                                "height": 37.33,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.5960784554481506,
+                                      "g": 0.7647058963775635,
+                                      "b": 0.4745098054409027
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "0.88",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Medium"
+                                },
+                                "fontSize": 12,
+                                "textAutoResize": "NONE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 37.33333206176758
+                                },
+                                "textAlignHorizontal": "RIGHT",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/1/line",
+                                "x": 20,
+                                "y": 158.67,
+                                "width": 880,
+                                "height": 1,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 1,
+                                      "g": 1,
+                                      "b": 1
+                                    },
+                                    "opacity": 0.03999999910593033
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/2/check",
+                                "x": 20,
+                                "y": 173.67,
+                                "width": 16,
+                                "height": 16,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.3803921639919281,
+                                      "g": 0.686274528503418,
+                                      "b": 0.9372549057006836
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "cornerRadius": 4,
+                                "children": [
+                                  {
+                                    "type": "TEXT",
+                                    "props": {
+                                      "name": "v11/row/2/check-t",
+                                      "x": 0,
+                                      "y": 0,
+                                      "width": 16,
+                                      "height": 16,
+                                      "fills": [
+                                        {
+                                          "type": "SOLID",
+                                          "color": {
+                                            "r": 0.05882352963089943,
+                                            "g": 0.06666667014360428,
+                                            "b": 0.08235294371843338
+                                          },
+                                          "opacity": 1
+                                        }
+                                      ],
+                                      "characters": "√",
+                                      "fontName": {
+                                        "family": "PingFang SC",
+                                        "style": "Regular"
+                                      },
+                                      "fontSize": 10,
+                                      "textAutoResize": "NONE",
+                                      "lineHeight": {
+                                        "unit": "PIXELS",
+                                        "value": 16
+                                      },
+                                      "textAlignHorizontal": "CENTER",
+                                      "textAlignVertical": "CENTER"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/2/type",
+                                "x": 46,
+                                "y": 173.67,
+                                "width": 38,
+                                "height": 16,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.5960784554481506,
+                                      "g": 0.7647058963775635,
+                                      "b": 0.4745098054409027
+                                    },
+                                    "opacity": 0.11999999731779099
+                                  }
+                                ],
+                                "cornerRadius": 4,
+                                "clipsContent": true,
+                                "children": [
+                                  {
+                                    "type": "TEXT",
+                                    "props": {
+                                      "name": "v11/row/2/type-t",
+                                      "x": 0,
+                                      "y": 0,
+                                      "width": 38,
+                                      "height": 16,
+                                      "fills": [
+                                        {
+                                          "type": "SOLID",
+                                          "color": {
+                                            "r": 0.5960784554481506,
+                                            "g": 0.7647058963775635,
+                                            "b": 0.4745098054409027
+                                          },
+                                          "opacity": 1
+                                        }
+                                      ],
+                                      "characters": "MCP",
+                                      "fontName": {
+                                        "family": "PingFang SC",
+                                        "style": "Medium"
+                                      },
+                                      "fontSize": 9.5,
+                                      "textAutoResize": "NONE",
+                                      "lineHeight": {
+                                        "unit": "PIXELS",
+                                        "value": 16
+                                      },
+                                      "textAlignHorizontal": "CENTER",
+                                      "textAlignVertical": "CENTER"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/row/2/name",
+                                "x": 92,
+                                "y": 162.67,
+                                "width": 190,
+                                "height": 37.33,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.8901960849761963,
+                                      "g": 0.9019607901573181,
+                                      "b": 0.9176470637321472
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "AnySearch",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Medium"
+                                },
+                                "fontSize": 13,
+                                "textAutoResize": "TRUNCATE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 37.33333206176758
+                                },
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/row/2/desc",
+                                "x": 290,
+                                "y": 162.67,
+                                "width": 370,
+                                "height": 37.33,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.615686297416687,
+                                      "g": 0.6470588445663452,
+                                      "b": 0.7058823704719543
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "联网搜索与页面正文提取",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Regular"
+                                },
+                                "fontSize": 11.5,
+                                "textAutoResize": "TRUNCATE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 37.33333206176758
+                                },
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/2/bar",
+                                "x": 680,
+                                "y": 178.67,
+                                "width": 160,
+                                "height": 6,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 1,
+                                      "g": 1,
+                                      "b": 1
+                                    },
+                                    "opacity": 0.07999999821186066
+                                  }
+                                ],
+                                "cornerRadius": 3
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/2/bar-fill",
+                                "x": 680,
+                                "y": 178.67,
+                                "width": 130,
+                                "height": 6,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.5960784554481506,
+                                      "g": 0.7647058963775635,
+                                      "b": 0.4745098054409027
+                                    },
+                                    "opacity": 0.8500000238418579
+                                  }
+                                ],
+                                "cornerRadius": 3
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/row/2/score",
+                                "x": 848,
+                                "y": 162.67,
+                                "width": 52,
+                                "height": 37.33,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.5960784554481506,
+                                      "g": 0.7647058963775635,
+                                      "b": 0.4745098054409027
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "0.81",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Medium"
+                                },
+                                "fontSize": 12,
+                                "textAutoResize": "NONE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 37.33333206176758
+                                },
+                                "textAlignHorizontal": "RIGHT",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/2/line",
+                                "x": 20,
+                                "y": 200,
+                                "width": 880,
+                                "height": 1,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 1,
+                                      "g": 1,
+                                      "b": 1
+                                    },
+                                    "opacity": 0.03999999910593033
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/3/check",
+                                "x": 20,
+                                "y": 215,
+                                "width": 16,
+                                "height": 16,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.3803921639919281,
+                                      "g": 0.686274528503418,
+                                      "b": 0.9372549057006836
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "cornerRadius": 4,
+                                "children": [
+                                  {
+                                    "type": "TEXT",
+                                    "props": {
+                                      "name": "v11/row/3/check-t",
+                                      "x": 0,
+                                      "y": 0,
+                                      "width": 16,
+                                      "height": 16,
+                                      "fills": [
+                                        {
+                                          "type": "SOLID",
+                                          "color": {
+                                            "r": 0.05882352963089943,
+                                            "g": 0.06666667014360428,
+                                            "b": 0.08235294371843338
+                                          },
+                                          "opacity": 1
+                                        }
+                                      ],
+                                      "characters": "√",
+                                      "fontName": {
+                                        "family": "PingFang SC",
+                                        "style": "Regular"
+                                      },
+                                      "fontSize": 10,
+                                      "textAutoResize": "NONE",
+                                      "lineHeight": {
+                                        "unit": "PIXELS",
+                                        "value": 16
+                                      },
+                                      "textAlignHorizontal": "CENTER",
+                                      "textAlignVertical": "CENTER"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/3/type",
+                                "x": 46,
+                                "y": 215,
+                                "width": 38,
+                                "height": 16,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.5960784554481506,
+                                      "g": 0.7647058963775635,
+                                      "b": 0.4745098054409027
+                                    },
+                                    "opacity": 0.11999999731779099
+                                  }
+                                ],
+                                "cornerRadius": 4,
+                                "clipsContent": true,
+                                "children": [
+                                  {
+                                    "type": "TEXT",
+                                    "props": {
+                                      "name": "v11/row/3/type-t",
+                                      "x": 0,
+                                      "y": 0,
+                                      "width": 38,
+                                      "height": 16,
+                                      "fills": [
+                                        {
+                                          "type": "SOLID",
+                                          "color": {
+                                            "r": 0.5960784554481506,
+                                            "g": 0.7647058963775635,
+                                            "b": 0.4745098054409027
+                                          },
+                                          "opacity": 1
+                                        }
+                                      ],
+                                      "characters": "MCP",
+                                      "fontName": {
+                                        "family": "PingFang SC",
+                                        "style": "Medium"
+                                      },
+                                      "fontSize": 9.5,
+                                      "textAutoResize": "NONE",
+                                      "lineHeight": {
+                                        "unit": "PIXELS",
+                                        "value": 16
+                                      },
+                                      "textAlignHorizontal": "CENTER",
+                                      "textAlignVertical": "CENTER"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/row/3/name",
+                                "x": 92,
+                                "y": 204,
+                                "width": 190,
+                                "height": 37.33,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.8901960849761963,
+                                      "g": 0.9019607901573181,
+                                      "b": 0.9176470637321472
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "playwright",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Medium"
+                                },
+                                "fontSize": 13,
+                                "textAutoResize": "TRUNCATE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 37.33333206176758
+                                },
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/row/3/desc",
+                                "x": 290,
+                                "y": 204,
+                                "width": 370,
+                                "height": 37.33,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.615686297416687,
+                                      "g": 0.6470588445663452,
+                                      "b": 0.7058823704719543
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "浏览器自动化与端到端回归",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Regular"
+                                },
+                                "fontSize": 11.5,
+                                "textAutoResize": "TRUNCATE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 37.33333206176758
+                                },
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/3/bar",
+                                "x": 680,
+                                "y": 220,
+                                "width": 160,
+                                "height": 6,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 1,
+                                      "g": 1,
+                                      "b": 1
+                                    },
+                                    "opacity": 0.07999999821186066
+                                  }
+                                ],
+                                "cornerRadius": 3
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/3/bar-fill",
+                                "x": 680,
+                                "y": 220,
+                                "width": 122,
+                                "height": 6,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.5607843399047852,
+                                      "g": 0.7372549176216125,
+                                      "b": 1
+                                    },
+                                    "opacity": 0.8500000238418579
+                                  }
+                                ],
+                                "cornerRadius": 3
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/row/3/score",
+                                "x": 848,
+                                "y": 204,
+                                "width": 52,
+                                "height": 37.33,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.5607843399047852,
+                                      "g": 0.7372549176216125,
+                                      "b": 1
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "0.76",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Medium"
+                                },
+                                "fontSize": 12,
+                                "textAutoResize": "NONE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 37.33333206176758
+                                },
+                                "textAlignHorizontal": "RIGHT",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/3/line",
+                                "x": 20,
+                                "y": 241.33,
+                                "width": 880,
+                                "height": 1,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 1,
+                                      "g": 1,
+                                      "b": 1
+                                    },
+                                    "opacity": 0.03999999910593033
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/4/check",
+                                "x": 20,
+                                "y": 256.33,
+                                "width": 16,
+                                "height": 16,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.3803921639919281,
+                                      "g": 0.686274528503418,
+                                      "b": 0.9372549057006836
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "cornerRadius": 4,
+                                "children": [
+                                  {
+                                    "type": "TEXT",
+                                    "props": {
+                                      "name": "v11/row/4/check-t",
+                                      "x": 0,
+                                      "y": 0,
+                                      "width": 16,
+                                      "height": 16,
+                                      "fills": [
+                                        {
+                                          "type": "SOLID",
+                                          "color": {
+                                            "r": 0.05882352963089943,
+                                            "g": 0.06666667014360428,
+                                            "b": 0.08235294371843338
+                                          },
+                                          "opacity": 1
+                                        }
+                                      ],
+                                      "characters": "√",
+                                      "fontName": {
+                                        "family": "PingFang SC",
+                                        "style": "Regular"
+                                      },
+                                      "fontSize": 10,
+                                      "textAutoResize": "NONE",
+                                      "lineHeight": {
+                                        "unit": "PIXELS",
+                                        "value": 16
+                                      },
+                                      "textAlignHorizontal": "CENTER",
+                                      "textAlignVertical": "CENTER"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/4/type",
+                                "x": 46,
+                                "y": 256.33,
+                                "width": 38,
+                                "height": 16,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.3803921639919281,
+                                      "g": 0.686274528503418,
+                                      "b": 0.9372549057006836
+                                    },
+                                    "opacity": 0.11999999731779099
+                                  }
+                                ],
+                                "cornerRadius": 4,
+                                "clipsContent": true,
+                                "children": [
+                                  {
+                                    "type": "TEXT",
+                                    "props": {
+                                      "name": "v11/row/4/type-t",
+                                      "x": 0,
+                                      "y": 0,
+                                      "width": 38,
+                                      "height": 16,
+                                      "fills": [
+                                        {
+                                          "type": "SOLID",
+                                          "color": {
+                                            "r": 0.5607843399047852,
+                                            "g": 0.7372549176216125,
+                                            "b": 1
+                                          },
+                                          "opacity": 1
+                                        }
+                                      ],
+                                      "characters": "技能",
+                                      "fontName": {
+                                        "family": "PingFang SC",
+                                        "style": "Medium"
+                                      },
+                                      "fontSize": 9.5,
+                                      "textAutoResize": "NONE",
+                                      "lineHeight": {
+                                        "unit": "PIXELS",
+                                        "value": 16
+                                      },
+                                      "textAlignHorizontal": "CENTER",
+                                      "textAlignVertical": "CENTER"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/row/4/name",
+                                "x": 92,
+                                "y": 245.33,
+                                "width": 190,
+                                "height": 37.33,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.8901960849761963,
+                                      "g": 0.9019607901573181,
+                                      "b": 0.9176470637321472
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "session-retrospective",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Medium"
+                                },
+                                "fontSize": 13,
+                                "textAutoResize": "TRUNCATE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 37.33333206176758
+                                },
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/row/4/desc",
+                                "x": 290,
+                                "y": 245.33,
+                                "width": 370,
+                                "height": 37.33,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.615686297416687,
+                                      "g": 0.6470588445663452,
+                                      "b": 0.7058823704719543
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "整理对话决策与待办，产出小结",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Regular"
+                                },
+                                "fontSize": 11.5,
+                                "textAutoResize": "TRUNCATE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 37.33333206176758
+                                },
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/4/bar",
+                                "x": 680,
+                                "y": 261.33,
+                                "width": 160,
+                                "height": 6,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 1,
+                                      "g": 1,
+                                      "b": 1
+                                    },
+                                    "opacity": 0.07999999821186066
+                                  }
+                                ],
+                                "cornerRadius": 3
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/4/bar-fill",
+                                "x": 680,
+                                "y": 261.33,
+                                "width": 102,
+                                "height": 6,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.3803921639919281,
+                                      "g": 0.686274528503418,
+                                      "b": 0.9372549057006836
+                                    },
+                                    "opacity": 0.8500000238418579
+                                  }
+                                ],
+                                "cornerRadius": 3
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/row/4/score",
+                                "x": 848,
+                                "y": 245.33,
+                                "width": 52,
+                                "height": 37.33,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.3803921639919281,
+                                      "g": 0.686274528503418,
+                                      "b": 0.9372549057006836
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "0.64",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Medium"
+                                },
+                                "fontSize": 12,
+                                "textAutoResize": "NONE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 37.33333206176758
+                                },
+                                "textAlignHorizontal": "RIGHT",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/4/line",
+                                "x": 20,
+                                "y": 282.67,
+                                "width": 880,
+                                "height": 1,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 1,
+                                      "g": 1,
+                                      "b": 1
+                                    },
+                                    "opacity": 0.03999999910593033
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/5/check",
+                                "x": 20,
+                                "y": 297.67,
+                                "width": 16,
+                                "height": 16,
+                                "strokes": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 1,
+                                      "g": 1,
+                                      "b": 1
+                                    },
+                                    "opacity": 0.20000000298023224
+                                  }
+                                ],
+                                "strokeWeight": 1,
+                                "strokeAlign": "INSIDE",
+                                "cornerRadius": 4
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/5/type",
+                                "x": 46,
+                                "y": 297.67,
+                                "width": 38,
+                                "height": 16,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 1,
+                                      "g": 1,
+                                      "b": 1
+                                    },
+                                    "opacity": 0.11999999731779099
+                                  }
+                                ],
+                                "cornerRadius": 4,
+                                "clipsContent": true,
+                                "children": [
+                                  {
+                                    "type": "TEXT",
+                                    "props": {
+                                      "name": "v11/row/5/type-t",
+                                      "x": 0,
+                                      "y": 0,
+                                      "width": 38,
+                                      "height": 16,
+                                      "fills": [
+                                        {
+                                          "type": "SOLID",
+                                          "color": {
+                                            "r": 0.49803921580314636,
+                                            "g": 0.529411792755127,
+                                            "b": 0.5803921818733215
+                                          },
+                                          "opacity": 1
+                                        }
+                                      ],
+                                      "characters": "技能",
+                                      "fontName": {
+                                        "family": "PingFang SC",
+                                        "style": "Medium"
+                                      },
+                                      "fontSize": 9.5,
+                                      "textAutoResize": "NONE",
+                                      "lineHeight": {
+                                        "unit": "PIXELS",
+                                        "value": 16
+                                      },
+                                      "textAlignHorizontal": "CENTER",
+                                      "textAlignVertical": "CENTER"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/row/5/name",
+                                "x": 92,
+                                "y": 286.67,
+                                "width": 190,
+                                "height": 37.33,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.615686297416687,
+                                      "g": 0.6470588445663452,
+                                      "b": 0.7058823704719543
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "brand-guidelines",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Medium"
+                                },
+                                "fontSize": 13,
+                                "textAutoResize": "TRUNCATE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 37.33333206176758
+                                },
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/row/5/desc",
+                                "x": 290,
+                                "y": 286.67,
+                                "width": 370,
+                                "height": 37.33,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.49803921580314636,
+                                      "g": 0.529411792755127,
+                                      "b": 0.5803921818733215
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "统一品牌文案与配色（低于阈值）",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Regular"
+                                },
+                                "fontSize": 11.5,
+                                "textAutoResize": "TRUNCATE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 37.33333206176758
+                                },
+                                "textAlignHorizontal": "LEFT",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/5/bar",
+                                "x": 680,
+                                "y": 302.67,
+                                "width": 160,
+                                "height": 6,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 1,
+                                      "g": 1,
+                                      "b": 1
+                                    },
+                                    "opacity": 0.07999999821186066
+                                  }
+                                ],
+                                "cornerRadius": 3
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/5/bar-fill",
+                                "x": 680,
+                                "y": 302.67,
+                                "width": 67,
+                                "height": 6,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.29019609093666077,
+                                      "g": 0.3137255012989044,
+                                      "b": 0.3607843220233917
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "cornerRadius": 3
+                              }
+                            },
+                            {
+                              "type": "TEXT",
+                              "props": {
+                                "name": "v11/row/5/score",
+                                "x": 848,
+                                "y": 286.67,
+                                "width": 52,
+                                "height": 37.33,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.49803921580314636,
+                                      "g": 0.529411792755127,
+                                      "b": 0.5803921818733215
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "characters": "0.42",
+                                "fontName": {
+                                  "family": "PingFang SC",
+                                  "style": "Medium"
+                                },
+                                "fontSize": 12,
+                                "textAutoResize": "NONE",
+                                "lineHeight": {
+                                  "unit": "PIXELS",
+                                  "value": 37.33333206176758
+                                },
+                                "textAlignHorizontal": "RIGHT",
+                                "textAlignVertical": "CENTER"
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/row/5/line",
+                                "x": 20,
+                                "y": 324,
+                                "width": 880,
+                                "height": 1,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 1,
+                                      "g": 1,
+                                      "b": 1
+                                    },
+                                    "opacity": 0.03999999910593033
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/line/foot",
+                                "x": 20,
+                                "y": 336,
+                                "width": 880,
+                                "height": 1,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 1,
+                                      "g": 1,
+                                      "b": 1
+                                    },
+                                    "opacity": 0.05999999865889549
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/foot/rescore",
+                                "x": 20,
+                                "y": 350,
+                                "width": 84,
+                                "height": 30,
+                                "strokes": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 1,
+                                      "g": 1,
+                                      "b": 1
+                                    },
+                                    "opacity": 0.14000000059604645
+                                  }
+                                ],
+                                "strokeWeight": 1,
+                                "strokeAlign": "INSIDE",
+                                "cornerRadius": 8,
+                                "clipsContent": true,
+                                "children": [
+                                  {
+                                    "type": "TEXT",
+                                    "props": {
+                                      "name": "v11/foot/rescore/t",
+                                      "x": 0,
+                                      "y": 0,
+                                      "width": 84,
+                                      "height": 30,
+                                      "fills": [
+                                        {
+                                          "type": "SOLID",
+                                          "color": {
+                                            "r": 0.615686297416687,
+                                            "g": 0.6470588445663452,
+                                            "b": 0.7058823704719543
+                                          },
+                                          "opacity": 1
+                                        }
+                                      ],
+                                      "characters": "重新评分",
+                                      "fontName": {
+                                        "family": "PingFang SC",
+                                        "style": "Medium"
+                                      },
+                                      "fontSize": 11.5,
+                                      "textAutoResize": "NONE",
+                                      "lineHeight": {
+                                        "unit": "PIXELS",
+                                        "value": 30
+                                      },
+                                      "textAlignHorizontal": "CENTER",
+                                      "textAlignVertical": "CENTER"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/foot/cancel",
+                                "x": 700,
+                                "y": 350,
+                                "width": 70,
+                                "height": 30,
+                                "strokes": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 1,
+                                      "g": 1,
+                                      "b": 1
+                                    },
+                                    "opacity": 0.14000000059604645
+                                  }
+                                ],
+                                "strokeWeight": 1,
+                                "strokeAlign": "INSIDE",
+                                "cornerRadius": 8,
+                                "clipsContent": true,
+                                "children": [
+                                  {
+                                    "type": "TEXT",
+                                    "props": {
+                                      "name": "v11/foot/cancel/t",
+                                      "x": 0,
+                                      "y": 0,
+                                      "width": 70,
+                                      "height": 30,
+                                      "fills": [
+                                        {
+                                          "type": "SOLID",
+                                          "color": {
+                                            "r": 0.615686297416687,
+                                            "g": 0.6470588445663452,
+                                            "b": 0.7058823704719543
+                                          },
+                                          "opacity": 1
+                                        }
+                                      ],
+                                      "characters": "取消",
+                                      "fontName": {
+                                        "family": "PingFang SC",
+                                        "style": "Medium"
+                                      },
+                                      "fontSize": 11.5,
+                                      "textAutoResize": "NONE",
+                                      "lineHeight": {
+                                        "unit": "PIXELS",
+                                        "value": 30
+                                      },
+                                      "textAlignHorizontal": "CENTER",
+                                      "textAlignVertical": "CENTER"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "type": "FRAME",
+                              "props": {
+                                "name": "v11/foot/apply",
+                                "x": 784,
+                                "y": 350,
+                                "width": 116,
+                                "height": 30,
+                                "fills": [
+                                  {
+                                    "type": "SOLID",
+                                    "color": {
+                                      "r": 0.3803921639919281,
+                                      "g": 0.686274528503418,
+                                      "b": 0.9372549057006836
+                                    },
+                                    "opacity": 1
+                                  }
+                                ],
+                                "cornerRadius": 8,
+                                "clipsContent": true,
+                                "children": [
+                                  {
+                                    "type": "TEXT",
+                                    "props": {
+                                      "name": "v11/foot/apply/t",
+                                      "x": 0,
+                                      "y": 0,
+                                      "width": 116,
+                                      "height": 30,
+                                      "fills": [
+                                        {
+                                          "type": "SOLID",
+                                          "color": {
+                                            "r": 0.05882352963089943,
+                                            "g": 0.06666667014360428,
+                                            "b": 0.08235294371843338
+                                          },
+                                          "opacity": 1
+                                        }
+                                      ],
+                                      "characters": "应用所选（5）",
+                                      "fontName": {
+                                        "family": "PingFang SC",
+                                        "style": "Medium"
+                                      },
+                                      "fontSize": 11.5,
+                                      "textAutoResize": "NONE",
+                                      "lineHeight": {
+                                        "unit": "PIXELS",
+                                        "value": 30
+                                      },
+                                      "textAlignHorizontal": "CENTER",
+                                      "textAlignVertical": "CENTER"
+                                    }
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "TEXT",
+            "props": {
+              "name": "v11/note",
+              "x": 388,
+              "y": 882,
+              "width": 780,
+              "height": 16,
+              "fills": [
+                {
+                  "type": "SOLID",
+                  "color": {
+                    "r": 0.49803921580314636,
+                    "g": 0.529411792755127,
+                    "b": 0.5803921818733215
+                  },
+                  "opacity": 1
+                }
+              ],
+              "characters": "※ 结果按分数降序 · 阈值只改预勾选 · 应用只写当前会话",
+              "fontName": {
+                "family": "PingFang SC",
+                "style": "Regular"
+              },
+              "fontSize": 10.5,
+              "textAutoResize": "NONE",
+              "lineHeight": {
+                "unit": "PIXELS",
+                "value": 16
+              },
+              "textAlignHorizontal": "LEFT",
+              "textAlignVertical": "CENTER"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -133,6 +133,7 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
 - **设计源**：Figma 本地文档 **`dsh`**。**当前基线**：
   - `Capability Panel · 能力决策 v11`（page `56:7043`）：5 帧 `56:7046` / `56:7257` / `56:7468` /
     `56:7679` / `56:7890`，与代码「能力决策」实现对齐（默认关闭 + 双阈值 + 新密钥路径）；
+    5 帧可重导入 scene JSON 已导出（`docs/figma/scenes/v11-*.scene.json`）。
   - `Capability Panel · 终稿 v8`（page `42:3373`）：面板列表/详情/手风琴终稿，可重导入 scene 保留。
   - 历史页面（按序保留，不要删）：`Capability Dock · 终稿 v5`（page `4:2`：画板 `4:3`、首屏 hero
     `4:7`、会话内「能力」Tab `4:223`）、`Capability Panel · 升级原型 v6`（`10:2`）、
@@ -143,17 +144,19 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
   然后才用 `use_figma` / `get_screenshot` / `import_scene` / `download_assets`。画布工具报
   `unknown tool` 时按「关闭并重开 Figma 伴生插件 → `figma_status`/`figma_select_document`
   重新绑定 → 仍不行则重启 DSH 会话」排查；连不上时不要拿旧截图冒充新设计。
-- **可重导入的设计源在仓库**：`docs/figma/scenes/*.scene.json`（**目前仅 v5 与 v8**；`import_scene`
-  契约，可直接 `import_scene({ nodes: scene.nodes })` 重建可编辑图层）+ `docs/figma/preview/*.png`
-  （视觉对照）。**v9–v11 只有预览图 `preview/v9-*…v11-*` 与建稿脚本
-  `docs/figma/prototype/v9|v10|v11/`，scene JSON 尚未导出**；重建按 `docs/figma/README.md` §3.1
-  的脚本顺序在 Figma 内执行。重新导出用 `docs/figma/tools/export-scene.js`（`use_figma` 脚本，
-  按 `TARGET_NODE_ID` 与 `SERIALIZE_RANGE` 分片）。完整流程与已知限制见 `docs/figma/README.md`。
+- **可重导入的设计源在仓库**：`docs/figma/scenes/*.scene.json`（**含 v5、v8 各帧与 v11 五帧**
+  `scenes/v11-*.scene.json`；`import_scene` 契约，可直接 `import_scene({ nodes: scene.nodes })`
+  重建可编辑图层）+ `docs/figma/preview/*.png`（视觉对照）。v11 单帧节点数
+  170/97/131/158/324，**合计 880 > 500，需逐帧或分三次导入**（v11 导入方法见 README §3.1.2）。
+  **v9/v10 只有预览图 `preview/v9|v10-*` 与建稿脚本 `docs/figma/prototype/v9|v10/`，
+  scene JSON 未导出**；要重建这两页按 `docs/figma/README.md` §3.1 的脚本顺序在 Figma 内执行。
+  重新导出用 `docs/figma/tools/export-scene.js`（`use_figma` 脚本，按 `TARGET_NODE_ID` 与
+  `SERIALIZE_RANGE` 分片）。完整流程与已知限制见 `docs/figma/README.md`。
 - **已知限制**：scene 契约不含 VECTOR 图标（导入后图标为空）、只保留 SOLID 填充/描边与圆角/自动布局，
   渐变/阴影/图片不导出；文字字体为 `PingFang SC`。
 - **变更纪律**：用户可见 UI/交互改动 → 先改代码并跑验证 → 同步 Figma 基线节点（v11；面板结构改动
-  同时同步 v8）→ 重新导出预览图（v9–v11 暂无 scene JSON；v5/v8 变更时一并更新 scene JSON）→
-  与代码一起提交（CHANGELOG 里注明设计变更）。
+  同时同步 v8）→ 重新导出预览图 + 更新对应 scene JSON（v11 变更时重导 `scenes/v11-*.scene.json`；
+  v9/v10 暂无 scene；v5/v8 变更时一并更新）→ 与代码一起提交（CHANGELOG 里注明设计变更）。
 
 ## 构建产物 `lib/`（重要）
 
