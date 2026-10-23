@@ -35,6 +35,7 @@ import { scanInjectedMcpInstances } from "./mcp/runtime.js";
 import { createOverridesManager } from "./overrides/manager.js";
 import type { OverrideToggleInput } from "./overrides/manager.js";
 import { createImportsManager } from "./imports/manager.js";
+import { createJevManager } from "./jev/manager.js";
 import { findProjectRoot } from "./shared/project-root.js";
 import { mountRpcChannel } from "./remote.js";
 
@@ -69,11 +70,20 @@ export type SkillsService = ReturnType<typeof createService> & {
   setSessionEnabled: SkillSessionRegistry["setEnabled"];
 };
 
-/** 暴露给宿主调用方的传输无关服务：skills / mcp 两个域的合体 + 项目级禁用声明。 */
+/** 暴露给宿主调用方的传输无关服务：skills / mcp 两个域的合体 + 项目级禁用声明 + Jev。 */
 export interface CapabilityPanelService {
   skills: SkillsService;
   mcp: ReturnType<typeof createMcpManager>;
   overrides: ReturnType<typeof createOverridesManager>;
+  /** Jev 能力决策（配置 / 打分 / 应用；见 `jev/manager.ts`）。 */
+  jev: ReturnType<typeof createJevManager>;
+  /**
+   * 可选：按 serverName 从全局工具注册表反推 MCP 工具清单（只读）。
+   *
+   * 只给 Jev rank 的逐能力 question 用（让模型知道 server 实际能做什么）；
+   * 实现方任何异常应静默返回 []，不影响枚举/评分。
+   */
+  mcpTools?: (serverName: string) => Array<{ name: string; description?: string }>;
 }
 
 /** 宿主上下文增强：`ctx.capabilityPanel`。 */
@@ -127,6 +137,16 @@ export function apply(ctx: any, config: Config = {}) {
   // 避免两处读取口径分叉。
   const skillsBase = createService(ctx, config);
   const skillSessions = createSkillSessionRegistry(ctx);
+  // Jev 管理器：内部持有冷会话排队表与 agent/created|disposed 监听。service
+  // 访问器延迟求值（jev 与 service 互相引用），disposer 随插件卸载清监听与
+  // 内存队列（架构 §8.7）。
+  const serviceRef: { current?: CapabilityPanelService } = {};
+  const jev = createJevManager({
+    ctx,
+    dshHome: config.dshHome,
+    service: () => serviceRef.current,
+    logger: ctx.logger,
+  });
   const service: CapabilityPanelService = {
     skills: Object.assign(skillsBase, {
       sessionList: (cwd?: string, sessionId?: string) => skillSessions.list(skillsBase.list, cwd, sessionId),
@@ -148,9 +168,38 @@ export function apply(ctx: any, config: Config = {}) {
       imports,
     ),
     overrides,
+    jev,
+    // Jev rank 的 question 需要「这个 MCP server 能做什么」：从全局工具注册表
+    // 反推 `mcp__<serverName>__*`（name 取后缀、description 取 schema 描述）。
+    // 只读；tools 服务缺失或任何异常都静默降级为 []（评分照常，只是缺 tools）。
+    mcpTools: (serverName: string) => {
+      try {
+        const schemas = ctx.get?.("tools")?.schemas?.() ?? [];
+        const prefix = `mcp__${serverName}__`;
+        const tools: Array<{ name: string; description?: string }> = [];
+        for (const schema of Array.isArray(schemas) ? schemas : []) {
+          const fullName = typeof schema?.name === "string" ? schema.name : "";
+          if (!fullName.startsWith(prefix)) continue;
+          const name = fullName.slice(prefix.length);
+          if (name.length === 0) continue;
+          const description =
+            typeof schema?.description === "string" && schema.description.length > 0 ? schema.description : undefined;
+          tools.push(description !== undefined ? { name, description } : { name });
+        }
+        return tools;
+      } catch {
+        return [];
+      }
+    },
   };
+  // 回填给 jev 的延迟访问器：此后 apply/rank 才能枚举能力。
+  serviceRef.current = service;
   ctx.provide("capabilityPanel", () => service);
-  const disposers: Array<() => void> = [disposeUsageGuard, () => skillSessions.dispose()];
+  const disposers: Array<() => void> = [
+    disposeUsageGuard,
+    () => skillSessions.dispose(),
+    () => jev.dispose(),
+  ];
   if (config.mountRpc !== false) {
     const dispose = mountRpcChannel(ctx, service);
     if (typeof dispose === "function") disposers.push(dispose);
@@ -172,6 +221,27 @@ export type { SkillSessionRegistry, SessionSkillView, SessionSkillOpResult } fro
 export { createMcpLoader } from "./mcp/loader.js";
 export { createMcpManager } from "./mcp/manager.js";
 export { createOverridesManager } from "./overrides/manager.js";
+export { createJevManager } from "./jev/manager.js";
+export type { JevManager, JevManagerDeps } from "./jev/manager.js";
+export {
+  readJevConfig,
+  setJevConfig,
+  validateJevConfig,
+  resolveJevKey,
+  toJevConfigView,
+  redact,
+} from "./jev/config-file.js";
+export { jevConfigDir, jevConfigFile } from "./jev/paths.js";
+export { defaultJevConfig } from "./jev/types.js";
+export type {
+  JevConfig,
+  JevConfigInput,
+  JevConfigView,
+  JevRankItem,
+  JevRankResult,
+  JevApplyResult,
+  JevTestResult,
+} from "./jev/types.js";
 export { mountRpcChannel, handleEndpoint, CHANNEL } from "./remote.js";
 export { findProjectRoot } from "./shared/project-root.js";
 export { globalSkillsDir, projectSkillsDir, userAgentsSkillsDir } from "./skills/roots.js";

@@ -130,22 +130,30 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
 
 ## Figma 原型（dsh-to-figma 本地桥）
 
-- **设计源**：Figma 本地文档 **`dsh`** → 页面 **`Capability Dock · 终稿 v5`**（page `4:2`）：
-  画板 `4:3`、首屏 hero `4:7`、会话内「能力」Tab `4:223`；旧页面 `Capability Dock · 交互原型`
-  （page `1:2`）保留 v1–v4 历史，不要删。
+- **设计源**：Figma 本地文档 **`dsh`**。**当前基线**：
+  - `Capability Panel · 能力决策 v11`（page `56:7043`）：5 帧 `56:7046` / `56:7257` / `56:7468` /
+    `56:7679` / `56:7890`，与代码「能力决策」实现对齐（默认关闭 + 双阈值 + 新密钥路径）；
+  - `Capability Panel · 终稿 v8`（page `42:3373`）：面板列表/详情/手风琴终稿，可重导入 scene 保留。
+  - 历史页面（按序保留，不要删）：`Capability Dock · 终稿 v5`（page `4:2`：画板 `4:3`、首屏 hero
+    `4:7`、会话内「能力」Tab `4:223`）、`Capability Panel · 升级原型 v6`（`10:2`）、
+    `Capability Panel · 交互原型 v7`（`21:2353`）、`Capability Panel · Jev 模型 v9`（`49:4455`）、
+    `Capability Panel · 自主决策 v10`（`51:5711`）、`Capability Dock · 交互原型` v1–v4（page `1:2`）。
 - **工具前提**：Figma 桌面打开该文件并运行伴生插件「DSH to Figma · Local」，保持窗口常开。
   先 `figma_status`；断连或多文档时 `figma_select_document <connectionId>` 显式重新绑定，
   然后才用 `use_figma` / `get_screenshot` / `import_scene` / `download_assets`。画布工具报
   `unknown tool` 时按「关闭并重开 Figma 伴生插件 → `figma_status`/`figma_select_document`
   重新绑定 → 仍不行则重启 DSH 会话」排查；连不上时不要拿旧截图冒充新设计。
-- **可重导入的设计源在仓库**：`docs/figma/scenes/*.scene.json`（`import_scene` 契约，可直接
-  `import_scene({ nodes: scene.nodes })` 重建可编辑图层）+ `docs/figma/preview/*.png`（视觉对照）。
-  重新导出用 `docs/figma/tools/export-scene.js`（`use_figma` 脚本，按 `TARGET_NODE_ID` 与
-  `SERIALIZE_RANGE` 分片）。完整流程与已知限制见 `docs/figma/README.md`。
+- **可重导入的设计源在仓库**：`docs/figma/scenes/*.scene.json`（**目前仅 v5 与 v8**；`import_scene`
+  契约，可直接 `import_scene({ nodes: scene.nodes })` 重建可编辑图层）+ `docs/figma/preview/*.png`
+  （视觉对照）。**v9–v11 只有预览图 `preview/v9-*…v11-*` 与建稿脚本
+  `docs/figma/prototype/v9|v10|v11/`，scene JSON 尚未导出**；重建按 `docs/figma/README.md` §3.1
+  的脚本顺序在 Figma 内执行。重新导出用 `docs/figma/tools/export-scene.js`（`use_figma` 脚本，
+  按 `TARGET_NODE_ID` 与 `SERIALIZE_RANGE` 分片）。完整流程与已知限制见 `docs/figma/README.md`。
 - **已知限制**：scene 契约不含 VECTOR 图标（导入后图标为空）、只保留 SOLID 填充/描边与圆角/自动布局，
   渐变/阴影/图片不导出；文字字体为 `PingFang SC`。
-- **变更纪律**：用户可见 UI/交互改动 → 先改代码并跑验证 → 同步 Figma 终稿节点 →
-  重新导出 scene JSON + 预览图 → 与代码一起提交（CHANGELOG 里注明设计变更）。
+- **变更纪律**：用户可见 UI/交互改动 → 先改代码并跑验证 → 同步 Figma 基线节点（v11；面板结构改动
+  同时同步 v8）→ 重新导出预览图（v9–v11 暂无 scene JSON；v5/v8 变更时一并更新 scene JSON）→
+  与代码一起提交（CHANGELOG 里注明设计变更）。
 
 ## 构建产物 `lib/`（重要）
 

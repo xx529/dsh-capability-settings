@@ -40,6 +40,24 @@
  */
 import type { CapabilityPanelApi } from "./api.js";
 /**
+ * 域 Tab 的取值（快捷消息域已下线，现有技能 / MCP / Jev 模型三域）。
+ * `jev` 是配置页而不是条目域：无计数、无搜索、无左导航（见 UX v1.5 §5.1）。
+ * 导出给 client.ts 的 `openCapabilityPanel(domain?)` 复用。
+ */
+export type DomainTab = "skills" | "mcp" | "jev";
+/**
+ * 请求能力面板切到指定域（由 client.ts 的 `openCapabilityPanel(domain?)` 在
+ * `layout.selectPanel("capability-panel")` 之前调用）。
+ *
+ * 覆盖两种时序：
+ *   - 面板**已挂载**：派发 `capability-panel:set-domain`，组件监听后立即切 Tab；
+ *   - 面板**未挂载**：目标留在模块级 pending，组件首次渲染直接落在该域
+ *     （hero「去配置」因此能一步打开 Jev Tab，AC-ENT-4）。
+ *
+ * `undefined` = 保持当前域（无参打开面板的旧行为）。
+ */
+export declare function setPanelDomain(domain?: DomainTab): void;
+/**
  * 面板根组件：头部（标题 + 项目下拉框 + 域 Tab）+ 当前域视图。
  *
  * 它是主区域页面的本体（见 panel-entry.tsx 的 CapabilityPanelPage），自带

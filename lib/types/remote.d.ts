@@ -17,6 +17,7 @@
  * @module @chengdb/capability-panel/remote
  */
 import { CHANNEL } from "./channel.js";
+import type { JevManager } from "./jev/manager.js";
 export { CHANNEL };
 /**
  * RPC 通道的业务信封。
@@ -101,6 +102,13 @@ export interface PanelRpcService {
         get(cwd?: string): Promise<unknown>;
         toggle(input: unknown): Promise<unknown>;
     };
+    /**
+     * Jev 能力决策（配置 / 连通性 / 批量打分 / 批量应用）。
+     *
+     * 业务失败一律走 `value.ok=false`（信封仍恒 `ok:true`）；`rank` / `apply`
+     * 的成功支里可能带回 `pendingOutcome`（冷会话排队结果，读取即消费）。
+     */
+    jev: JevManager;
 }
 /**
  * 把 `(endpoint, payload)` 路由到服务并规范化结果。

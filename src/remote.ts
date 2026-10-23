@@ -18,6 +18,7 @@
  */
 
 import { CHANNEL } from "./channel.js";
+import type { JevManager } from "./jev/manager.js";
 
 export { CHANNEL };
 
@@ -105,6 +106,13 @@ export interface PanelRpcService {
     get(cwd?: string): Promise<unknown>;
     toggle(input: unknown): Promise<unknown>;
   };
+  /**
+   * Jev 能力决策（配置 / 连通性 / 批量打分 / 批量应用）。
+   *
+   * 业务失败一律走 `value.ok=false`（信封仍恒 `ok:true`）；`rank` / `apply`
+   * 的成功支里可能带回 `pendingOutcome`（冷会话排队结果，读取即消费）。
+   */
+  jev: JevManager;
 }
 
 /**
@@ -178,6 +186,20 @@ export async function handleEndpoint(service: PanelRpcService, endpoint: string,
         return { ok: true, value: await service.overrides.get(cwd) };
       case "overrides.toggle":
         return { ok: true, value: await service.overrides.toggle(p) };
+      case "jev.getConfig":
+        // 只回掩码视图（hasApiKey / apiKeySource / apiKeyLast4），绝无明文 key。
+        return { ok: true, value: await service.jev.getConfig() };
+      case "jev.setConfig":
+        return { ok: true, value: await service.jev.setConfig(p) };
+      case "jev.test":
+        // 探针在宿主进程 fetch（客户端拿不到 key）。payload 可为 `{config?}`
+        // （本次表单值，不落盘）；取消信号透传。
+        return { ok: true, value: await service.jev.test(p, _signal) };
+      case "jev.rank":
+        // 传整个 payload：sessionId / cwd / draft 由 service 再校验（与 mcp 一致）。
+        return { ok: true, value: await service.jev.rank(p, _signal) };
+      case "jev.apply":
+        return { ok: true, value: await service.jev.apply(p) };
       default:
         return failure([`unknown endpoint "${endpoint}"`]);
     }

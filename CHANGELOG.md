@@ -3,6 +3,109 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.4.0] - 2026-10-24
+
+### 新增
+
+- **能力面板第三个域 Tab「Jev 模型」**（TypeSafe Jev 全局配置页，无计数 / 无搜索 /
+  无左导航）：Base URL（默认 `https://api.typesafe.ai`）、模型名（默认 `jev-latest`）、
+  API Key 来源（`直接填写` / `环境变量`，默认变量名 `TYPESAFE_API_KEY`）、测试连接、
+  保存、恢复默认（需行内再点一次确认，只重置表单）。保存成功**不关闭页面、不跳转**，下一次
+  评分 / 测试立即生效。
+- **Jev 配置存储与密钥边界**：配置文件写入 `<dshHome>/capability-panel/jev.json`
+  （默认 `~/.dsh/capability-panel/jev.json`；`DSH_HOME` 存在时以其为根；目录 `0700` /
+  文件 `0600`）。密钥解析优先级 **环境变量（`apiKeyEnv`）> 配置文件 `apiKey`**；
+  `jev.getConfig` 只回 `hasApiKey` / `apiKeySource` / `apiKeyLast4`，浏览器与 RPC
+  响应均无明文；错误、日志与错误摘要统一脱敏。旧 `~/.agents/jev.json` 无历史迁移、
+  不读取。
+- **首屏 hero「✦ 能力决策」**：手动点按即发起评分；结果面板替换 hero 能力区内容
+  （同宽、不遮输入框、不抢焦点），按分数降序（同分技能先于 MCP、再按名称）；
+  阈值滑杆 `0–1` 步长 `0.05` 默认 `0.50`，分数 ≥ 阈值预勾选、支持手改；显示
+  `已选 n / N`（N 含不可切换项）；「应用所选」只写**当前会话**的会话开关，不改项目
+  默认，失败尽力回滚并报错。
+- **一次批量评分**：`POST {baseURL}/v1/systemone` 单次请求、每能力一条 `noul`、
+  返回 0–1 分；**不分片、不按能力拆请求**；单次最多 300 个能力（超出直接报错不请求）；
+  超上下文返回「输入内容超出模型上下文上限」，不自动截断或分批。缺分 / 非数值容错：
+  数值 clamp 到 `[0,1]`（`1.2`→`1`），缺失 / 字符串 / `NaN` → 该能力 `score=0` +
+  `reason="no-answer"`（界面「未获得评分」），**不整单失败**，列表不丢行。
+- **输入停顿自动触发（默认关闭）**：开启后仅 hero 相位、已配置、无评分 / 应用进行中，
+  且同时满足「草稿字符数 ≥ 最少触发字数」「自上次能力决策累计插入 + 删除字符数 ≥
+  最少修改间隔字符数」时，停顿达到阈值自动发起 1 次评分并展开面板。可配置：停顿阈值
+  （默认 `1000ms`，`300–3000`、步长 100）、最少触发字数（默认 `10`，`1–200`）、
+  最少修改间隔字符数（默认 `4`，`1–100`）。编辑量在任意一次决策触发后、草稿清空后、
+  发送首条消息后归零；停顿计时每次草稿变化都重置但不清零编辑量；取消后同草稿静默，
+  直到再次累计到最少修改量；不弹 toast、不抢焦点、不进 `aria-live`。
+- **冷会话排队应用**：首屏无 live agent 时 `jev.apply` 只入宿主内存 pending 队列，
+  chips 立即乐观回显 + 提示「已加入本会话，发送首条消息后生效」（有跳过项时合并
+  提示）；`agent/created` 后 `setTimeout(0)` 延后应用，失败重试 2 次（100ms / 300ms）；
+  激活后应用失败以一次性 `pendingOutcome` 回执提示（读取即消费，插件重载会丢失）。
+- **RPC**：新增 `jev.getConfig / setConfig / test / rank / apply` 五个端点；沿用
+  `{ok:true,value}` 传输信封与 `value:{ok:false,...}` 业务失败约定。
+
+### 修复
+
+- **首次配置保存后首屏不刷新**（测试报告 F3）：配置保存成功后广播
+  `capability-panel:jev-config-changed` 事件，hero 监听事件并在窗口重新聚焦时重读
+  `jev.getConfig`；无需刷新页面即可用新配置评分、按新门槛自动触发。
+- **Jev rank 打分质量**：旧请求把能力数组放在 `state.capabilities`，但 155 条
+  noul question 的 instructions/criteria 完全相同、题内又不含能力（question id
+  不发给模型），模型只能给出几乎相同的概率，实测分数集中在 0.40–0.41，排序与阈值
+  失效。现改为 `state = { request, guidance }`，每题结构化 instructions 内嵌
+  `capability { kind, name, description, whenToUse?, tools? }`（MCP 带工具名/描述：
+  配置条目经宿主 `mcpTools(serverName)` 从工具 schema 反推、外部实例用 runtime
+  tools），题目逐能力唯一、criteria 更明确，仍保持一次请求、不分片。RPC 返回形状
+  不变、客户端无感；内部请求体积 152 条 ≈105KB（约 27k tokens），低于默认 64k
+  上下文，超限仍报 `context-too-long`。tester task-31 复验 **567 PASS / 0 FAIL**
+  （host-rank 126），typecheck / build 与既有回归全 0；真实 Jev 分数分布需用户真机
+  复测（本机无 key），架构文档同步 v1.1（task-32）。
+
+### 变更
+
+- **结果面板精简**：移除说明行 / 隐私行 / 阈值提示，仅保留标题、模型徽标、阈值与列表。
+- **域 Tab 由两个变三个**：`技能 / MCP / Jev 模型`；第三个 Tab 无计数、无搜索，
+  选中时头部工作区路径与项目作用域下拉隐藏（内容区为单列配置页）。
+- **评分错误语义调整**：不再有「评分结果不完整」错误态；单能力缺分 / 非法分按
+  `no-answer` 容错（0 分 + 可解释标注），只有 HTTP / 鉴权 / 超时 / 上下文 / 空能力等
+  整体失败才进入错误态。
+- **重试与超时边界**：仅 429 / 529 在 HTTP 层最多重试 2 次（固定 500ms / 1000ms
+  退避，无抖动）；其它 4xx 不重试；单次尝试超时 30s；自动触发失败不自动重试。
+- **隐私与发送范围**：评分请求只由宿主发起；请求体仅含当前草稿 + 能力名称 / 描述
+  （截断到 200 / 120 码点），不含历史消息、文件正文、项目路径、session/cwd 或
+  API Key；错误与日志同样脱敏。
+- **文档与原型**：新增 `docs/specs/jev-auto-select.md` v1.3.1（含 §11 实现裁决记录）、
+  `docs/ux/jev-auto-select.md` v1.5、`docs/architecture/jev-capability-decision.md`；
+  Figma v11 五帧（`docs/figma/preview/v11-*.png`）；README 增加「Jev 能力决策」章节、
+  三 Tab 总述与旧截图跨版本说明。
+
+### 内部
+
+- 实现（task-14~21）：
+  - 宿主新增 `src/jev/paths.ts`（dsh home 路径）、`types.ts`（配置 / 错误码契约）、
+    `config-file.ts`（读写锁 + 原子写 + 校验 + 脱敏）、`manager.ts`（RPC 业务与密钥
+    解析）、`rank.ts`（systemone 请求构造 / 容错解析 / 排序 / 错误映射）、
+    `apply.ts`（枚举、会话写入事务、冷会话 pending）。
+  - `src/remote.ts` 增加 5 个 `jev.*` 路由；`src/index.ts` 装配 manager / apply 引擎与
+    `agent/created`、`agent/disposed` 生命周期监听；`src/shared/atomic-write.ts`
+    支持写入文件 mode。
+  - 客户端新增 `src/client/jev-panel.tsx`（配置页）；`src/client/api.ts` /
+    `api-adapter.ts` 增加 `jev.*` 适配；`src/client/panel.tsx` 三域 Tab 与 Jev 页；
+    `src/client/composer-capability.tsx` 能力决策调度器（手动 / 自动 / 编辑计数 /
+    冷会话 pending / 结果面板）；`src/client/styles.ts` 新增样式与
+    `@container 720/560` 断点。
+- 验证（task-17）：
+  - `bash notes/verify/jev-capability-decision/run-all.sh` — exit 0，**511/511 断言
+    通过**（host-config 68、host-rank 93、host-apply 69、host-rpc 12、client-panel 73、
+    client-hero 178、client-adapter 18）；`pnpm typecheck` / `pnpm build` exit 0。
+  - 既有回归 `bash notes/verify/run-all.sh` — 全部子脚本 exit 0；既有回归断言未改，
+    `render-smoke` 的域 Tab 断言仍只校验「技能 / MCP 存在且无快捷消息」，不与第三
+    Tab 冲突。
+  - 报告：`notes/verify/jev-capability-decision/report.md`（含覆盖矩阵、关键断言、
+    规格—实现偏差 F1/F2/F3/F4/F5 与真机验证状态）。
+- 未验证 / 已知限制：真机浏览器未执行（隔离 `DSH_HOME` + 同版本外壳未搭建）；hero
+  `useInput` 实机可用性、冷会话排队后首条消息是否真正生效、首次配置保存后事件链
+  仍建议真机补验（见报告 §8–§9）；Windows 上 POSIX mode 语义不生效（记录 warning，
+  不阻断保存）。
+
 ## [1.3.4] - 2026-10-23
 
 ### 变更
@@ -449,6 +552,7 @@
   输出总量上限（对接入的压缩包上限之下再拦一层"膨胀内存"），并修复
   数据区越界被静默截断、短归档负面偏移读越界的问题（zip bomb 防护）。
 
+[1.4.0]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.3.4...v1.4.0
 [1.3.4]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.3.3...v1.3.4
 [1.3.3]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.3.1...v1.3.2

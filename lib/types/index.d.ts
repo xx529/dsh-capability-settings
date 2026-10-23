@@ -25,6 +25,7 @@ import { createService } from "./skills/manager.js";
 import type { SessionSkillView, SkillSessionRegistry } from "./skills/session.js";
 import { createMcpManager } from "./mcp/manager.js";
 import { createOverridesManager } from "./overrides/manager.js";
+import { createJevManager } from "./jev/manager.js";
 /** Cordis 插件名（对应 cordis.patch.yml 里的插件 id）。 */
 export declare const name = "capability-panel";
 /** 宿主插件强依赖的服务（connection/webServer 是惰性解析的，不在这里声明）。 */
@@ -52,11 +53,23 @@ export type SkillsService = ReturnType<typeof createService> & {
     /** 设置本会话开关（内存态，不落盘）。 */
     setSessionEnabled: SkillSessionRegistry["setEnabled"];
 };
-/** 暴露给宿主调用方的传输无关服务：skills / mcp 两个域的合体 + 项目级禁用声明。 */
+/** 暴露给宿主调用方的传输无关服务：skills / mcp 两个域的合体 + 项目级禁用声明 + Jev。 */
 export interface CapabilityPanelService {
     skills: SkillsService;
     mcp: ReturnType<typeof createMcpManager>;
     overrides: ReturnType<typeof createOverridesManager>;
+    /** Jev 能力决策（配置 / 打分 / 应用；见 `jev/manager.ts`）。 */
+    jev: ReturnType<typeof createJevManager>;
+    /**
+     * 可选：按 serverName 从全局工具注册表反推 MCP 工具清单（只读）。
+     *
+     * 只给 Jev rank 的逐能力 question 用（让模型知道 server 实际能做什么）；
+     * 实现方任何异常应静默返回 []，不影响枚举/评分。
+     */
+    mcpTools?: (serverName: string) => Array<{
+        name: string;
+        description?: string;
+    }>;
 }
 /** 宿主上下文增强：`ctx.capabilityPanel`。 */
 declare module "@deepseek-ai/cordis" {
@@ -77,6 +90,12 @@ export type { SkillSessionRegistry, SessionSkillView, SessionSkillOpResult } fro
 export { createMcpLoader } from "./mcp/loader.js";
 export { createMcpManager } from "./mcp/manager.js";
 export { createOverridesManager } from "./overrides/manager.js";
+export { createJevManager } from "./jev/manager.js";
+export type { JevManager, JevManagerDeps } from "./jev/manager.js";
+export { readJevConfig, setJevConfig, validateJevConfig, resolveJevKey, toJevConfigView, redact, } from "./jev/config-file.js";
+export { jevConfigDir, jevConfigFile } from "./jev/paths.js";
+export { defaultJevConfig } from "./jev/types.js";
+export type { JevConfig, JevConfigInput, JevConfigView, JevRankItem, JevRankResult, JevApplyResult, JevTestResult, } from "./jev/types.js";
 export { mountRpcChannel, handleEndpoint, CHANNEL } from "./remote.js";
 export { findProjectRoot } from "./shared/project-root.js";
 export { globalSkillsDir, projectSkillsDir, userAgentsSkillsDir } from "./skills/roots.js";

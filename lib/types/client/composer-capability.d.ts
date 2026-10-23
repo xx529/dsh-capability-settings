@@ -19,6 +19,7 @@
  *
  * @module @chengdb/capability-panel/client/composer-capability
  */
+import type { ReactNode } from "react";
 import type { CapabilityPanelApi, ClientMcpRuntimeServer, ClientMcpServer, ClientSkillSummary } from "./api.js";
 import { type MountInfo } from "./mcp-common.js";
 export interface CapabilitySnapshot {
@@ -54,6 +55,32 @@ export interface McpRow {
     locked: boolean;
 }
 export type Row = SkillRow | McpRow;
+/** 能力面板域 Tab（`onManage` 可指定打开哪个 Tab，由 src/client.ts 接线）。 */
+export type PanelDomain = "skills" | "mcp" | "jev";
+/**
+ * 宿主 `conversation.input.dock` 槽透传的 standardProps 子集。
+ *
+ * 真机契约（app.asar 只读核对）：该槽 ownerProps 为 `InputZone { session, input }`，
+ * standardProps 含 `useInput: SnapshotSelectorHook<InputState>`。旧外壳可能两者都
+ * 没有，因此全部可选。
+ */
+export interface HeroSlotProps {
+    /** 订阅式草稿选择器（首选草稿来源，变化即重渲染）。 */
+    useInput?: (selector: (state: any) => string) => string;
+    /** 点时刻草稿（InputZone ownerProps，次选）。 */
+    input?: {
+        draft?: string;
+    };
+    sessionId?: string;
+}
+/** `ComposerCapabilityHero` 的入参（由 `src/client.ts` 的槽注册回调装配）。 */
+export interface ComposerCapabilityHeroProps {
+    api: CapabilityPanelApi;
+    /** 打开能力面板；传 `"jev"` 时停在「Jev 模型」Tab。 */
+    onManage?: (domain?: PanelDomain) => void;
+    /** 宿主槽 standardProps（`useInput` / `input`），旧外壳可能不传。 */
+    slotProps?: HeroSlotProps;
+}
 export declare function buildSkillRows(snapshot: CapabilitySnapshot, pending: Record<string, boolean>): SkillRow[];
 export declare function buildMcpRows(snapshot: CapabilitySnapshot, pending: Record<string, boolean>): McpRow[];
 export declare function CapabilityCard({ row, busy, onToggle }: {
@@ -77,20 +104,28 @@ interface PanelProps {
     onCollapse: () => void;
     onManage?: () => void;
     onRetry?: () => void;
+    /** 入口「✦ 能力决策」（展开态在 tabs 行右侧；仅 hero 传入）。 */
+    decisionEntry?: ReactNode;
+    /** 自动触发默认关闭的弱提示（与入口同排，窄容器隐藏）。 */
+    decisionHint?: string;
+    /** 自动触发停顿倒计时（aria-live="off"，不干扰读屏）。 */
+    decisionWaiting?: {
+        elapsedMs: number;
+        pauseMs: number;
+    } | undefined;
 }
 export declare function CapabilityPanel(props: PanelProps & {
     initialTab?: TabId;
 }): import("react").JSX.Element;
-export declare function CapabilityBar({ skillRows, mcpRows, loading, onExpand }: {
+export declare function CapabilityBar({ skillRows, mcpRows, loading, onExpand, decisionEntry, }: {
     skillRows: SkillRow[];
     mcpRows: McpRow[];
     loading: boolean;
     onExpand: () => void;
+    /** 入口「✦ 能力决策」（紧邻「配置」左侧；仅 hero 传入）。 */
+    decisionEntry?: ReactNode;
 }): import("react").JSX.Element;
-export declare function ComposerCapabilityHero({ api, onManage }: {
-    api: CapabilityPanelApi;
-    onManage?: () => void;
-}): import("react").JSX.Element;
+export declare function ComposerCapabilityHero(props: ComposerCapabilityHeroProps): import("react").JSX.Element;
 export declare function SessionCapabilityView({ apiFor, sessionId: initialSessionId, onManage, }: {
     apiFor: (sessionId: string | undefined) => CapabilityPanelApi;
     sessionId?: string;

@@ -22,6 +22,7 @@
 
 import { createElement } from "react";
 import { createPanelApi } from "./client/api-adapter.js";
+import { setPanelDomain, type DomainTab } from "./client/panel.js";
 import { installStyles } from "./client/styles.js";
 import { CapabilityPanelNavIcon, CapabilityPanelPage } from "./client/panel-entry.js";
 import { ComposerCapabilityHero, SessionCapabilityView } from "./client/composer-capability.js";
@@ -234,7 +235,16 @@ export function apply(ctx: any) {
   // `conversation.view` 是 session 作用域 list 槽，标准 props 可能只给
   // inspectCall/openView 等，这里用 props.sessionId 优先、sessions 快照兜底。
   if (ctx.slots?.inject && ctx.slots.register) {
-    const openCapabilityPanel = () => {
+    /**
+     * 打开能力面板（可指定落点域）。
+     *
+     * `domain` 省略 = 保持面板当前域（旧行为）；传 "jev" 时先经
+     * `setPanelDomain` 记录 pending / 广播事件，再切主区域——面板已挂载则立即
+     * 切到「Jev 模型」Tab，尚未挂载则首次渲染直接落在该 Tab（未配置引导
+     * AC-ENT-4：hero 的「去配置」走 `onManage("jev")`）。
+     */
+    const openCapabilityPanel = (domain?: DomainTab) => {
+      setPanelDomain(domain);
       try {
         ctx.get("layout")?.selectPanel?.("capability-panel");
       } catch {
@@ -253,9 +263,16 @@ export function apply(ctx: any) {
     // 首屏（hero）的能力配置区：外壳 hero 态没有会话 view，用
     // conversation.input.dock 里的零高锚点 + fixed 面板覆盖到输入卡下方
     // （见 composer-capability.tsx）。active 相位该组件返回 null。
+    //
+    // `slotProps` 必须透传：hero 要在首屏读输入框草稿 / 停顿自动触发，
+    // 而草稿与 input 状态由外壳的 standardProps 注入，不能从 api 侧拿到。
     const disposeCapabilityHero = ctx.slots.inject("conversation.input.dock", () =>
       ctx.slots.register({ name: "conversation.input.dock", id: "capability-panel-hero", order: 60, label: "本会话能力（首屏）" }, (props: any) =>
-        ComposerCapabilityHero({ api: composerApiFor(props?.sessionId), onManage: openCapabilityPanel }),
+        ComposerCapabilityHero({
+          api: composerApiFor(props?.sessionId),
+          onManage: openCapabilityPanel,
+          slotProps: props,
+        }),
       ),
     );
     if (typeof disposeCapabilityHero === "function") disposers.push(disposeCapabilityHero);

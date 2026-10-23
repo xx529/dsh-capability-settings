@@ -408,6 +408,234 @@ export interface OverridesApi {
 }
 
 // ---------------------------------------------------------------------------
+// Jev 域（能力决策：配置 / 测试连接 / 评分 / 应用）
+//
+// 类型与宿主 `src/jev/types.ts` 同名同义（传输边界两侧各镜像一份，见架构
+// §5.2）。与 skills/mcp 的关键差异：`rank` / `apply` 的业务失败**不抛出**，
+// 原样返回 `{ ok:false, code, errors }`，前端按 `code` 做错误分类（架构 §9.7）。
+// ---------------------------------------------------------------------------
+
+/** 评分 / 测试 / 密钥解析失败的分类码（架构 §5.4）。 */
+export type JevErrorCode =
+  | "no-config"
+  | "auth"
+  | "rate-limit"
+  | "overloaded"
+  | "timeout"
+  | "context-too-long"
+  | "network"
+  | "bad-request"
+  | "empty-capabilities";
+
+/** `setConfig` 的业务错误码。 */
+export type JevSetConfigErrorCode = "invalid-config" | "write-failed";
+
+/** `apply` 的业务错误码。 */
+export type JevApplyErrorCode = "bad-request" | "write-failed";
+
+/** 一次评分请求的 token 用量（宿主原样透传）。 */
+export interface JevUsage {
+  input_tokens: number;
+  output_tokens: number;
+}
+
+/** 自动触发（输入停顿后自动评分）的四个可配置门槛。 */
+export interface JevAutoTrigger {
+  /** 总开关，**默认 false**（默认关闭）。 */
+  enabled: boolean;
+  /** 停顿阈值（ms）：300–3000，步长 100，默认 1000。 */
+  pauseMs: number;
+  /** 最少触发字数：1–200，默认 10。 */
+  minChars: number;
+  /** 最少修改间隔字符数：1–100，默认 4。 */
+  minEditChars: number;
+}
+
+/**
+ * 配置文件 `~/.dsh/capability-panel/jev.json` 的完整形状。
+ *
+ * 客户端只镜像语义、不落盘；`apiKey` 仅在提交 `setConfig` 时单向下发，
+ * 任何读取响应都不会带明文（架构 §4.2）。
+ */
+export interface JevConfig {
+  /** 服务根地址（不含 `/v1/systemone`），默认 `https://api.typesafe.ai`。 */
+  baseURL: string;
+  /** 模型名，默认 `jev-latest`。 */
+  model: string;
+  /** 直接填写的密钥（可省略）。 */
+  apiKey?: string;
+  /** 承载密钥的环境变量名，默认 `TYPESAFE_API_KEY`。 */
+  apiKeyEnv?: string;
+  autoTrigger: JevAutoTrigger;
+  /** 单次 HTTP 尝试超时（ms），默认 30000。 */
+  timeoutMs: number;
+}
+
+/** `setConfig` 的入参：字段均可选；`autoTrigger` 若提供必须是完整对象。 */
+export type JevConfigInput = Partial<Omit<JevConfig, "autoTrigger">> & { autoTrigger?: JevAutoTrigger };
+
+/** `jev.setConfig` 的 payload。 */
+export interface JevSetConfigInput {
+  config: JevConfigInput;
+}
+
+/**
+ * `jev.getConfig` 的视图（**不含任何密钥明文**，架构 §4.2）。
+ *
+ * `apiKeyEnv` 是宿主 additive 字段（架构 §4.2 的补充，task-19）：返回已保存的
+ * 环境变量名（默认 `TYPESAFE_API_KEY`，非明文），供配置页回显；宿主暂时缺失时
+ * 前端退回默认值。
+ */
+export interface JevConfigView {
+  baseURL: string;
+  model: string;
+  hasApiKey: boolean;
+  apiKeySource: "env" | "file" | "none";
+  /** 已保存密钥的末 4 位；无 key 为 null，短 key 为 `"****"`。 */
+  apiKeyLast4: string | null;
+  autoTrigger: JevAutoTrigger;
+  timeoutMs: number;
+  /** 已保存的环境变量名（additive，默认 TYPESAFE_API_KEY；缺省时前端兜底）。 */
+  apiKeyEnv?: string;
+}
+
+/** 保存结果的字段级明细（宿主 additive 返回）。 */
+export interface JevConfigIssue {
+  field: string;
+  code: string;
+  message: string;
+}
+
+/** `jev.setConfig` 的返回：成功 `{ok:true}`；失败带错误码与可读错误。 */
+export type JevSetConfigResult =
+  | { ok: true }
+  | { ok: false; code: JevSetConfigErrorCode; errors: string[]; issues?: JevConfigIssue[] };
+
+/** `jev.test` 的返回：成功带回实际模型与首次尝试耗时。 */
+export type JevTestResult =
+  | { ok: true; model: string; latencyMs: number }
+  | { ok: false; code: JevErrorCode; errors: string[] };
+
+/** 一条被评分的能力（宿主枚举 + 打分 + 会话态投影）。 */
+export interface JevRankItem {
+  /** 稳定能力 id：`cap_<36 位小写 hex>`；apply 只认这个 id。 */
+  id: string;
+  kind: "skill" | "mcp";
+  name: string;
+  description: string;
+  /** 0..1 的 noul 分数；无答案记 0。 */
+  score: number;
+  /** 能力本身可启用（与 session 活性无关）。 */
+  applicable: boolean;
+  /** `applicable=false` 时的原因。 */
+  reason?: string;
+  /** 当前会话启用态（前端勾选初值 / 回显）。 */
+  enabledInSession: boolean;
+}
+
+/** 冷会话排队应用的结果回执（宿主 additive 返回，读取即消费）。 */
+export interface JevPendingOutcome {
+  applied: number;
+  failed: number;
+  errors: string[];
+  /** epoch ms。 */
+  at: number;
+}
+
+/** `jev.rank` 的返回：成功分支携带完整评分结果；失败分支带分类码。 */
+export type JevRankResult =
+  | {
+      ok: true;
+      items: JevRankItem[];
+      model: string;
+      usage: JevUsage;
+      elapsedMs: number;
+      /** 逻辑批量请求数（重试不累加），恒为 1。 */
+      requestCount: 1;
+      capabilitiesTotal: number;
+      pendingOutcome?: JevPendingOutcome;
+    }
+  | { ok: false; code: JevErrorCode; errors: string[] };
+
+/** `apply` 跳过原因。 */
+export type JevApplySkipReason =
+  | "unknown-id"
+  | "hard-disabled"
+  | "not-restrictable"
+  | "not-toggleable"
+  | "shadowed"
+  | "already-applied";
+
+/** 一条应用计划项（宿主按 id 重解析，不信任 name/target）。 */
+export interface JevApplyPlanItem {
+  id: string;
+  kind: "skill" | "mcp";
+  name: string;
+  target?: string;
+  /** 本期只支持「启用」。 */
+  enabled: true;
+}
+
+/** 被跳过的计划项。 */
+export interface JevApplySkipped {
+  id: string;
+  reason: JevApplySkipReason;
+}
+
+/** 应用失败的计划项。 */
+export interface JevApplyFailed {
+  id: string;
+  reason: string;
+}
+
+/** `jev.apply` 的返回：成功分支含 applied/skipped/pending；失败分支带分类码。 */
+export type JevApplyResult =
+  | {
+      ok: true;
+      applied: number;
+      skipped: JevApplySkipped[];
+      pending: boolean;
+      failed?: JevApplyFailed[];
+      errors?: string[];
+      pendingOutcome?: JevPendingOutcome;
+    }
+  | { ok: false; code: JevApplyErrorCode; errors: string[] };
+
+/** 成功分支的收窄别名（组件按需使用）。 */
+export type JevRankSuccess = Extract<JevRankResult, { ok: true }>;
+export type JevApplySuccess = Extract<JevApplyResult, { ok: true }>;
+
+/**
+ * Jev 域的面板 API。
+ *
+ * 与 skills/mcp 不同，`rank` / `apply` 的业务失败**不 throw**，原样返回带
+ * `code` 的对象；只有传输层异常（RPC reject / sessionId 缺失）才抛。
+ */
+export interface JevApi {
+  /** 读取全局配置视图（永远不含密钥明文）。 */
+  getConfig(): Promise<JevConfigView>;
+  /** 保存全局配置：成功不关闭配置页，由调用方决定是否重新读取。 */
+  setConfig(input: JevSetConfigInput): Promise<JevSetConfigResult>;
+  /**
+   * 发一次最小探针（不落盘、不改会话开关）。
+   *
+   * - 不传 / 传 `{}`：用**已保存的配置**（旧行为）。
+   * - 传 `{config: {config: JevConfigInput}}`：内层 `config` 与 `setConfig` 同形，
+   *   adapter 把它原样作为 RPC payload `{config: JevConfigInput}` 透传；宿主以
+   *   「当前磁盘配置 + 该 config」合并出**仅本次探针使用的临时配置**，用于
+   *   AC-CFG-10「测试使用当前表单值且不写盘」。
+   */
+  test(input?: { config?: JevSetConfigInput }): Promise<JevTestResult>;
+  /**
+   * 为当前会话的全部可评分能力打分。
+   * `sessionId` / `cwd` 由 adapter 从 api 依赖自动注入，组件只需传草稿。
+   */
+  rank(input: { draft: string; sessionId?: string; cwd?: string }, signal?: AbortSignal): Promise<JevRankResult>;
+  /** 应用一份计划（由宿主按 id 重解析；冷会话走排队）。 */
+  apply(input: { plan: JevApplyPlanItem[]; sessionId?: string; cwd?: string }): Promise<JevApplyResult>;
+}
+
+// ---------------------------------------------------------------------------
 // 面板根（跨域公共部分）
 // ---------------------------------------------------------------------------
 
@@ -418,11 +646,16 @@ export interface WorkspaceOption {
   title?: string;
 }
 
-/** 面板需要的全部宿主能力（skills + mcp + 项目级禁用 + 工作区选择），传输无关。 */
+/** 面板需要的全部宿主能力（skills + mcp + overrides + jev + 工作区选择），传输无关。 */
 export interface CapabilityPanelApi {
   skills: SkillsApi;
   mcp: McpApi;
   overrides: OverridesApi;
+  /**
+   * Jev 能力决策域。配置页只用 `getConfig/setConfig/test`；`rank/apply` 需要
+   * 会话上下文（composer 的每会话 api），在面板根 api 上调用会抛错。
+   */
+  jev: JevApi;
   /** 面板头部的"项目作用域"目录标签。 */
   workspaceLabel(): string;
   /**

@@ -22,6 +22,12 @@ import type {
   ClientSkillSummary,
   CreateSkillInput,
   InstallResult,
+  JevApplyResult,
+  JevConfigIssue,
+  JevConfigView,
+  JevRankResult,
+  JevSetConfigResult,
+  JevTestResult,
   McpTestResult,
   McpUpsertInput,
   WorkspaceOption,
@@ -390,6 +396,90 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
       },
     },
 
+    jev: {
+      /**
+       * 读取全局配置视图：宿主只回掩码 / 来源，**永不含明文**（架构 §4.2）。
+       * 传输层失败（通道不可用 / 宿主未装配 jev 服务）抛错，配置页进入
+       * load-error 态并给「重试」。
+       */
+      async getConfig(): Promise<JevConfigView> {
+        const result = await rpc("jev.getConfig", {});
+        if (!result.ok) throw new Error(result.errors.join("; "));
+        return toJevConfigView(result.value);
+      },
+
+      /**
+       * 保存全局配置：**业务失败原样返回**（`invalid-config` / `write-failed`
+       * + errors + 可选 issues），不抛错——配置页需要按 code 分类并把
+       * issues 落到字段行内。只有传输层失败才抛。
+       */
+      async setConfig(input): Promise<JevSetConfigResult> {
+        const result = await rpc("jev.setConfig", { config: input.config });
+        const failure = toJevFailure(result);
+        if (failure !== undefined) return failure as JevSetConfigResult;
+        if (!result.ok) throw new Error(result.errors.join("; "));
+        return { ok: true };
+      },
+
+      /**
+       * 测试连接：宿主发一次最小探针。
+       *
+       * - 无参：payload `{}` ⇒ 用已保存配置（旧行为）；
+       * - 传 `{config: JevSetConfigInput}`：**透传内层对象**为 RPC payload
+       *   `{config: JevConfigInput}`（与 setConfig 同形），宿主据此合并出仅本次
+       *   探针使用的临时配置，不写盘（AC-CFG-10）。
+       *
+       * 业务失败带 code 原样返回供分类文案；传输层失败才抛。
+       */
+      async test(input): Promise<JevTestResult> {
+        const payload: unknown = input?.config !== undefined ? input.config : {};
+        const result = await rpc("jev.test", payload);
+        const failure = toJevFailure(result);
+        if (failure !== undefined) return failure as JevTestResult;
+        if (!result.ok) throw new Error(result.errors.join("; "));
+        const value = unwrap(result) as unknown as Record<string, unknown>;
+        return {
+          ok: true,
+          model: typeof value.model === "string" && value.model.length > 0 ? value.model : "",
+          latencyMs: typeof value.latencyMs === "number" && Number.isFinite(value.latencyMs) ? value.latencyMs : 0,
+        };
+      },
+
+      /**
+       * 评分：`sessionId` / `cwd` 由 api 依赖注入（组件只传草稿）。
+       * 业务失败（含 no-config / auth / timeout 等 9 个 code）**不 throw**，
+       * 前端按 code 分类；面板根 api 没有 session 上下文时直接抛错。
+       */
+      async rank(input, signal): Promise<JevRankResult> {
+        if (deps.sessionId === undefined) throw new Error("jev.rank requires a session context");
+        const cwd = input.cwd ?? deps.currentWorkspaceCwd();
+        const result = await rpc(
+          "jev.rank",
+          { sessionId: deps.sessionId, draft: input.draft, ...(cwd !== undefined ? { cwd } : {}) },
+          signal,
+        );
+        const failure = toJevFailure(result);
+        if (failure !== undefined) return failure as JevRankResult;
+        if (!result.ok) throw new Error(result.errors.join("; "));
+        return unwrap(result) as unknown as JevRankResult;
+      },
+
+      /** 应用：同上，业务失败原样返回（bad-request / write-failed）。 */
+      async apply(input): Promise<JevApplyResult> {
+        if (deps.sessionId === undefined) throw new Error("jev.apply requires a session context");
+        const cwd = input.cwd ?? deps.currentWorkspaceCwd();
+        const result = await rpc("jev.apply", {
+          sessionId: deps.sessionId,
+          plan: input.plan,
+          ...(cwd !== undefined ? { cwd } : {}),
+        });
+        const failure = toJevFailure(result);
+        if (failure !== undefined) return failure as JevApplyResult;
+        if (!result.ok) throw new Error(result.errors.join("; "));
+        return unwrap(result) as unknown as JevApplyResult;
+      },
+    },
+
     // 工作区相关方法直接透传注入的 deps（状态由 client.ts 持有）。
     workspaceLabel() {
       return deps.currentWorkspaceCwd() ?? "（无工作区）";
@@ -478,5 +568,54 @@ function toClientTool(tool: Record<string, unknown>): ClientMcpTool {
     ...(typeof tool.description === "string" && tool.description.length > 0 ? { description: tool.description } : {}),
     ...(parameters !== null && typeof parameters === "object" && !Array.isArray(parameters) ? { parameters: parameters as Record<string, unknown> } : {}),
     ...(outputSchema !== undefined ? { outputSchema } : {}),
+  };
+}
+
+/**
+ * `jev.*` 的业务失败提取（与 skills/mcp 的 unwrap 抛错刻意不同，架构 §9.7）：
+ * 宿主把业务失败包成 `{ok:true, value:{ok:false, code, errors, issues?}}`，
+ * 适配器 `rpc()` 已展平为 `{ok:false, code, errors, issues?}`。这里保留
+ * `code` 原样返回，供调用方做错误分类；没有 `code` 的是传输层失败，返回
+ * undefined 交给调用方抛错。
+ */
+function toJevFailure(
+  result: RawResult,
+): { ok: false; code: string; errors: string[]; issues?: JevConfigIssue[] } | undefined {
+  if (result.ok) return undefined;
+  const record = result as unknown as Record<string, unknown>;
+  const code = record.code;
+  if (typeof code !== "string" || code.length === 0) return undefined;
+  return {
+    ok: false,
+    code,
+    errors: result.errors,
+    ...(Array.isArray(record.issues) ? { issues: record.issues as JevConfigIssue[] } : {}),
+  };
+}
+
+/**
+ * `jev.getConfig` 视图的防御性投影：宿主字段缺失 / 类型漂移时回退默认值，
+ * 保证配置表单永远可渲染（默认值与宿主 `defaultJevConfig()` 对齐）。
+ */
+function toJevConfigView(value: unknown): JevConfigView {
+  const raw = (value ?? {}) as Record<string, unknown>;
+  const auto = (raw.autoTrigger ?? {}) as Record<string, unknown>;
+  const source = raw.apiKeySource === "env" || raw.apiKeySource === "file" ? raw.apiKeySource : "none";
+  const num = (input: unknown, fallback: number): number =>
+    typeof input === "number" && Number.isFinite(input) ? input : fallback;
+  return {
+    baseURL: typeof raw.baseURL === "string" && raw.baseURL.length > 0 ? raw.baseURL : "https://api.typesafe.ai",
+    model: typeof raw.model === "string" && raw.model.length > 0 ? raw.model : "jev-latest",
+    hasApiKey: raw.hasApiKey === true || source !== "none",
+    apiKeySource: source,
+    apiKeyLast4: typeof raw.apiKeyLast4 === "string" ? raw.apiKeyLast4 : null,
+    autoTrigger: {
+      enabled: auto.enabled === true,
+      pauseMs: num(auto.pauseMs, 1000),
+      minChars: num(auto.minChars, 10),
+      minEditChars: num(auto.minEditChars, 4),
+    },
+    timeoutMs: num(raw.timeoutMs, 30000),
+    ...(typeof raw.apiKeyEnv === "string" && raw.apiKeyEnv.length > 0 ? { apiKeyEnv: raw.apiKeyEnv } : {}),
   };
 }

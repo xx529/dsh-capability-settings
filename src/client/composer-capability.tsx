@@ -21,14 +21,23 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type {
   CapabilityPanelApi,
   ClientMcpRuntimeServer,
   ClientMcpServer,
   ClientSkillSummary,
+  JevApplyPlanItem,
+  JevApplyResult,
+  JevApplySuccess,
+  JevConfigView,
+  JevErrorCode,
+  JevPendingOutcome,
+  JevRankItem,
   OpResult,
 } from "./api.js";
 import { useWorkspaceLabel } from "./composer-common.js";
+import { JEV_CONFIG_CHANGED_EVENT } from "./jev-panel.js";
 import { aggregateMounts, MOUNT_LABEL, type MountInfo } from "./mcp-common.js";
 
 // ---------------------------------------------------------------------------
@@ -284,6 +293,993 @@ function useComposerCardRect(active: boolean, hostRef: { current: HTMLDivElement
 }
 
 // ---------------------------------------------------------------------------
+// Jev 能力决策：草稿读取 / 配置 / 自动触发调度 / 结果面板
+//
+// 交互与文案以 docs/ux/jev-auto-select.md v1.5 为准，调度结构与状态机见
+// docs/architecture/jev-capability-decision.md §9.3–§9.6。这里的设计要点：
+//   - 草稿三级降级：槽 standardProps `useInput`（订阅）→ `input.draft`（点时刻）
+//     → `[data-composer-card] [data-composer-input]` DOM 兜底；三者都失败时入口
+//     aria-disabled + tooltip「无法读取输入框内容」，不提供点击报错路径。
+//   - 自动触发默认关闭，读取 `jev.getConfig().autoTrigger`；只影响自动路径，
+//     手动入口在任何门槛下都可点（未配置时引导到「Jev 模型」Tab）。
+//   - 每次评分有单调递增 runId；晚到/取消的响应一律丢弃；自动触发不 focus，
+//     手动触发生效后才把焦点移到面板标题。
+//   - 冷会话技能**不按 canToggleInSession 置灰**（架构 §8.6 裁决）：rank 返回
+//     applicable=true，应用走宿主排队；只有宿主明确 applicable=false（硬关闭 /
+//     不可 restrict / 不可切换）的行才置灰并给原因。
+// ---------------------------------------------------------------------------
+
+/** 能力面板域 Tab（`onManage` 可指定打开哪个 Tab，由 src/client.ts 接线）。 */
+export type PanelDomain = "skills" | "mcp" | "jev";
+
+/**
+ * 宿主 `conversation.input.dock` 槽透传的 standardProps 子集。
+ *
+ * 真机契约（app.asar 只读核对）：该槽 ownerProps 为 `InputZone { session, input }`，
+ * standardProps 含 `useInput: SnapshotSelectorHook<InputState>`。旧外壳可能两者都
+ * 没有，因此全部可选。
+ */
+export interface HeroSlotProps {
+  /** 订阅式草稿选择器（首选草稿来源，变化即重渲染）。 */
+  useInput?: (selector: (state: any) => string) => string;
+  /** 点时刻草稿（InputZone ownerProps，次选）。 */
+  input?: { draft?: string };
+  sessionId?: string;
+}
+
+/** `ComposerCapabilityHero` 的入参（由 `src/client.ts` 的槽注册回调装配）。 */
+export interface ComposerCapabilityHeroProps {
+  api: CapabilityPanelApi;
+  /** 打开能力面板；传 `"jev"` 时停在「Jev 模型」Tab。 */
+  onManage?: (domain?: PanelDomain) => void;
+  /** 宿主槽 standardProps（`useInput` / `input`），旧外壳可能不传。 */
+  slotProps?: HeroSlotProps;
+}
+
+/** 结果面板阈值默认值与步长（UX §6.5）。 */
+const DECISION_DEFAULT_THRESHOLD = 0.5;
+const DECISION_THRESHOLD_STEP = 0.05;
+
+/** 自动触发四个门槛（来自 getConfig().autoTrigger）。 */
+interface AutoPrefs {
+  enabled: boolean;
+  pauseMs: number;
+  minChars: number;
+  minEditChars: number;
+}
+
+const DISABLED_AUTO_PREFS: AutoPrefs = { enabled: false, pauseMs: 1000, minChars: 10, minEditChars: 4 };
+
+/** 宿主 chip / 附件占位符（与架构 §9.3 REFERENCE_PLACEHOLDER_RE 一致）。 */
+const CHIP_PLACEHOLDER_RE = /[\uE100-\uE11D\uFFFC]/gu;
+/** 零宽字符（从 contenteditable innerText 里剔除）。 */
+const ZERO_WIDTH_RE = /[\u200B-\u200D\uFEFF]/gu;
+
+/** 草稿清洗：去 chip/附件占位符与零宽字符，再 `trim()`。 */
+function cleanDraft(text: string): string {
+  return text.replace(CHIP_PLACEHOLDER_RE, "").replace(ZERO_WIDTH_RE, "").trim();
+}
+
+/** 按 Unicode 码点计字符数（中文计 1）。 */
+function draftLength(text: string): number {
+  return Array.from(text).length;
+}
+
+/** 编辑量：前后缀对齐后的「删除 + 插入」码点数（架构 §9.4）。 */
+function diffAmount(prev: string, next: string): number {
+  const a = Array.from(prev);
+  const b = Array.from(next);
+  let p = 0;
+  while (p < a.length && p < b.length && a[p] === b[p]) p += 1;
+  let s = 0;
+  while (s < a.length - p && s < b.length - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s += 1;
+  return a.length - p - s + (b.length - p - s);
+}
+
+/** 停顿/倒计时的秒数显示（1 位小数）。 */
+function formatSeconds(ms: number): string {
+  return (ms / 1000).toFixed(1);
+}
+
+/** 取消（abort）不应进入错误态。 */
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException ? error.name === "AbortError" : error instanceof Error && error.name === "AbortError";
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+// ---------------------------------------------------------------------------
+// Jev 配置：hero 挂载时读取；配置保存事件 / 相位回落 / 窗口 focus 时刷新
+//
+// 配置页（能力面板「Jev 模型」Tab）与本组件可能同时挂载：用户在配置页保存后
+// 首屏 hero 不会重挂，因此必须用事件把「配置已变化」传过来（tester F3）。
+// 事件由 jev-panel.tsx 派发（task-24），本组件只消费；刷新静默进行——成功前
+// 保留旧配置（不闪 loading、不清空未配置引导），失败也保留旧配置，不打断输入。
+// ---------------------------------------------------------------------------
+
+/** window focus 兜底刷新的最小间隔，避免窗口反复聚焦触发密集 getConfig。 */
+const JEV_CONFIG_FOCUS_REFRESH_MS = 2000;
+
+type JevConfigState =
+  | { status: "loading" }
+  | { status: "ready"; view: JevConfigView }
+  | { status: "error"; message: string };
+
+function useJevConfig(api: CapabilityPanelApi) {
+  const [state, setState] = useState<JevConfigState>({ status: "loading" });
+  const seqRef = useRef(0);
+  const mountedRef = useRef(true);
+  const lastLoadAtRef = useRef(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  /** `silent`：后台刷新——成功前保留旧配置，失败也保留（异常静默）。 */
+  const refresh = useCallback(
+    (options?: { silent?: boolean }) => {
+      const silent = options?.silent === true;
+      lastLoadAtRef.current = Date.now();
+      const seq = ++seqRef.current;
+      if (!silent) setState({ status: "loading" });
+      api.jev
+        .getConfig()
+        .then((view) => {
+          if (!mountedRef.current || seq !== seqRef.current) return;
+          setState({ status: "ready", view });
+        })
+        .catch((error) => {
+          if (!mountedRef.current || seq !== seqRef.current) return;
+          // 静默刷新失败：保留当前已就绪/已失败状态；只有初始加载仍保持 loading 时才落错误。
+          setState((prev) => (silent && prev.status !== "loading" ? prev : { status: "error", message: messageOf(error) }));
+        });
+    },
+    [api],
+  );
+
+  const reload = useCallback(() => refresh(), [refresh]);
+  const refreshSilently = useCallback(() => refresh({ silent: true }), [refresh]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  // 配置保存事件 + 窗口 focus 兜底（focus 有最小间隔，不做轮询）。
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onConfigChanged = () => refreshSilently();
+    const onFocus = () => {
+      if (Date.now() - lastLoadAtRef.current < JEV_CONFIG_FOCUS_REFRESH_MS) return;
+      refreshSilently();
+    };
+    window.addEventListener(JEV_CONFIG_CHANGED_EVENT, onConfigChanged);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener(JEV_CONFIG_CHANGED_EVENT, onConfigChanged);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [refreshSilently]);
+
+  return { state, reload, refreshSilently };
+}
+
+// ---------------------------------------------------------------------------
+// 草稿读取：DOM 兜底 + IME composition 状态
+// ---------------------------------------------------------------------------
+
+interface DraftReading {
+  /** 清洗后的草稿；`undefined` = 读不到输入框。 */
+  draft?: string;
+  isComposing: boolean;
+}
+
+/**
+ * DOM 兜底草稿读取（contenteditable 没有 `value`，只能读 innerText）。
+ *
+ * - `observeDraft=false` 时（槽 props 已给草稿）仍监听 composition，
+ *   用于自动触发时的 IME 门槛；
+ * - 监听整棵文档的 characterData/childList 变化并按内容去重，避免高频 setState；
+ * - 元素找不到时返回 `draft: undefined`（入口据此禁用）。
+ */
+function useDomDraftReader(anchorRef: { current: HTMLDivElement | null }, observeDraft: boolean): DraftReading {
+  const [reading, setReading] = useState<DraftReading>({ isComposing: false });
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const read = () => {
+      const anchor = anchorRef.current;
+      const root = (anchor?.closest("[data-phase]") ?? document.body) as HTMLElement;
+      const input = root.querySelector("[data-composer-card] [data-composer-input]") as HTMLElement | null;
+      const next = input === null ? undefined : cleanDraft(input.innerText ?? input.textContent ?? "");
+      setReading((prev) => (prev.draft === next ? prev : { ...prev, draft: next }));
+    };
+    let observer: MutationObserver | undefined;
+    if (observeDraft) {
+      read();
+      observer = new MutationObserver(read);
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    }
+    const onStart = () => setReading((prev) => (prev.isComposing ? prev : { ...prev, isComposing: true }));
+    const onEnd = () => {
+      setReading((prev) => ({ ...prev, isComposing: false }));
+      if (observeDraft) window.setTimeout(read, 0);
+    };
+    document.addEventListener("compositionstart", onStart, true);
+    document.addEventListener("compositionend", onEnd, true);
+    return () => {
+      observer?.disconnect();
+      document.removeEventListener("compositionstart", onStart, true);
+      document.removeEventListener("compositionend", onEnd, true);
+    };
+  }, [anchorRef, observeDraft]);
+
+  return reading;
+}
+
+// ---------------------------------------------------------------------------
+// 结果面板状态与错误分类
+// ---------------------------------------------------------------------------
+
+type DecisionOrigin = "auto" | "manual";
+type DecisionPhase = "loading" | "results" | "applying" | "error";
+type DecisionErrorCode = JevErrorCode | "config-error" | "unknown";
+
+interface DecisionErrorInfo {
+  code: DecisionErrorCode;
+  title: string;
+  body: string;
+  primary: "retry" | "config";
+  secondary?: "config" | "cancel";
+}
+
+interface DecisionData {
+  items: JevRankItem[];
+  model: string;
+  total: number;
+  pendingOutcome?: JevPendingOutcome;
+}
+
+interface DecisionState {
+  phase: DecisionPhase;
+  origin: DecisionOrigin;
+  /** 自动触发时的停顿阈值（说明行「停顿 x.xs 后自动发起」）。 */
+  pauseMs: number;
+  threshold: number;
+  /** 用户手改过的行（阈值不再影响这些行）。 */
+  manual: Record<string, boolean>;
+  data?: DecisionData;
+  error?: DecisionErrorInfo;
+  /** 应用失败的行内错误条。 */
+  applyError?: string;
+}
+
+const CONFIG_ERROR_INFO: DecisionErrorInfo = {
+  code: "config-error",
+  title: "读取 Jev 配置失败",
+  body: "请稍后重试，或到「Jev 模型」Tab 检查。",
+  primary: "retry",
+  secondary: "config",
+};
+
+/** rank 业务错误码 → UX §6.11 文案。 */
+function rankErrorInfo(code: JevErrorCode, errors: string[]): DecisionErrorInfo {
+  switch (code) {
+    case "auth":
+      return { code, title: "评分失败：API Key 无效或无权限", body: "请到「Jev 模型」Tab 检查 API Key 或环境变量。", primary: "config", secondary: "cancel" };
+    case "no-config":
+      return { code, title: "评分失败：尚未配置 Jev 模型", body: "请先完成配置。", primary: "config", secondary: "cancel" };
+    case "context-too-long":
+      return { code, title: "评分失败：输入内容超出模型上下文上限", body: "请缩短输入框草稿后重试。", primary: "retry", secondary: "cancel" };
+    case "timeout":
+      return { code, title: "评分失败：请求超时", body: "Jev 服务响应超时，请稍后重试。", primary: "retry", secondary: "cancel" };
+    case "network":
+      return { code, title: "评分失败：无法连接 Jev 服务", body: "请检查网络后重试；若使用代理，请确认宿主可访问。", primary: "retry", secondary: "cancel" };
+    case "rate-limit":
+      return { code, title: "评分失败：请求过于频繁", body: "请稍后重试。", primary: "retry", secondary: "cancel" };
+    case "overloaded":
+      return { code, title: "评分失败：Jev 服务暂时不可用", body: "这是服务端问题，请稍后重试。", primary: "retry", secondary: "cancel" };
+    case "empty-capabilities":
+      return { code, title: "当前会话没有可评分的技能或 MCP 服务器", body: "切换项目或稍后重试。", primary: "retry", secondary: "cancel" };
+    case "bad-request":
+    default:
+      return { code: code === "bad-request" ? code : "unknown", title: "评分失败：请求无法完成", body: errors[0] ?? "请稍后重试。", primary: "retry", secondary: "cancel" };
+  }
+}
+
+/** rank item 的不可切换原因（UX §6.8 / 架构 §7.3）。 */
+const RANK_REASON_TEXT: Record<string, string> = {
+  "hard-disabled": "该能力已在配置中禁用",
+  "not-restrictable": "不可在当前对话关闭",
+  "not-toggleable": "当前会话无法切换该能力",
+  shadowed: "被同名能力覆盖",
+  "no-answer": "未获得评分",
+};
+
+/** 预勾选口径：手改优先；否则「可切换且分数 ≥ 阈值」（含等于）。 */
+function isCheckedItem(item: JevRankItem, manual: Record<string, boolean>, threshold: number): boolean {
+  const override = manual[item.id];
+  if (override !== undefined) return override;
+  return item.applicable && item.score >= threshold;
+}
+
+/** 当前勾选项（不可切换项永不进入计划）。 */
+function checkedItems(state: DecisionState): JevRankItem[] {
+  if (state.data === undefined) return [];
+  return state.data.items.filter((item) => item.applicable && isCheckedItem(item, state.manual, state.threshold));
+}
+
+/** 应用结果 → toast 文案（含冷会话排队与跳过数合并口径，UX §6.12）。 */
+function applyToastText(result: JevApplySuccess, skipped: number): string {
+  if (result.pending) {
+    return skipped > 0 ? `已加入本会话，发送首条消息后生效；${skipped} 项不可切换已跳过` : "已加入本会话，发送首条消息后生效";
+  }
+  if (result.applied === 0 && skipped > 0) return "所选能力已在当前会话启用";
+  return skipped > 0 ? `已应用 ${result.applied} 项；${skipped} 项不可切换已跳过` : `已应用 ${result.applied} 项能力（仅当前会话）`;
+}
+
+/** 排队结果回执（pendingOutcome）的一次性提示文案。 */
+function pendingOutcomeText(outcome: JevPendingOutcome): string {
+  const parts = [`上次排队应用：成功 ${outcome.applied} 项`];
+  if (outcome.failed > 0) parts.push(`失败 ${outcome.failed} 项`);
+  if (outcome.errors.length > 0) parts.push(outcome.errors[0] as string);
+  return parts.join(" · ");
+}
+
+// ---------------------------------------------------------------------------
+// 能力决策调度器（自动触发 + 手动 + 结果状态）
+// ---------------------------------------------------------------------------
+
+interface UseDecisionOptions {
+  api: CapabilityPanelApi;
+  /** 仅 hero 相位自动触发；false 时停表并丢弃在途请求。 */
+  enabled: boolean;
+  /** 清洗后的草稿；`undefined` = 不可读。 */
+  draft: string | undefined;
+  isComposing: boolean;
+  config: JevConfigState;
+  reloadConfig: () => void;
+  /** 能力快照已到且存在可评分/可切换能力（自动触发与入口共用同一门槛）。 */
+  capabilitiesReady: boolean;
+  onManage?: (domain?: PanelDomain) => void;
+  onRefreshCapabilities: () => void;
+  /** 冷会话排队应用成功后做 chips 乐观回显（宿主写入前快照里没有会话态）。 */
+  onOptimisticApplied: (items: Array<{ kind: "skill" | "mcp"; name: string }>) => void;
+  /** 面板关闭后由外层决定是否把焦点还给入口按钮。 */
+  onClosed: (returnFocus: boolean) => void;
+}
+
+interface DecisionController {
+  state: DecisionState | undefined;
+  /** 自动触发的停顿倒计时（约 100ms 刷新）；`undefined` = 未计时。 */
+  countdown: { elapsedMs: number; pauseMs: number } | undefined;
+  toast: { text: string; tone: "ok" | "warn" } | undefined;
+  liveMessage: string;
+  start: () => void;
+  startConfigError: () => void;
+  cancelScoring: () => void;
+  close: (returnFocus?: boolean) => void;
+  rescore: () => void;
+  retry: () => void;
+  goConfig: () => void;
+  setThreshold: (value: number) => void;
+  toggleItem: (id: string) => void;
+  apply: () => void;
+}
+
+function useDecision(options: UseDecisionOptions): DecisionController {
+  const { api, enabled, draft, isComposing, config, reloadConfig, capabilitiesReady, onManage, onRefreshCapabilities, onOptimisticApplied, onClosed } = options;
+  const [state, setState] = useState<DecisionState | undefined>(undefined);
+  const [countdown, setCountdown] = useState<{ startedAt: number; pauseMs: number } | undefined>(undefined);
+  const [nowTick, setNowTick] = useState(0);
+  const [toast, setToast] = useState<{ text: string; tone: "ok" | "warn" } | undefined>(undefined);
+  const [liveMessage, setLiveMessage] = useState("");
+
+  const timerRef = useRef<number | undefined>(undefined);
+  const lastDraftRef = useRef<string | undefined>(undefined);
+  const editCharsRef = useRef(0);
+  const silentDraftRef = useRef<string | undefined>(undefined);
+  const inFlightRef = useRef<{ runId: number; controller: AbortController } | undefined>(undefined);
+  const runIdRef = useRef(0);
+  const beginRef = useRef<(origin: DecisionOrigin, threshold: number) => void>(() => undefined);
+  const stateRef = useRef<DecisionState | undefined>(undefined);
+
+  const prefs: AutoPrefs = config.status === "ready" ? { ...config.view.autoTrigger } : DISABLED_AUTO_PREFS;
+  const configured = config.status === "ready" && config.view.hasApiKey;
+
+  const clearTimer = useCallback(() => {
+    if (timerRef.current !== undefined) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = undefined;
+    }
+    setCountdown(undefined);
+  }, []);
+
+  const pushToast = useCallback((text: string, tone: "ok" | "warn" = "ok") => setToast({ text, tone }), []);
+
+  useEffect(() => {
+    if (toast === undefined) return;
+    const timer = window.setTimeout(() => setToast(undefined), 4400);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  // 倒计时每 100ms 刷新一次（只驱动展示，不进 aria-live）。
+  useEffect(() => {
+    if (countdown === undefined) return;
+    setNowTick(Date.now());
+    const timer = window.setInterval(() => setNowTick(Date.now()), 100);
+    return () => window.clearInterval(timer);
+  }, [countdown]);
+
+  useEffect(() => () => {
+    if (timerRef.current !== undefined) window.clearTimeout(timerRef.current);
+    inFlightRef.current?.controller.abort();
+  }, []);
+
+  function begin(origin: DecisionOrigin, threshold: number) {
+    const snapshot = draft;
+    if (snapshot === undefined || snapshot === "") return;
+    if (inFlightRef.current !== undefined) return;
+    const runId = ++runIdRef.current;
+    const controller = new AbortController();
+    inFlightRef.current = { runId, controller };
+    editCharsRef.current = 0;
+    setCountdown(undefined);
+    setState({ phase: "loading", origin, pauseMs: prefs.pauseMs, threshold, manual: {} });
+    if (origin === "auto") setLiveMessage("停顿时长已达，已自动发起评分");
+    void (async () => {
+      try {
+        const result = await api.jev.rank({ draft: snapshot }, controller.signal);
+        if (runId !== runIdRef.current) return;
+        if (!result.ok) {
+          setState({ phase: "error", origin, pauseMs: prefs.pauseMs, threshold, manual: {}, error: rankErrorInfo(result.code, result.errors) });
+          return;
+        }
+        const items = result.items;
+        const checkedCount = items.filter((item) => item.applicable && item.score >= threshold).length;
+        setState({
+          phase: "results",
+          origin,
+          pauseMs: prefs.pauseMs,
+          threshold,
+          manual: {},
+          data: {
+            items,
+            model: result.model,
+            total: items.length,
+            ...(result.pendingOutcome !== undefined ? { pendingOutcome: result.pendingOutcome } : {}),
+          },
+        });
+        setLiveMessage(`评分完成，共 ${items.length} 个能力，已勾选 ${checkedCount} 项`);
+      } catch (error) {
+        if (runId !== runIdRef.current) return;
+        if (isAbortError(error)) return;
+        setState({
+          phase: "error",
+          origin,
+          pauseMs: prefs.pauseMs,
+          threshold,
+          manual: {},
+          error: { code: "network", title: "评分失败：无法连接 Jev 服务", body: "请检查网络后重试；若使用代理，请确认宿主可访问。", primary: "retry", secondary: "cancel" },
+        });
+      } finally {
+        if (runId === runIdRef.current) inFlightRef.current = undefined;
+      }
+    })();
+  }
+  beginRef.current = begin;
+  stateRef.current = state;
+
+  // 草稿变化：累计编辑量、解除静默、重置停顿计时；满足门槛时启动计时。
+  // 结果面板打开期间（phase==="results"）允许按新草稿在停顿到点后重新自动评分（UX §7.2）。
+  useEffect(() => {
+    if (draft === undefined) {
+      clearTimer();
+      lastDraftRef.current = undefined;
+      editCharsRef.current = 0;
+      return;
+    }
+    const previous = lastDraftRef.current;
+    // 首次取到草稿（含整段粘贴）也计入编辑量：基线视为空草稿。
+    editCharsRef.current += previous === undefined ? draftLength(draft) : diffAmount(previous, draft);
+    lastDraftRef.current = draft;
+    if (draft === "") {
+      editCharsRef.current = 0;
+      silentDraftRef.current = undefined;
+    } else if (silentDraftRef.current !== undefined && silentDraftRef.current !== draft) {
+      silentDraftRef.current = undefined;
+    }
+    clearTimer();
+    if (!enabled) return;
+    const phase = stateRef.current?.phase;
+    if (phase !== undefined && phase !== "results") return;
+    if (!capabilitiesReady) return;
+    if (!prefs.enabled || !configured) return;
+    if (draft === "") return;
+    if (draftLength(draft) < prefs.minChars) return;
+    if (editCharsRef.current < prefs.minEditChars) return;
+    if (isComposing) return;
+    if (inFlightRef.current !== undefined) return;
+    if (silentDraftRef.current !== undefined) return;
+    const pauseMs = prefs.pauseMs;
+    const startedAt = Date.now();
+    setCountdown({ startedAt, pauseMs });
+    timerRef.current = window.setTimeout(() => {
+      timerRef.current = undefined;
+      setCountdown(undefined);
+      const current = stateRef.current;
+      beginRef.current("auto", current !== undefined && current.phase === "results" ? current.threshold : DECISION_DEFAULT_THRESHOLD);
+    }, pauseMs);
+    return clearTimer;
+  }, [draft, enabled, config.status, capabilitiesReady, isComposing, clearTimer, prefs.enabled, prefs.pauseMs, prefs.minChars, prefs.minEditChars, configured, state?.phase]);
+
+  // hero 结束：停表、作废在途请求、重置编辑基线（首条消息后不再自动触发）。
+  useEffect(() => {
+    if (enabled) return;
+    clearTimer();
+    if (inFlightRef.current !== undefined) {
+      inFlightRef.current.controller.abort();
+      inFlightRef.current = undefined;
+      runIdRef.current += 1;
+    }
+    lastDraftRef.current = undefined;
+    editCharsRef.current = 0;
+    silentDraftRef.current = undefined;
+    setState(undefined);
+  }, [enabled, clearTimer]);
+
+  function startManual() {
+    if (draft === undefined || draft === "") return;
+    begin("manual", stateRef.current?.threshold ?? DECISION_DEFAULT_THRESHOLD);
+  }
+
+  function startConfigError() {
+    setState({
+      phase: "error",
+      origin: "manual",
+      pauseMs: prefs.pauseMs,
+      threshold: DECISION_DEFAULT_THRESHOLD,
+      manual: {},
+      error: CONFIG_ERROR_INFO,
+    });
+  }
+
+  function cancelScoring() {
+    const current = stateRef.current;
+    if (current?.phase !== "loading") return;
+    const inFlight = inFlightRef.current;
+    if (inFlight !== undefined) {
+      inFlight.controller.abort();
+      inFlightRef.current = undefined;
+    }
+    runIdRef.current += 1;
+    silentDraftRef.current = draft;
+    editCharsRef.current = 0;
+    setCountdown(undefined);
+    setState(undefined);
+    setLiveMessage("已取消本次能力决策");
+    // 自动触发路径不把焦点从输入框抢走；手动触发才把焦点还给入口。
+    onClosed(current.origin === "manual");
+  }
+
+  function close(returnFocus = true) {
+    const current = stateRef.current;
+    if (current === undefined) return;
+    if (current.phase === "loading" || current.phase === "applying") return;
+    setState(undefined);
+    onClosed(returnFocus);
+  }
+
+  function rescore() {
+    const current = stateRef.current;
+    if (current === undefined) return;
+    begin("manual", current.threshold);
+  }
+
+  function goConfig() {
+    onManage?.("jev");
+    setState(undefined);
+    onClosed(false);
+  }
+
+  function retry() {
+    const current = stateRef.current;
+    if (current === undefined || current.phase !== "error" || current.error === undefined) return;
+    if (current.error.code === "config-error") {
+      reloadConfig();
+      setState(undefined);
+      onClosed(false);
+      return;
+    }
+    if (current.error.code === "no-config") {
+      goConfig();
+      return;
+    }
+    begin(current.origin, current.threshold);
+  }
+
+  function setThreshold(value: number) {
+    const rounded = Math.round(value / DECISION_THRESHOLD_STEP) * DECISION_THRESHOLD_STEP;
+    const next = Math.min(1, Math.max(0, Number(rounded.toFixed(2))));
+    setState((current) => (current === undefined ? current : { ...current, threshold: next }));
+  }
+
+  function toggleItem(id: string) {
+    setState((current) => {
+      if (current === undefined || current.data === undefined) return current;
+      const item = current.data.items.find((candidate) => candidate.id === id);
+      if (item === undefined || !item.applicable) return current;
+      const checked = isCheckedItem(item, current.manual, current.threshold);
+      return { ...current, manual: { ...current.manual, [id]: !checked } };
+    });
+  }
+
+  function apply() {
+    const current = stateRef.current;
+    if (current === undefined || current.phase !== "results" || current.data === undefined) return;
+    const selected = checkedItems(current);
+    if (selected.length === 0) return;
+    const plan: JevApplyPlanItem[] = selected.map((item) => ({ id: item.id, kind: item.kind, name: item.name, enabled: true }));
+    setState({ ...current, phase: "applying", applyError: undefined });
+    void (async () => {
+      try {
+        const result: JevApplyResult = await api.jev.apply({ plan });
+        if (!result.ok) {
+          setState((latest) => (latest === undefined ? latest : { ...latest, phase: "results", applyError: `应用失败：${result.errors[0] ?? result.code}` }));
+          return;
+        }
+        const failed = result.failed ?? [];
+        if (failed.length > 0) {
+          setState((latest) => (latest === undefined ? latest : { ...latest, phase: "results", applyError: `应用失败：${failed[0]?.reason ?? "写入失败"}` }));
+          return;
+        }
+        // 冷会话排队：宿主此时没有写会话态，先乐观回显 chips（UX §8.6）。
+        if (result.pending) {
+          onOptimisticApplied(selected.map((item) => ({ kind: item.kind, name: item.name })));
+        }
+        onRefreshCapabilities();
+        const baseText = applyToastText(result, result.skipped.length);
+        const voidText = result.pendingOutcome === undefined ? baseText : `${baseText} · ${pendingOutcomeText(result.pendingOutcome)}`;
+        setState(undefined);
+        pushToast(voidText, "ok");
+        setLiveMessage(voidText);
+        onClosed(true);
+      } catch (error) {
+        if (isAbortError(error)) return;
+        setState((latest) => (latest === undefined ? latest : { ...latest, phase: "results", applyError: `应用失败：${messageOf(error)}` }));
+      }
+    })();
+  }
+
+  const countdownInfo =
+    countdown === undefined
+      ? undefined
+      : { elapsedMs: Math.max(0, Math.min(countdown.pauseMs, nowTick - countdown.startedAt)), pauseMs: countdown.pauseMs };
+
+  return {
+    state,
+    countdown: countdownInfo,
+    toast,
+    liveMessage,
+    start: startManual,
+    startConfigError,
+    cancelScoring,
+    close,
+    rescore,
+    retry,
+    goConfig,
+    setThreshold,
+    toggleItem,
+    apply,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 「✦ 能力决策」入口与结果面板
+// ---------------------------------------------------------------------------
+
+/** 两态入口按钮（展开面板 tabs 行 / 收起能力条右侧，视觉必须一致）。 */
+function DecisionEntryButton({
+  inBar,
+  label,
+  tooltip,
+  disabled,
+  guide,
+  onClick,
+}: {
+  inBar: boolean;
+  label: string;
+  tooltip: string;
+  disabled: boolean;
+  guide: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`skp-decision-entry${inBar ? " skp-decision-entry-bar" : ""}`}
+      title={tooltip}
+      aria-label="根据输入框草稿为本会话能力做能力决策"
+      aria-disabled={disabled ? true : undefined}
+      onClick={(event) => {
+        // 收起态能力条本身是 role="button"（点击展开），入口不能触发它。
+        event.stopPropagation();
+        if (disabled) return;
+        onClick();
+      }}
+    >
+      <span className="skp-decision-entry-star" aria-hidden="true">
+        ✦
+      </span>
+      <span className="skp-decision-entry-label">{label}</span>
+      {guide && <i className="skp-decision-entry-dot" aria-hidden="true" />}
+    </button>
+  );
+}
+
+/** 评分中骨架（5 行，与结果行同高）。 */
+function DecisionSkeleton() {
+  return (
+    <div className="skp-decision-skeleton" aria-hidden="true">
+      {[0, 1, 2, 3, 4].map((index) => (
+        <div key={index} className="skp-decision-skel-row">
+          <span className="skp-decision-skel-dot" />
+          <span className="skp-decision-skel-line skp-decision-skel-line-a" />
+          <span className="skp-decision-skel-line skp-decision-skel-line-b" />
+          <span className="skp-decision-skel-line skp-decision-skel-line-c" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+interface DecisionPanelProps {
+  state: DecisionState;
+  config: JevConfigState;
+  draft: string | undefined;
+  /** 评分中态还没拿到真实 N 时的估算值（当前能力快照总数）。 */
+  estimateTotal: number;
+  titleRef: { current: HTMLDivElement | null };
+  onClose: (returnFocus: boolean) => void;
+  onCancel: () => void;
+  onRescore: () => void;
+  onRetry: () => void;
+  onGoConfig: () => void;
+  onThreshold: (value: number) => void;
+  onToggle: (id: string) => void;
+  onApply: () => void;
+}
+
+/**
+ * 「✦ 能力决策」结果面板（fixed 容器内替换 hero 内容）。
+ *
+ * a11y（UX §9）：`role="dialog"` + `aria-modal="false"`（不阻断输入框）、
+ * `aria-labelledby` 标题；倒计时不播报；评分完成、应用结果由 hero 的 polite
+ * live 节点播报；Esc 只在结果/错误态关闭。
+ */
+function DecisionPanel(props: DecisionPanelProps) {
+  const { state, config, draft, estimateTotal, titleRef } = props;
+  const loading = state.phase === "loading";
+  const applying = state.phase === "applying";
+  const errorPhase = state.phase === "error";
+  const data = state.data;
+  const items = data?.items ?? [];
+  const total = data?.total ?? estimateTotal;
+  const model = data?.model ?? (config.status === "ready" ? config.view.model : "");
+  const selected = checkedItems(state);
+  const selectedCount = selected.length;
+  const draftCleared = !loading && !errorPhase && !applying && draft === "";
+  const noMatch = !loading && !errorPhase && items.length > 0 && items.every((item) => !item.applicable || item.score < state.threshold);
+  const pendingOutcome = data?.pendingOutcome;
+  const errorInfo = state.error;
+  const titleId = "skp-decision-title";
+
+  return (
+    <div
+      className="skp-decision-panel"
+      role="dialog"
+      aria-modal={false}
+      aria-labelledby={titleId}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        if (loading || applying) return;
+        event.preventDefault();
+        props.onClose(true);
+      }}
+    >
+      <div className="skp-decision-head">
+        <div className="skp-decision-title" id={titleId} ref={titleRef} tabIndex={-1}>
+          <span className="skp-decision-star" aria-hidden="true">
+            ✦
+          </span>
+          能力决策
+        </div>
+        {model.length > 0 && (
+          <span className="skp-decision-badge" title={model}>
+            Jev · {model}
+          </span>
+        )}
+        {state.origin === "auto" && (
+          <span className="skp-decision-badge skp-decision-badge-auto" title={`停顿 ${formatSeconds(state.pauseMs)}s 后自动发起`}>
+            自动
+          </span>
+        )}
+        <button
+          type="button"
+          className="skp-decision-close"
+          aria-label="关闭"
+          title={loading ? "评分中，取消请点「取消评分」" : applying ? "正在应用所选能力" : "关闭"}
+          aria-disabled={loading || applying ? true : undefined}
+          onClick={() => {
+            if (loading || applying) return;
+            props.onClose(true);
+          }}
+        >
+          ×
+        </button>
+      </div>
+
+      {errorPhase && errorInfo !== undefined ? (
+        <div className="skp-decision-error" role="alert">
+          <p className="skp-decision-error-title">{errorInfo.title}</p>
+          <p className="skp-decision-error-body">{errorInfo.body}</p>
+        </div>
+      ) : (
+        <>
+          <div className="skp-decision-threshold">
+            <span className="skp-decision-threshold-label">相关度阈值</span>
+            <input
+              className="skp-decision-range"
+              type="range"
+              min={0}
+              max={1}
+              step={DECISION_THRESHOLD_STEP}
+              value={state.threshold}
+              aria-label="相关度阈值"
+              aria-valuetext={state.threshold.toFixed(2)}
+              disabled={loading || applying}
+              onChange={(event) => props.onThreshold(Number(event.target.value))}
+            />
+            <span className="skp-decision-threshold-value">{state.threshold.toFixed(2)}</span>
+            {!loading && <span className="skp-decision-count">已选 {selectedCount} / {total}</span>}
+          </div>
+          {noMatch && selectedCount === 0 && (
+            <p className="skp-decision-nomatch">没有达到阈值 {state.threshold.toFixed(2)} 的能力，可调低阈值或手动勾选</p>
+          )}
+        </>
+      )}
+
+      {pendingOutcome !== undefined && <div className="skp-decision-banner">{pendingOutcomeText(pendingOutcome)}</div>}
+
+      {loading ? (
+        <>
+          <div className="skp-decision-loading" role="status" aria-live="off">
+            <span className="skp-decision-spinner" aria-hidden="true" />
+            正在评分… · 1 次请求 · {total} 个能力
+          </div>
+          <DecisionSkeleton />
+        </>
+      ) : errorPhase ? null : (
+        <ul className="skp-decision-list">
+          {items.map((item) => {
+            const checked = isCheckedItem(item, state.manual, state.threshold);
+            const unavailable = !item.applicable;
+            const manual = state.manual[item.id] !== undefined;
+            const below = !unavailable && !checked && !manual && item.score < state.threshold;
+            const reasonText = item.reason === undefined ? undefined : RANK_REASON_TEXT[item.reason] ?? item.reason;
+            const reasonId = `skp-decision-reason-${item.id.slice(4)}`;
+            return (
+              <li
+                key={item.id}
+                className={`skp-decision-row${checked ? " skp-decision-row-selected" : ""}${manual ? " skp-decision-row-manual" : ""}${below ? " skp-decision-row-below" : ""}${unavailable ? " skp-decision-row-unavailable" : ""}`}
+              >
+                <label className="skp-decision-check">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={unavailable || applying}
+                    aria-label={`选择 ${item.name}`}
+                    aria-disabled={unavailable ? true : undefined}
+                    aria-describedby={unavailable && reasonText !== undefined ? reasonId : undefined}
+                    onChange={() => props.onToggle(item.id)}
+                  />
+                </label>
+                <span className={`skp-decision-kind skp-decision-kind-${item.kind}`}>{item.kind === "skill" ? "技能" : "MCP"}</span>
+                <span className="skp-decision-name" title={item.name}>
+                  {item.name}
+                </span>
+                <span className="skp-decision-desc-cell">
+                  <span className="skp-decision-desc" title={item.description}>
+                    {item.description.length > 0 ? item.description : "—"}
+                  </span>
+                  {reasonText !== undefined && (
+                    <span className="skp-decision-reason" id={reasonId}>
+                      {reasonText}
+                    </span>
+                  )}
+                </span>
+                <span className="skp-decision-bar" aria-hidden="true">
+                  <i style={{ width: `${Math.round(Math.min(1, Math.max(0, item.score)) * 100)}%` }} />
+                </span>
+                <span className="skp-decision-score" aria-label={`相关度 ${item.score.toFixed(2)}`}>
+                  {item.score.toFixed(2)}
+                </span>
+              </li>
+            );
+          })}
+          {items.length === 0 && <li className="skp-decision-empty">没有可评分的能力</li>}
+        </ul>
+      )}
+
+      {state.applyError !== undefined && (
+        <div className="skp-decision-applyerr" role="alert">
+          <span className="skp-decision-applyerr-text">{state.applyError}</span>
+          <button type="button" className="skp-decision-link" onClick={props.onApply}>
+            重试
+          </button>
+        </div>
+      )}
+
+      <div className="skp-decision-foot">
+        {errorPhase ? (
+          <>
+            <button
+              type="button"
+              className="skp-decision-btn skp-decision-btn-primary"
+              disabled={errorInfo?.primary === "retry" && errorInfo.code !== "config-error" && (draft === undefined || draft === "")}
+              title={errorInfo?.primary === "retry" && errorInfo.code !== "config-error" && (draft === undefined || draft === "") ? "输入框已清空" : undefined}
+              onClick={errorInfo?.primary === "config" ? props.onGoConfig : props.onRetry}
+            >
+              {errorInfo?.primary === "config" ? "去配置" : "重试"}
+            </button>
+            {errorInfo?.secondary === "config" && errorInfo.primary !== "config" && (
+              <button type="button" className="skp-decision-btn" onClick={props.onGoConfig}>
+                去配置
+              </button>
+            )}
+            <button type="button" className="skp-decision-btn" onClick={() => props.onClose(true)}>
+              取消
+            </button>
+          </>
+        ) : loading ? (
+          <button type="button" className="skp-decision-btn skp-decision-btn-primary" onClick={props.onCancel}>
+            取消评分
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="skp-decision-btn"
+              disabled={applying || draftCleared || draft === undefined}
+              title={draftCleared || draft === undefined ? "输入框已清空" : undefined}
+              onClick={props.onRescore}
+            >
+              重新评分
+            </button>
+            <button type="button" className="skp-decision-btn" disabled={applying} onClick={() => props.onClose(true)}>
+              取消
+            </button>
+            <button
+              type="button"
+              className="skp-decision-btn skp-decision-btn-primary"
+              disabled={applying || selectedCount === 0}
+              title={selectedCount === 0 ? "至少勾选一项" : undefined}
+              onClick={props.onApply}
+            >
+              {applying ? "应用中…" : `应用所选（${selectedCount}）`}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // 视图模型
 // ---------------------------------------------------------------------------
 
@@ -457,10 +1453,16 @@ interface PanelProps {
   onCollapse: () => void;
   onManage?: () => void;
   onRetry?: () => void;
+  /** 入口「✦ 能力决策」（展开态在 tabs 行右侧；仅 hero 传入）。 */
+  decisionEntry?: ReactNode;
+  /** 自动触发默认关闭的弱提示（与入口同排，窄容器隐藏）。 */
+  decisionHint?: string;
+  /** 自动触发停顿倒计时（aria-live="off"，不干扰读屏）。 */
+  decisionWaiting?: { elapsedMs: number; pauseMs: number } | undefined;
 }
 
 export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
-  const { mode, loading, error, skillRows, mcpRows, pending, busy, onToggle, onReset, onCollapse, onManage, onRefresh, onRetry, initialTab } = props;
+  const { mode, loading, error, skillRows, mcpRows, pending, busy, onToggle, onReset, onCollapse, onManage, onRefresh, onRetry, initialTab, decisionEntry, decisionHint, decisionWaiting } = props;
   const [tab, setTab] = useState<TabId>(initialTab ?? "skills");
   const [query, setQuery] = useState("");
   const [resetBusy, setResetBusy] = useState(false);
@@ -536,12 +1538,20 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
           </button>
         </div>
         <span className="skp-dock-spacer" />
+        {decisionHint !== undefined && <span className="skp-decision-hint">{decisionHint}</span>}
+        {decisionEntry}
         {onManage !== undefined && (
           <button type="button" className="skp-dock-link" onClick={onManage}>
             管理全部 ↗
           </button>
         )}
       </div>
+
+      {decisionWaiting !== undefined && (
+        <div className="skp-decision-countdown" aria-live="off">
+          停顿 {formatSeconds(decisionWaiting.elapsedMs)}s / {formatSeconds(decisionWaiting.pauseMs)}s · 即将能力决策
+        </div>
+      )}
 
       {error !== undefined && (
         <div className="skp-dock-banner" role="alert">
@@ -602,7 +1612,20 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
 // 收起态能力条
 // ---------------------------------------------------------------------------
 
-export function CapabilityBar({ skillRows, mcpRows, loading, onExpand }: { skillRows: SkillRow[]; mcpRows: McpRow[]; loading: boolean; onExpand: () => void }) {
+export function CapabilityBar({
+  skillRows,
+  mcpRows,
+  loading,
+  onExpand,
+  decisionEntry,
+}: {
+  skillRows: SkillRow[];
+  mcpRows: McpRow[];
+  loading: boolean;
+  onExpand: () => void;
+  /** 入口「✦ 能力决策」（紧邻「配置」左侧；仅 hero 传入）。 */
+  decisionEntry?: ReactNode;
+}) {
   const mcpEnabled = mcpRows.filter((row) => row.enabled).map((row) => ({ id: row.id, name: row.name, kind: "mcp" as const }));
   const enabled = [
     ...mcpEnabled.slice(0, 2),
@@ -650,6 +1673,7 @@ export function CapabilityBar({ skillRows, mcpRows, loading, onExpand }: { skill
       <span className="skp-dock-count">
         {enabled.length} / {total} 启用
       </span>
+      {decisionEntry}
       <button type="button" className="skp-dock-config-btn" onClick={onExpand}>
         配置
         <ChevronIcon />
@@ -666,8 +1690,49 @@ function useCapabilityController(api: CapabilityPanelApi, workspace: string, ena
   const { snapshot, loading, error, setError, refresh } = useCapabilitySnapshot(api, workspace, enabled);
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState<Record<string, boolean>>({});
-  const skillRows = useMemo(() => buildSkillRows(snapshot, pending), [snapshot, pending]);
-  const mcpRows = useMemo(() => buildMcpRows(snapshot, pending), [snapshot, pending]);
+  // 冷会话「能力决策」应用走宿主排队，写入前快照里没有会话态；这里做乐观回显，
+  // 让 chips 立即出现（UX §8.6「冷会话 chips 立即回显」）。
+  const [optimistic, setOptimistic] = useState<{ skills: Record<string, boolean>; mcp: Record<string, boolean> }>({ skills: {}, mcp: {} });
+  const skillRows = useMemo(
+    () =>
+      buildSkillRows(snapshot, pending).map((row) => {
+        if (pending[row.id] !== undefined) return row;
+        const value = optimistic.skills[row.name];
+        return value === undefined ? row : { ...row, enabled: value };
+      }),
+    [snapshot, pending, optimistic.skills],
+  );
+  const mcpRows = useMemo(
+    () =>
+      buildMcpRows(snapshot, pending).map((row) => {
+        if (pending[row.id] !== undefined) return row;
+        const value = optimistic.mcp[row.name];
+        return value === undefined ? row : { ...row, enabled: value };
+      }),
+    [snapshot, pending, optimistic.mcp],
+  );
+
+  const applyOptimistic = useCallback(
+    (items: Array<{ kind: "skill" | "mcp"; name: string }>) => {
+      setOptimistic((prev) => {
+        const skills = { ...prev.skills };
+        const mcp = { ...prev.mcp };
+        for (const item of items) {
+          if (item.kind === "skill") {
+            skills[item.name] = true;
+            continue;
+          }
+          // rank 的 name 是 serverName；composer 行名对项目条目用的是 key，
+          // 因此先按 serverName / key 在快照里解析出行名。
+          const server =
+            snapshot.servers.find((candidate) => candidate.serverName === item.name) ?? snapshot.servers.find((candidate) => candidate.key === item.name);
+          mcp[server?.key ?? item.name] = true;
+        }
+        return { skills, mcp };
+      });
+    },
+    [snapshot.servers],
+  );
 
   useEffect(() => {
     setPending({});
@@ -724,20 +1789,184 @@ function useCapabilityController(api: CapabilityPanelApi, workspace: string, ena
     }
   }, [api, refresh, setError, snapshot]);
 
-  return { snapshot, loading, error, refresh, skillRows, mcpRows, pending, busy, toggle, reset };
+  return { snapshot, loading, error, refresh, skillRows, mcpRows, pending, busy, toggle, reset, applyOptimistic };
 }
 
 // ---------------------------------------------------------------------------
 // 首屏（hero）：fixed 面板（active 相位返回零高占位）
 // ---------------------------------------------------------------------------
 
-export function ComposerCapabilityHero({ api, onManage }: { api: CapabilityPanelApi; onManage?: () => void }) {
+export function ComposerCapabilityHero(props: ComposerCapabilityHeroProps) {
+  const { api, onManage } = props;
+  const slot = props.slotProps;
+  if (slot !== undefined && typeof slot.useInput === "function") {
+    return <HeroWithSubscribedDraft api={api} onManage={onManage} slotProps={slot} useInput={slot.useInput} />;
+  }
+  return <HeroBody api={api} onManage={onManage} slotProps={slot} slotDraft={undefined} />;
+}
+
+/**
+ * 槽 standardProps 可用分支：`useInput` 是订阅式 hook，草稿变化即重渲染。
+ * 单独成组件是为了避免在 props 形态切换时改变 HeroBody 的 hooks 顺序。
+ */
+function HeroWithSubscribedDraft({
+  api,
+  onManage,
+  slotProps,
+  useInput,
+}: {
+  api: CapabilityPanelApi;
+  onManage?: (domain?: PanelDomain) => void;
+  slotProps: HeroSlotProps;
+  useInput: NonNullable<HeroSlotProps["useInput"]>;
+}) {
+  const draft = useInput((state: any) => (typeof state?.draft === "string" ? state.draft : ""));
+  return <HeroBody api={api} onManage={onManage} slotProps={slotProps} slotDraft={draft} />;
+}
+
+function HeroBody({
+  api,
+  onManage,
+  slotProps,
+  slotDraft,
+}: {
+  api: CapabilityPanelApi;
+  onManage?: (domain?: PanelDomain) => void;
+  slotProps?: HeroSlotProps;
+  /** 订阅式草稿（`useInput`）；`undefined` = 宿主的标准套件不可用。 */
+  slotDraft: string | undefined;
+}) {
   const { ref, phase } = useConversationPhase();
   const isHero = phase === "hero";
   const workspace = useWorkspaceLabel(api);
   const controller = useCapabilityController(api, workspace, isHero);
   const rect = useComposerCardRect(isHero, ref);
   const [open, setOpen] = useState(true);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const titleRef = useRef<HTMLDivElement | null>(null);
+
+  // 草稿三级降级：useInput（已订阅）→ input.draft（点时刻）→ DOM 兜底。
+  const staticDraft = typeof slotProps?.input?.draft === "string" ? slotProps.input.draft : undefined;
+  const dom = useDomDraftReader(ref, slotDraft === undefined && staticDraft === undefined);
+  const rawDraft = slotDraft !== undefined ? slotDraft : staticDraft !== undefined ? staticDraft : dom.draft;
+  const draft = rawDraft === undefined ? undefined : cleanDraft(rawDraft);
+
+  const jevConfig = useJevConfig(api);
+  // 相位兜底：从 active 回到 hero（组件不卸载）时重读一次配置，覆盖外壳未派发
+  // 配置事件 / 配置页与本组件不同挂载期的遗漏。首次进入 hero（初始 undefined
+  // → "hero"）由挂载时加载覆盖，不重复请求。
+  const lastPhaseRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const previous = lastPhaseRef.current;
+    lastPhaseRef.current = phase;
+    if (previous !== undefined && previous !== "hero" && phase === "hero") jevConfig.refreshSilently();
+  }, [phase, jevConfig.refreshSilently]);
+  const totalCapabilities = controller.skillRows.length + controller.mcpRows.length;
+  // 冷会话技能走宿主排队应用（架构 §8.6），不按 canToggleInSession 置灰，
+  // 因此这里只把「外部不可 restrict 实例」从可切换集合里排除。
+  const switchableCapabilities = controller.skillRows.length + controller.mcpRows.filter((row) => !row.locked).length;
+  const returnFocusToEntry = useCallback((returnFocus: boolean) => {
+    if (!returnFocus) return;
+    requestAnimationFrame(() => {
+      contentRef.current?.querySelector<HTMLButtonElement>(".skp-decision-entry")?.focus();
+    });
+  }, []);
+  const decision = useDecision({
+    api,
+    enabled: isHero,
+    draft,
+    isComposing: dom.isComposing,
+    config: jevConfig.state,
+    reloadConfig: jevConfig.reload,
+    capabilitiesReady: !controller.loading && totalCapabilities > 0 && switchableCapabilities > 0,
+    onManage,
+    onRefreshCapabilities: controller.refresh,
+    onOptimisticApplied: controller.applyOptimistic,
+    onClosed: returnFocusToEntry,
+  });
+
+  // 手动触发的评分态把焦点移到面板标题（自动触发不移动焦点）。
+  const previousPhaseRef = useRef<DecisionPhase | undefined>(undefined);
+  useEffect(() => {
+    const currentPhase = decision.state?.phase;
+    const wasInactive = previousPhaseRef.current === undefined;
+    previousPhaseRef.current = currentPhase;
+    if (!wasInactive || currentPhase === undefined) return;
+    if (decision.state?.origin !== "manual") return;
+    requestAnimationFrame(() => titleRef.current?.focus());
+  }, [decision.state]);
+
+  const configured = jevConfig.state.status === "ready" && jevConfig.state.view.hasApiKey;
+  const autoOff = jevConfig.state.status === "ready" && !jevConfig.state.view.autoTrigger.enabled;
+
+  let entryDisabled = false;
+  let entryGuide = jevConfig.state.status === "ready" && !configured;
+  let entryLabel = "能力决策";
+  let entryTooltip = configured
+    ? autoOff
+      ? "自动触发默认关闭 · 可在 Jev 模型 Tab 开启"
+      : "根据输入框草稿，为技能和 MCP 打分并勾选相关能力（仅当前会话）"
+    : "尚未配置 Jev 模型，点击去配置";
+  if (decision.state?.phase === "applying") {
+    entryDisabled = true;
+    entryGuide = false;
+    entryLabel = "应用中…";
+    entryTooltip = "正在应用所选能力";
+  } else if (decision.state?.phase === "loading") {
+    entryDisabled = true;
+    entryGuide = false;
+    entryLabel = "评分中…";
+    entryTooltip = "正在评分，请稍候";
+  } else if (jevConfig.state.status === "loading") {
+    entryDisabled = true;
+    entryGuide = false;
+    entryTooltip = "正在读取 Jev 配置…";
+  } else if (controller.loading) {
+    entryDisabled = true;
+    entryGuide = false;
+    entryTooltip = "正在加载本会话能力…";
+  } else if (draft === undefined) {
+    entryDisabled = true;
+    entryGuide = false;
+    entryTooltip = "无法读取输入框内容";
+  } else if (draft === "") {
+    entryDisabled = true;
+    entryGuide = false;
+    entryTooltip = "先在输入框写下你要做的事";
+  } else if (totalCapabilities === 0) {
+    entryDisabled = true;
+    entryGuide = false;
+    entryTooltip = "当前会话没有可评分的技能或 MCP 服务器";
+  } else if (switchableCapabilities === 0) {
+    entryDisabled = true;
+    entryGuide = false;
+    entryTooltip = "当前会话没有可切换的能力";
+  } else if (jevConfig.state.status === "error") {
+    entryGuide = false;
+    entryTooltip = "读取 Jev 配置失败，点击查看详情";
+  }
+
+  const onEntryClick = () => {
+    if (entryDisabled) return;
+    if (jevConfig.state.status === "error") {
+      decision.startConfigError();
+      return;
+    }
+    if (jevConfig.state.status !== "ready") return;
+    if (!jevConfig.state.view.hasApiKey) {
+      onManage?.("jev");
+      return;
+    }
+    decision.start();
+  };
+
+  const decisionHint =
+    jevConfig.state.status === "ready" && jevConfig.state.view.hasApiKey && autoOff ? "自动触发默认关闭 · 可在 Jev 模型 Tab 开启" : undefined;
+
+  const entryButton = (inBar: boolean) => (
+    <DecisionEntryButton inBar={inBar} label={entryLabel} tooltip={entryTooltip} disabled={entryDisabled} guide={entryGuide} onClick={onEntryClick} />
+  );
+  const countdown = decision.countdown;
 
   // 零高锚点：input.dock 里的真实 DOM（hero 时负责相位探测 + 定位面板）。
   // 不用 portal：fixed 元素不受祖先 overflow 裁剪，且避免引入 react-dom 类型
@@ -752,8 +1981,24 @@ export function ComposerCapabilityHero({ api, onManage }: { api: CapabilityPanel
 
   return (
     <div ref={ref} className="skp-dock-hero-anchor">
-      <div className="skp-dock-fixed" style={style}>
-        {open ? (
+      <div ref={contentRef} className="skp-dock-fixed" style={style}>
+        {decision.state !== undefined ? (
+          <DecisionPanel
+            state={decision.state}
+            config={jevConfig.state}
+            draft={draft}
+            estimateTotal={totalCapabilities}
+            titleRef={titleRef}
+            onClose={decision.close}
+            onCancel={decision.cancelScoring}
+            onRescore={decision.rescore}
+            onRetry={decision.retry}
+            onGoConfig={decision.goConfig}
+            onThreshold={decision.setThreshold}
+            onToggle={decision.toggleItem}
+            onApply={decision.apply}
+          />
+        ) : open ? (
           <CapabilityPanel
             mode="hero"
             loading={controller.loading}
@@ -769,10 +2014,34 @@ export function ComposerCapabilityHero({ api, onManage }: { api: CapabilityPanel
             onCollapse={() => setOpen(false)}
             {...(onManage !== undefined ? { onManage } : {})}
             onRetry={controller.refresh}
+            decisionEntry={entryButton(false)}
+            {...(decisionHint !== undefined ? { decisionHint } : {})}
+            {...(countdown !== undefined ? { decisionWaiting: countdown } : {})}
           />
         ) : (
-          <CapabilityBar skillRows={controller.skillRows} mcpRows={controller.mcpRows} loading={controller.loading} onExpand={() => setOpen(true)} />
+          <div className="skp-decision-bar-wrap">
+            <CapabilityBar
+              skillRows={controller.skillRows}
+              mcpRows={controller.mcpRows}
+              loading={controller.loading}
+              onExpand={() => setOpen(true)}
+              decisionEntry={entryButton(true)}
+            />
+            {countdown !== undefined && (
+              <div className="skp-decision-countdown skp-decision-countdown-bar" aria-live="off">
+                停顿 {formatSeconds(countdown.elapsedMs)}s / {formatSeconds(countdown.pauseMs)}s · 即将能力决策
+              </div>
+            )}
+          </div>
         )}
+        {decision.toast !== undefined && (
+          <div className={`skp-decision-toast skp-decision-toast-${decision.toast.tone}`} role="status">
+            {decision.toast.text}
+          </div>
+        )}
+        <span className="skp-sr-only" role="status" aria-live="polite">
+          {decision.liveMessage}
+        </span>
       </div>
     </div>
   );

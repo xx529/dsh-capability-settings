@@ -42,6 +42,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { CapabilityPanelApi, ClientSkillSummary, SkillFilePayload, SkillsApi } from "./api.js";
 import { McpView } from "./mcp-panel.js";
+import { JevPanel } from "./jev-panel.js";
 import { Modal } from "./modal.js";
 import { SkpSelect } from "./select.js";
 import { hasWorkspaceLabel, isProjectSource, useAsyncList } from "./panel-common.js";
@@ -51,19 +52,58 @@ import { locateSkillRoot, rerootEntries, stripCommonTopFolder } from "../shared/
 import { unzip } from "./unzip.js";
 import { base64ToBytes, buildZip, downloadBytes } from "./zip.js";
 
-/** 域 Tab 的取值（快捷消息域已下线，只剩技能 / MCP）。 */
-type DomainTab = "skills" | "mcp";
+/**
+ * 域 Tab 的取值（快捷消息域已下线，现有技能 / MCP / Jev 模型三域）。
+ * `jev` 是配置页而不是条目域：无计数、无搜索、无左导航（见 UX v1.5 §5.1）。
+ * 导出给 client.ts 的 `openCapabilityPanel(domain?)` 复用。
+ */
+export type DomainTab = "skills" | "mcp" | "jev";
+
+/** 外部（client.ts）请求面板切域时派发的 window 自定义事件名。 */
+const PANEL_DOMAIN_EVENT = "capability-panel:set-domain";
+
+/**
+ * 待应用的目标域：面板**尚未挂载**时，`openCapabilityPanel(domain)` 先把目标
+ * 记在这里，由 CapabilityPanel 首次渲染读取并清空；面板已挂载时改用事件即时
+ * 切换（见 setPanelDomain）。
+ */
+let pendingPanelDomain: DomainTab | undefined;
+
+/**
+ * 请求能力面板切到指定域（由 client.ts 的 `openCapabilityPanel(domain?)` 在
+ * `layout.selectPanel("capability-panel")` 之前调用）。
+ *
+ * 覆盖两种时序：
+ *   - 面板**已挂载**：派发 `capability-panel:set-domain`，组件监听后立即切 Tab；
+ *   - 面板**未挂载**：目标留在模块级 pending，组件首次渲染直接落在该域
+ *     （hero「去配置」因此能一步打开 Jev Tab，AC-ENT-4）。
+ *
+ * `undefined` = 保持当前域（无参打开面板的旧行为）。
+ */
+export function setPanelDomain(domain?: DomainTab): void {
+  pendingPanelDomain = domain;
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(new window.CustomEvent(PANEL_DOMAIN_EVENT, { detail: domain }));
+  } catch {
+    /* 非浏览器/测试环境没有 CustomEvent：只走 pending 路径 */
+  }
+}
 
 /** 域 Tab 的展示文案（当前硬编码中文，见 client.ts 的 locale 说明）。 */
 const DOMAIN_LABEL: Record<DomainTab, string> = {
   skills: "技能",
   mcp: "MCP",
+  jev: "Jev 模型",
 };
 
-const DOMAIN_ORDER: DomainTab[] = ["skills", "mcp"];
+const DOMAIN_ORDER: DomainTab[] = ["skills", "mcp", "jev"];
 
-/** 各域的搜索占位符（搜索框在根组件头部，切换域时切换文案）。 */
-const DOMAIN_SEARCH_PLACEHOLDER: Record<DomainTab, string> = {
+/**
+ * 各域的搜索占位符（搜索框在根组件头部，切换域时切换文案）。
+ * `jev` 域没有搜索框，故不在此表内（渲染处按 `domain !== "jev"` 隐藏）。
+ */
+const DOMAIN_SEARCH_PLACEHOLDER: Record<Exclude<DomainTab, "jev">, string> = {
   skills: "搜索技能…",
   mcp: "搜索 MCP 服务器…",
 };
@@ -78,7 +118,11 @@ const DOMAIN_SEARCH_PLACEHOLDER: Record<DomainTab, string> = {
 export function CapabilityPanel({ api }: { api: CapabilityPanelApi }) {
   // 域、工作区标签、下拉框选项、钉选状态各自维护一份 useState；
   // 起始值取自 api 的快照方法。
-  const [domain, setDomain] = useState<DomainTab>("skills");
+  //
+  // 初始域优先消费外部 pending（`setPanelDomain`）；初始化器只读不写，
+  // 避开 React StrictMode 双调用初始化器的副作用问题，pending 由下方
+  // effect 在挂载后清空。
+  const [domain, setDomain] = useState<DomainTab>(() => pendingPanelDomain ?? "skills");
   /** 当前域的搜索词（搜索框在头部，按域切换 placeholder；切域清空）。 */
   const [query, setQuery] = useState("");
   const [workspace, setWorkspace] = useState<string | undefined>(() => api.workspaceLabel());
@@ -92,6 +136,29 @@ export function CapabilityPanel({ api }: { api: CapabilityPanelApi }) {
   // 搜索不改变 Tab 计数（Tab 计数是总量）。
   const [skillsCount, setSkillsCount] = useState<number | undefined>(undefined);
   const [mcpCount, setMcpCount] = useState<number | undefined>(undefined);
+  /**
+   * Jev 配置页在首次进入该 Tab 时挂载，之后**常驻**（用 active 控制显隐）：
+   * 这样在同一面板会话内切到技能/MCP 再切回来，未保存的表单草稿仍在
+   * （AC-CFG-16）；关闭能力面板后整棵子树卸载，草稿丢弃。
+   * 若初始域就是 jev（pending），同样要挂载。
+   */
+  const [jevMounted, setJevMounted] = useState(() => pendingPanelDomain === "jev");
+
+  // 消费 pending + 监听外部切域事件：挂载期间 `setPanelDomain(domain)` 会
+  // 立即切 Tab（清空搜索词，沿用点 Tab 的既有规则）；卸载移除监听。
+  useEffect(() => {
+    pendingPanelDomain = undefined;
+    const onSetDomain = (event: Event) => {
+      pendingPanelDomain = undefined;
+      const detail = (event as CustomEvent<unknown>).detail;
+      if (detail !== "skills" && detail !== "mcp" && detail !== "jev") return;
+      setDomain(detail);
+      setQuery("");
+      if (detail === "jev") setJevMounted(true);
+    };
+    window.addEventListener(PANEL_DOMAIN_EVENT, onSetDomain);
+    return () => window.removeEventListener(PANEL_DOMAIN_EVENT, onSetDomain);
+  }, []);
 
   // 工作区标签/项目选项/钉选状态都会随"当前工作区解析完成或变化、
   // 用户挑选项目"而变；数据源是快照（SnapshotStore），本身不具备响应性，
@@ -112,10 +179,15 @@ export function CapabilityPanel({ api }: { api: CapabilityPanelApi }) {
     };
   }, [api]);
 
-  const counts: Record<DomainTab, number | undefined> = { skills: skillsCount, mcp: mcpCount };
+  // Jev 域无条目计数（不是条目域，无「总数」语义），恒为 undefined。
+  const counts: Record<DomainTab, number | undefined> = { skills: skillsCount, mcp: mcpCount, jev: undefined };
 
   // 页面 chrome 由主区域提供（侧栏切换主面板 = 关闭）；这里只渲染
   // 标题行 + 域 Tab 与当前域视图。
+  //
+  // Jev 配置页没有「项目作用域」语义：选中该 Tab 时隐藏工作区路径、项目下拉框
+  // 与搜索框（UX v1.5 §5.1 / AC-CFG-2），切回条目域后全部恢复。
+  const jevActive = domain === "jev";
   return (
     <section className="skp-panel" aria-label="能力面板">
       <header className="skp-header">
@@ -123,28 +195,30 @@ export function CapabilityPanel({ api }: { api: CapabilityPanelApi }) {
           <div className="skp-title-main">
             <h2>能力面板</h2>
             {/* 当前作用域的工作区路径（跟随 session 或钉选的项目）。 */}
-            {workspace !== undefined && (
+            {!jevActive && workspace !== undefined && (
               <span className="skp-workspace" title={workspace}>
                 {workspace}
               </span>
             )}
           </div>
-          <div className="skp-title-tools">
-            {/* 项目作用域下拉框："" = 跟随当前 session；钉选才固定。 */}
-            <SkpSelect
-              className="skp-dd-scope"
-              value={pinned ?? ""}
-              title={workspace}
-              ariaLabel="项目作用域"
-              options={[
-                { value: "", label: "跟随当前会话" },
-                ...projects.map((p) => ({ value: p.path, label: p.title ?? p.path })),
-                // 钉选的项目不在已知列表里时也保留为选项，避免"消失"。
-                ...(pinned !== undefined && !projects.some((p) => p.path === pinned) ? [{ value: pinned, label: pinned }] : []),
-              ]}
-              onChange={(value) => api.selectProject(value === "" ? undefined : value)}
-            />
-          </div>
+          {!jevActive && (
+            <div className="skp-title-tools">
+              {/* 项目作用域下拉框："" = 跟随当前 session；钉选才固定。 */}
+              <SkpSelect
+                className="skp-dd-scope"
+                value={pinned ?? ""}
+                title={workspace}
+                ariaLabel="项目作用域"
+                options={[
+                  { value: "", label: "跟随当前会话" },
+                  ...projects.map((p) => ({ value: p.path, label: p.title ?? p.path })),
+                  // 钉选的项目不在已知列表里时也保留为选项，避免"消失"。
+                  ...(pinned !== undefined && !projects.some((p) => p.path === pinned) ? [{ value: pinned, label: pinned }] : []),
+                ]}
+                onChange={(value) => api.selectProject(value === "" ? undefined : value)}
+              />
+            </div>
+          )}
         </div>
         {/* 第二行：域 Tab 在左，搜索框右对齐（同一个 input，按域切 placeholder）。 */}
         <div className="skp-header-row">
@@ -158,51 +232,63 @@ export function CapabilityPanel({ api }: { api: CapabilityPanelApi }) {
                 onClick={() => {
                   setDomain(d);
                   setQuery("");
+                  // 首次进入 Jev 域才挂载配置页；之后常驻以保留未保存草稿。
+                  if (d === "jev") setJevMounted(true);
                 }}
               >
                 <span>{DOMAIN_LABEL[d]}</span>
-                <span className="skp-tab-count">{counts[d] ?? "—"}</span>
+                {/* Jev 不是条目域，无「总数」语义，不显示计数徽标（AC-CFG-1）。 */}
+                {d !== "jev" && <span className="skp-tab-count">{counts[d] ?? "—"}</span>}
               </button>
             ))}
           </div>
-          <input
-            className="skp-search skp-header-search"
-            type="search"
-            aria-label={DOMAIN_SEARCH_PLACEHOLDER[domain]}
-            placeholder={DOMAIN_SEARCH_PLACEHOLDER[domain]}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape" && query.length > 0) {
-                event.preventDefault();
-                setQuery("");
-              }
-            }}
-          />
+          {/* Jev 配置页没有搜索框：该 Tab 下整个 input 不渲染（不是禁用）。 */}
+          {domain !== "jev" && (
+            <input
+              className="skp-search skp-header-search"
+              type="search"
+              aria-label={DOMAIN_SEARCH_PLACEHOLDER[domain]}
+              placeholder={DOMAIN_SEARCH_PLACEHOLDER[domain]}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && query.length > 0) {
+                  event.preventDefault();
+                  setQuery("");
+                }
+              }}
+            />
+          )}
         </div>
       </header>
 
-      {domain === "skills" ? (
-        <SkillsView
-          api={api}
-          workspace={workspace}
-          projects={projects}
-          query={query}
-          pinned={pinned}
-          onSelectWorkspace={(path) => api.selectProject(path)}
-          onCount={setSkillsCount}
-        />
-      ) : (
-        <McpView
-          api={api}
-          workspace={workspace}
-          projects={projects}
-          query={query}
-          pinned={pinned}
-          onSelectWorkspace={(path) => api.selectProject(path)}
-          onCount={setMcpCount}
-        />
-      )}
+      {jevActive
+        ? null
+        : domain === "skills"
+          ? (
+              <SkillsView
+                api={api}
+                workspace={workspace}
+                projects={projects}
+                query={query}
+                pinned={pinned}
+                onSelectWorkspace={(path) => api.selectProject(path)}
+                onCount={setSkillsCount}
+              />
+            )
+          : (
+              <McpView
+                api={api}
+                workspace={workspace}
+                projects={projects}
+                query={query}
+                pinned={pinned}
+                onSelectWorkspace={(path) => api.selectProject(path)}
+                onCount={setMcpCount}
+              />
+            )}
+      {/* 常驻挂载：切走时仅 display:none，未保存草稿不丢（AC-CFG-16）。 */}
+      {jevMounted && <JevPanel api={api} active={jevActive} />}
     </section>
   );
 }

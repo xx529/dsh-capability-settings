@@ -13,6 +13,18 @@ import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 /**
+ * 原子写可选参数（additive；不传时行为与旧版完全一致）。
+ *
+ * 目前只有 Jev 配置使用：`mode: 0o600` 让临时文件从创建起就是 0600，rename
+ * 保留该模式，密钥文件不会经历"先按 umask 可读、再 chmod"的中间态。
+ * mcp / skills / overrides 三域的三参调用**不要改**，产物 mode 仍由 umask 决定。
+ */
+export interface AtomicWriteOptions {
+  /** 写临时文件时使用的 POSIX 权限（如 `0o600`）。缺省不传 = 沿用 umask。 */
+  mode?: number;
+}
+
+/**
  * 原子写入一个文本文件（自动创建父目录）。
  *
  * 用带时间戳与随机后缀的临时文件 + rename 覆盖，避免写一半留下损坏的文件，
@@ -21,10 +33,17 @@ import { dirname, join } from "node:path";
  * @param filePath 目标文件绝对路径
  * @param body 完整文本内容
  * @param tmpPrefix 临时文件名的语义前缀（如 "mcp" / "overrides" / "skill"）
+ * @param options 可选写参数（见 {@link AtomicWriteOptions}）；缺省行为不变
  */
-export async function atomicWriteText(filePath: string, body: string, tmpPrefix: string): Promise<void> {
+export async function atomicWriteText(
+  filePath: string,
+  body: string,
+  tmpPrefix: string,
+  options?: AtomicWriteOptions,
+): Promise<void> {
   await mkdir(dirname(filePath), { recursive: true });
   const tmp = join(dirname(filePath), `.${tmpPrefix}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`);
-  await writeFile(tmp, body, "utf8");
+  const writeOptions = options?.mode === undefined ? ("utf8" as const) : { encoding: "utf8" as const, mode: options.mode };
+  await writeFile(tmp, body, writeOptions);
   await rename(tmp, filePath);
 }
