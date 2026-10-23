@@ -7,9 +7,8 @@
  *     - `skills`：传输无关的磁盘 CRUD 管理器（见 `skills/manager.ts` 与
  *       `skills/crud.ts`）；
  *     - `mcp`：项目/全局 MCP 配置 CRUD + 实时挂载状态（见 `mcp/manager.ts`）；
- *     - `quickMessages`：项目/全局快捷消息 CRUD（见 `quick-messages/manager.ts`）；
  *     - `overrides`：项目级"全局能力禁用"声明（见 `overrides/manager.ts`）——
- *       允许在单个项目里禁用指定的全局 skill / 快捷消息 / MCP server。
+ *       允许在单个项目里禁用指定的全局 MCP server（项目自身的同名条目不受影响）。
  *   - 通过 `mcp/loader.ts` 把配置好的 MCP server 自动挂载进每个存活 agent
  *     （全局 `~/.agents/mcp.json`，兼容旧位置 `~/.dsh` / `~/.claude`；
  *     + 项目 `.mcp.json`，项目级禁用的全局 server 跳过）。
@@ -33,7 +32,6 @@ import { createMcpLoader } from "./mcp/loader.js";
 import { createMcpManager } from "./mcp/manager.js";
 import { createMcpUsageLog, registerMcpUsageGuard } from "./mcp/usage.js";
 import { scanInjectedMcpInstances } from "./mcp/runtime.js";
-import { createQuickMessagesManager } from "./quick-messages/manager.js";
 import { createOverridesManager } from "./overrides/manager.js";
 import type { OverrideToggleInput } from "./overrides/manager.js";
 import { createImportsManager } from "./imports/manager.js";
@@ -71,11 +69,10 @@ export type SkillsService = ReturnType<typeof createService> & {
   setSessionEnabled: SkillSessionRegistry["setEnabled"];
 };
 
-/** 暴露给宿主调用方的传输无关服务：三个域的合体 + 项目级禁用声明。 */
+/** 暴露给宿主调用方的传输无关服务：skills / mcp 两个域的合体 + 项目级禁用声明。 */
 export interface CapabilityPanelService {
   skills: SkillsService;
   mcp: ReturnType<typeof createMcpManager>;
-  quickMessages: ReturnType<typeof createQuickMessagesManager>;
   overrides: ReturnType<typeof createOverridesManager>;
 }
 
@@ -99,8 +96,8 @@ export function apply(ctx: any, config: Config = {}) {
   // 组合根处包一层：loader 拿原身（只读），对外暴露的 service.overrides 是
   // 带 reload 侧效应的包装。
   const overridesRaw = createOverridesManager({ dshHome: config.dshHome });
-  // 项目级「全局能力引用」存储：MCP 与快捷消息两个域的管理器、MCP loader
-  // 共用同一实例（「导入到本项目」= 登记引用，启停是引用上的项目级标记）。
+  // 项目级「全局能力引用」存储：MCP 管理器与 MCP loader 共用同一实例
+  // （「导入到本项目」= 登记引用，启停是引用上的项目级标记）。
   // skills 域不走引用——skill 的启停由宿主原生读 frontmatter，引用存储
   // 对宿主注入链不可见（见 CHANGELOG Unreleased）。
   const imports = createImportsManager();
@@ -150,7 +147,6 @@ export function apply(ctx: any, config: Config = {}) {
       overrides,
       imports,
     ),
-    quickMessages: createQuickMessagesManager({ dshHome: config.dshHome, agentsHome: config.agentsHome }, overrides, imports),
     overrides,
   };
   ctx.provide("capabilityPanel", () => service);
@@ -175,7 +171,6 @@ export { createSkillSessionRegistry } from "./skills/session.js";
 export type { SkillSessionRegistry, SessionSkillView, SessionSkillOpResult } from "./skills/session.js";
 export { createMcpLoader } from "./mcp/loader.js";
 export { createMcpManager } from "./mcp/manager.js";
-export { createQuickMessagesManager } from "./quick-messages/manager.js";
 export { createOverridesManager } from "./overrides/manager.js";
 export { mountRpcChannel, handleEndpoint, CHANNEL } from "./remote.js";
 export { findProjectRoot } from "./shared/project-root.js";
@@ -192,17 +187,8 @@ export { isSkillName, validateSpec } from "./skills/validate.js";
 export { invocationPolicy } from "./skills/types.js";
 export { globalMcpFile, projectMcpFile } from "./mcp/paths.js";
 export { readMcpFile, writeMcpFile, sanitizeServerName, toClientConfig, validateEntry } from "./mcp/config-file.js";
-export { globalQuickMessagesFile, projectQuickMessagesFile } from "./quick-messages/paths.js";
-export { readQuickMessagesFile, writeQuickMessagesFile, validateQuickMessage } from "./quick-messages/config-file.js";
 export type { SkillSummaryView, SkillSpec, SkillFormat, WritableScope, InvocationPolicy } from "./skills/types.js";
 export type { McpScope, McpServerEntry, McpServerView, McpListResult, McpStatusView, McpMountState } from "./mcp/types.js";
-export type {
-  QuickScope,
-  QuickMessageEntry,
-  QuickMessageView,
-  QuickMessagesListResult,
-  QuickOpResult,
-} from "./quick-messages/types.js";
 export type { CapabilityDomain, CapabilityOverrides, OverridesSet, OverridesView } from "./overrides/types.js";
 export type { OverridesManager } from "./overrides/manager.js";
 

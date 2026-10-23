@@ -7,9 +7,8 @@
  *     - `skills`：传输无关的磁盘 CRUD 管理器（见 `skills/manager.ts` 与
  *       `skills/crud.ts`）；
  *     - `mcp`：项目/全局 MCP 配置 CRUD + 实时挂载状态（见 `mcp/manager.ts`）；
- *     - `quickMessages`：项目/全局快捷消息 CRUD（见 `quick-messages/manager.ts`）；
  *     - `overrides`：项目级"全局能力禁用"声明（见 `overrides/manager.ts`）——
- *       允许在单个项目里禁用指定的全局 skill / 快捷消息 / MCP server。
+ *       允许在单个项目里禁用指定的全局 MCP server（项目自身的同名条目不受影响）。
  *   - 通过 `mcp/loader.ts` 把配置好的 MCP server 自动挂载进每个存活 agent
  *     （全局 `~/.agents/mcp.json`，兼容旧位置 `~/.dsh` / `~/.claude`；
  *     + 项目 `.mcp.json`，项目级禁用的全局 server 跳过）。
@@ -25,7 +24,6 @@
 import { createService } from "./skills/manager.js";
 import type { SessionSkillView, SkillSessionRegistry } from "./skills/session.js";
 import { createMcpManager } from "./mcp/manager.js";
-import { createQuickMessagesManager } from "./quick-messages/manager.js";
 import { createOverridesManager } from "./overrides/manager.js";
 /** Cordis 插件名（对应 cordis.patch.yml 里的插件 id）。 */
 export declare const name = "capability-panel";
@@ -54,11 +52,10 @@ export type SkillsService = ReturnType<typeof createService> & {
     /** 设置本会话开关（内存态，不落盘）。 */
     setSessionEnabled: SkillSessionRegistry["setEnabled"];
 };
-/** 暴露给宿主调用方的传输无关服务：三个域的合体 + 项目级禁用声明。 */
+/** 暴露给宿主调用方的传输无关服务：skills / mcp 两个域的合体 + 项目级禁用声明。 */
 export interface CapabilityPanelService {
     skills: SkillsService;
     mcp: ReturnType<typeof createMcpManager>;
-    quickMessages: ReturnType<typeof createQuickMessagesManager>;
     overrides: ReturnType<typeof createOverridesManager>;
 }
 /** 宿主上下文增强：`ctx.capabilityPanel`。 */
@@ -79,7 +76,6 @@ export { createSkillSessionRegistry } from "./skills/session.js";
 export type { SkillSessionRegistry, SessionSkillView, SessionSkillOpResult } from "./skills/session.js";
 export { createMcpLoader } from "./mcp/loader.js";
 export { createMcpManager } from "./mcp/manager.js";
-export { createQuickMessagesManager } from "./quick-messages/manager.js";
 export { createOverridesManager } from "./overrides/manager.js";
 export { mountRpcChannel, handleEndpoint, CHANNEL } from "./remote.js";
 export { findProjectRoot } from "./shared/project-root.js";
@@ -96,11 +92,8 @@ export { isSkillName, validateSpec } from "./skills/validate.js";
 export { invocationPolicy } from "./skills/types.js";
 export { globalMcpFile, projectMcpFile } from "./mcp/paths.js";
 export { readMcpFile, writeMcpFile, sanitizeServerName, toClientConfig, validateEntry } from "./mcp/config-file.js";
-export { globalQuickMessagesFile, projectQuickMessagesFile } from "./quick-messages/paths.js";
-export { readQuickMessagesFile, writeQuickMessagesFile, validateQuickMessage } from "./quick-messages/config-file.js";
 export type { SkillSummaryView, SkillSpec, SkillFormat, WritableScope, InvocationPolicy } from "./skills/types.js";
 export type { McpScope, McpServerEntry, McpServerView, McpListResult, McpStatusView, McpMountState } from "./mcp/types.js";
-export type { QuickScope, QuickMessageEntry, QuickMessageView, QuickMessagesListResult, QuickOpResult, } from "./quick-messages/types.js";
 export type { CapabilityDomain, CapabilityOverrides, OverridesSet, OverridesView } from "./overrides/types.js";
 export type { OverridesManager } from "./overrides/manager.js";
 /**

@@ -3,11 +3,11 @@
  *
  * 两个槽入口（在 client.ts 注册）：
  *   - `conversation.input.left`：ComposerSkillsButton —— 能力工具组中间的
- *     闪电图标按钮（快捷消息 / Skills / MCP 顺序）；草稿里不含已知 `/skill`
+ *     闪电图标按钮（Skills / MCP 顺序）；草稿里不含已知 `/skill`
  *     口令时空心描边，含已知口令时实心填充绿色（成功色）；
  *   - `conversation.input.overlay`：ComposerSkillsOverlay —— InputBar 浮动
  *     锚点里的弹层，打开时以**整个能力工具组**的右上角为锚（弹层右下角贴
- *     按钮组右上角，三个弹层共用同一锚点、切换时位置不跳变），容器与行样式
+ *     按钮组右上角，两个弹层共用同一锚点、切换时位置不跳变），容器与行样式
  *     对齐宿主 slash 菜单（MenuView）那一族设计变量，按 当前项目/全局 分组
  *     列出 user-invocable 的 skill（名称 + 描述单行省略）。
  *
@@ -21,7 +21,7 @@
  * 行右侧还有一个 hover / 键盘聚焦时浮现的小按钮（与宿主主发送键同款向上
  * 箭头图标，28×28 方形圆角）：一键把 `/name ` 作为完整内容直接发送——先
  * `setDraft` 覆盖草稿、再 `submit()` 进入宿主提交流水线，不再经过输入框
- * 草稿（参照 composer-quick 的快捷消息行）。
+ * 草稿（与宿主 slash 菜单行的交互一致）。
  *
  * 草稿读写走 session 标准套件：`conversation.input.overlay` 是 session
  * 作用域槽，ui-conversation 的 provide 贡献（hooks: ["input"]、

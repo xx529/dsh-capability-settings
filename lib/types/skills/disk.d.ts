@@ -50,7 +50,7 @@ export declare function readSkill(root: string, name: string, format: SkillForma
  *
  * 采用"临时文件 + rename"的原子写入（shared/atomic-write.ts），避免写一半
  * 留下残缺文件；目录布局会自动创建父目录。写操作按文件加锁（shared/file-lock
- * 的 withFileLock），与 mcp / quick-messages 两个域的写路径同一口径：
+ * 的 withFileLock），与 mcp 域的写路径同一口径：
  * 多面板标签页并发写同一 skill 时串行化，避免互相覆盖。
  *
  * @returns 实际写入的文件绝对路径

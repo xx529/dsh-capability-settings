@@ -31,9 +31,9 @@ const NS = "capabilityPanel";
 
 /**
  * 简体中文词典。
- * 注意：当前面板组件直接使用硬编码文案（见 panel.tsx / mcp-panel.tsx /
- * quick-messages-panel.tsx），这组 dictionary 注册后暂无组件读取，属于
- * 后续接入本地化的预留脚手架，两边内容暂时一致。
+ * 注意：当前面板组件直接使用硬编码文案（见 panel.tsx / mcp-panel.tsx），
+ * 这组 dictionary 注册后暂无组件读取，属于后续接入本地化的预留脚手架，
+ * 两边内容暂时一致。
  */
 const zh = {
   "panel.title": "能力面板",
@@ -116,7 +116,7 @@ export function apply(ctx: any) {
     sessionTitle: (sessionId) => sessionTitleOf(ctx, sessionId),
   });
 
-  // composer（输入框工具行：快捷消息 / Skills / MCP 三个按钮与弹层）专用
+  // composer（输入框工具行：Skills / MCP 按钮与弹层）专用
   // 实例：项目作用域**只跟随该组件所在 session 自己的工作区**，永远不读面板
   // 的钉选状态 `selection.cwd`，也不允许退化成"工作区列表第一项"。否则在
   // 面板里把「项目作用域」钉到 A 工作区后，B 工作区的对话框弹层会列出 A 的
@@ -226,8 +226,8 @@ export function apply(ctx: any) {
   //   1. **顶部 Tab「能力」**（conversation.view）：整页管理本会话 Skills / MCP，
   //      与「对话 / 轨迹 / 上下文 / 编队」同级；进入该 Tab 时隐藏输入框；
   //   2. 首屏（hero）输入框下方内联面板（input.dock 零高锚点 + fixed 面板）。
-  // 输入框工具栏的三个快捷按钮与底部能力条、以及后续加过的单个「能力」图标都已
-  // 按产品决定移除；快捷消息仍可在侧栏「能力面板」中管理。
+  // 输入框工具栏的快捷按钮与底部能力条、以及后续加过的单个「能力」图标都已
+  // 按产品决定移除；快捷消息域已随本版整体下线（数据文件静默保留）。
   //
   // 三个入口一律用 `composerApiFor(props.sessionId)`（只跟随**所在 session** 的
   // 工作区，不含面板钉选、不退化成列表第一项），避免跨会话串味。

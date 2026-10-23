@@ -97,13 +97,6 @@ export interface PanelRpcService {
          */
         setSessionEnabled(input: unknown): Promise<unknown>;
     };
-    quickMessages: {
-        list(cwd?: string): Promise<unknown>;
-        upsert(input: unknown): Promise<unknown>;
-        remove(input: unknown): Promise<unknown>;
-        setEnabled(input: unknown): Promise<unknown>;
-        importToProject(input: unknown): Promise<unknown>;
-    };
     overrides: {
         get(cwd?: string): Promise<unknown>;
         toggle(input: unknown): Promise<unknown>;

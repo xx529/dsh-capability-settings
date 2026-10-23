@@ -2,8 +2,8 @@
  * 解析 "agents home"（全局 `.agents` 配置的基准目录）。
  *
  * 优先级：显式覆盖 → `DSH_AGENTS_HOME` 环境变量 → `~/.agents`。
- * 与 skills/roots.ts 的 `userAgentsSkillsDir` 同口径，供 quick-messages / mcp
- * 两个域的全局配置文件定位复用，避免各处重复实现同一份解析。
+ * 与 skills/roots.ts 的 `userAgentsSkillsDir` 同口径，供 mcp 等域的全局
+ * 配置文件定位复用，避免各处重复实现同一份解析。
  *
  * @module @chengdb/capability-panel/shared/agents-home
  */

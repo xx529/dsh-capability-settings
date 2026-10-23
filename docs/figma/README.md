@@ -1,7 +1,13 @@
-# Figma 原型（Capability Dock · 终稿 v5）
+# Figma 原型（Capability Dock v5 + 能力面板升级 v6）
 
-本目录是「输入框下方会话能力配置区」的 Figma 设计源，供人工查看 / 未来智能体继续改原型。
-设计文档说明见 [`../../notes/design/capability-dock.md`](../../notes/design/capability-dock.md)（本地 notes 目录，不入库）。
+本目录是能力面板相关 UI 的 Figma 设计源，供人工查看 / 未来智能体继续改原型：
+
+- **Capability Dock · 终稿 v5**（`4:2`）：「输入框下方会话能力配置区」的终稿（历史，保留）；
+- **Capability Panel · 升级原型 v6**（`10:2`）：「能力面板」v2 升级原型（当前设计基线；
+  可编辑图层由 `prototype/` 下的 `use_figma` 脚本生成，可随时重跑复现）。
+
+设计文档说明见 [`../../notes/design/capability-dock.md`](../../notes/design/capability-dock.md)
+（v5）与 [`../ux/panel-upgrade.md`](../ux/panel-upgrade.md)（v6 交互规格，入库）。
 
 ## 1. 设计文件与节点
 
@@ -12,6 +18,10 @@ Figma 本地文档：**`dsh`**（DSH to Figma 本地桥，见根 `AGENTS.md`「F
 | Capability Dock · 终稿 v5 | `4:2` | 00 · v5 终稿（画板） | `4:3` |
 | 同上 | | 01 · 首屏 hero · 输入框下方默认展开 | `4:7` |
 | 同上 | | 02 · 会话内 · 能力 Tab（隐藏输入框） | `4:223` |
+| Capability Panel · 升级原型 v6 | `10:2` | 01 · 技能总览（双作用域同屏） | `10:5` |
+| 同上 | | 02 · 技能详情（SKILL.md + 文件树） | `10:61` |
+| 同上 | | 03 · MCP 总览（三组） | `10:117` |
+| 同上 | | 04 · MCP 详情（外部只读） | `10:173` |
 | Capability Dock · 交互原型（历史 v1–v4） | `1:2` | 保留不动，仅作演进记录 | — |
 
 ## 2. 文件
@@ -20,11 +30,23 @@ Figma 本地文档：**`dsh`**（DSH to Figma 本地桥，见根 `AGENTS.md`「F
 docs/figma/
 ├── README.md                      ← 本文件
 ├── scenes/
-│   ├── 01-hero.scene.json         ← import_scene 契约：{ nodes: [FRAME...] }
+│   ├── 01-hero.scene.json         ← v5：import_scene 契约：{ nodes: [FRAME...] }
 │   └── 02-capability-tab.scene.json
 ├── preview/
-│   ├── 01-hero.png                ← 导出预览图（1440×900）
-│   └── 02-capability-tab.png
+│   ├── 01-hero.png                ← v5 导出预览图（1440×900）
+│   ├── 02-capability-tab.png
+│   ├── v6-01-skill-overview.png   ← v6 四帧真实导出（1440×900）
+│   ├── v6-02-skill-detail.png
+│   ├── v6-03-mcp-overview.png
+│   └── v6-04-mcp-detail.png
+├── prototype/                     ← v6 建稿脚本（按帧拆分，use_figma 可直接执行）
+│   ├── 00-init.js                 ← 建页 + 4 画框 + 克隆 v5 sidebar
+│   ├── 01-skill-overview.js
+│   ├── 02-skill-detail.js
+│   ├── 03-mcp-overview.js
+│   ├── 04-mcp-detail.js
+│   ├── 05-sidebar-fix.js          ← 侧栏高亮「能力面板」（幂等，最后跑）
+│   └── spec-v6.md                 ← 节点树 / 坐标 / 验收点
 └── tools/
     └── export-scene.js            ← 从 Figma 重新导出 scene JSON 的 use_figma 脚本
 ```
@@ -84,3 +106,33 @@ docs/figma/
 - 无「仅本会话」标签、无 Tab 栏「+」、无输入框「能力」图标/快捷弹层、无底部能力条。
 - 「能力」Tab 打开时隐藏输入框；整页右侧预留 64px 外壳浮动控件安全区。
 - Skills 会话级开关 = 关闭/恢复（agent 作用域 runtime shadow）；MCP 只做服务器级。
+
+## 7. v6 升级原型（能力面板 v2，当前基线）
+
+设计口径（与 `docs/ux/panel-upgrade.md` v1.2 一致）：
+
+- 域 Tab 只剩「技能 / MCP」，各带条目计数（技能 = 项目 + 全局；MCP 不含外部注入）。
+- 列表同屏分组：技能「本项目 / 全局」；MCP「本项目 / 全局 / 外部注入（非空才出现）」；
+  组头带计数与说明，组内独立滚动，空组折叠。
+- 行尾统一开关（30×18）：技能 =「启用」（项目整体启停；全局 = 在本项目禁用/恢复），
+  MCP =「默认」（新建对话是否启用）；行内不再有文字按钮。
+- 技能详情 = 标题/动作/元信息 + 目录树（220）+ 阅读器（580，「预览 / 源码」）；
+  数据复用 `skills.export`，无新增宿主 RPC。
+- MCP 详情 = 左工具列表（可点选）+ 右参数表（参数 / 类型 / 必填 / 说明，来自
+  `inputSchema` 的 `properties` + `required`）；外部注入只读详情复用同一检视器。
+- 帧尺寸 1440×900（含 256px sidebar 语境）；字体 PingFang SC，代码/路径 Menlo。
+
+### 7.1 重新生成 v6 页面
+
+1. `figma_status` 确认 `dsh` 已连接；必要时 `figma_select_document <connectionId>`。
+2. 依次把 `prototype/00-init.js` → `01` → `02` → `03` → `04` → `05` 整段贴进 `use_figma` 执行
+   （脚本均为幂等：`00` 清空 v6 页重建画框，`01–04` 只重建对应帧主区并保留 sidebar，
+   `05` 修正侧栏高亮）。注意 dynamic-page 模式必须用 `await figma.setCurrentPageAsync(page)`，
+   不能直接赋值 `figma.currentPage`。
+3. 每帧 `get_screenshot` / `download_assets` 与 `preview/v6-*.png` 对照；设计变更后
+   用 `download_assets({ nodeIds:["10:5","10:61","10:117","10:173"], format:"PNG", scale:1 })`
+   覆盖预览图。
+4. 若要导出可重导入的 scene JSON：复用 `tools/export-scene.js`，把 `TARGET_NODE_ID`
+   换成上表 v6 帧 id（脚本需先 `await figma.loadAllPagesAsync()`），按 `SERIALIZE_RANGE`
+   分片取 `part` 后拼接写入 `scenes/v6-*.scene.json`。v6 的可编辑图层以 `prototype/` 脚本
+   为唯一事实源，scene JSON 只是可选快照。

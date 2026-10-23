@@ -14,19 +14,20 @@
  *   - 面板自身用 client.ts 中带「项目钉选」的 `api`：`currentWorkspaceCwd`
  *     是 `selection.cwd ?? 当前会话工作区`，所以头部「项目作用域」下拉框
  *     能把项目级视图钉到任意工作区；
- *   - composer（输入框工具行：快捷消息 / Skills / MCP 三个按钮与弹层）在
- *     client.ts 中用单独的 `composerApi`：`currentWorkspaceCwd` **只**取当前
- *     会话自己的工作区，`selectedProject()` 恒为 undefined。两者共用同一份
+ *   - composer（输入框工具行：Skills / MCP 按钮与弹层）在 client.ts 中用
+ *     单独的 `composerApi`：`currentWorkspaceCwd` **只**取当前会话自己的
+ *     工作区，`selectedProject()` 恒为 undefined。两者共用同一份
  *     `subscribeWorkspace` 回调集合，因此都会随会话工作区切换刷新。
  *   若把面板这份 api 交给 composer，就会出现在面板里把项目作用域钉到 A
  *   工作区后、B 工作区的对话框弹层列出 A 的项目级技能/MCP 的串味 bug。
  *
- * 根容器按能力域分 Tab：
- *   - 快捷消息：项目 + 全局快捷语，支持搜索/过滤与详情视图（见
- *     `quick-messages-panel.tsx`）；
- *   - Skills：项目 + 全局技能，支持搜索/过滤与详情视图；
- *   - MCP：项目 `.mcp.json` + 全局 `mcp.json` 的 server 管理，
- *     带每个 session 的实时挂载状态（见 `mcp-panel.tsx`）。
+ * 根容器按能力域分 Tab（**只剩两个**：技能 / MCP，带数据量计数）：
+ *   - Skills：同一列表列里「本项目 / 全局」两组同屏，各自独立滚动；
+ *     详情页带完整文件树 + SKILL.md 阅读器（见 skill-content.tsx）；
+ *   - MCP：项目 `.mcp.json` + 全局 `mcp.json` 的 server 管理，带每个
+ *     session 的实时挂载状态（见 mcp-panel.tsx）。
+ *
+ * 快捷消息域已整体下线（2026-10 产品决定），域 Tab 不再有第三个入口。
  *
  * 布局刻意保持朴素（自带 CSS 类，见 styles.ts），对未经确认的 UI 原语
  * 组件零硬依赖。

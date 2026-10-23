@@ -19,7 +19,7 @@ function emptyMap(): ImportDomainMap {
 
 /** 一份全空的引用声明。 */
 export function emptyImports(): ImportsSet {
-  return { quickMessages: emptyMap(), mcp: emptyMap() };
+  return { mcp: emptyMap() };
 }
 
 /**

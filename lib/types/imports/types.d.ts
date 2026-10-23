@@ -8,8 +8,7 @@
  *
  * ```jsonc
  * {
- *   "quickMessages": { "继续":   {} },
- *   "mcp":           { "github": {} }
+ *   "mcp": { "github": {} }
  * }
  * ```
  *
@@ -19,8 +18,8 @@
  *
  * @module @chengdb/capability-panel/imports/types
  */
-/** 引用适用的能力域（与 overrides 的域键一致）。 */
-export type ImportDomain = "quickMessages" | "mcp";
+/** 引用适用的能力域（与 overrides 的域键一致；目前只有 MCP）。 */
+export type ImportDomain = "mcp";
 /** 全部引用域（配置文件归一化与校验共用）。 */
 export declare const IMPORT_DOMAINS: readonly ImportDomain[];
 /** 一条引用：指向同名的全局条目；启停状态是项目级的。 */
@@ -30,13 +29,11 @@ export interface ImportRef {
 }
 /** 一个域的引用表（条目名 → 引用）。 */
 export type ImportDomainMap = Record<string, ImportRef>;
-/** 一份完整的引用声明（两个域各自的引用表）。 */
+/** 一份完整的引用声明（各域各自的引用表；目前只有 mcp）。 */
 export interface ImportsSet {
-    quickMessages: ImportDomainMap;
     mcp: ImportDomainMap;
 }
 /** 一份 capability-imports.json 文件的根形状（各域键均可缺省；遗留的 skills 键忽略）。 */
 export interface ImportsFileShape {
-    quickMessages?: ImportDomainMap;
     mcp?: ImportDomainMap;
 }

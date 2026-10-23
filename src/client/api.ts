@@ -385,73 +385,11 @@ export interface McpApi {
 }
 
 // ---------------------------------------------------------------------------
-// 快捷消息域
-// ---------------------------------------------------------------------------
-
-/** 面板视角下的一条快捷消息（跨作用域合并后的视图）。 */
-export interface ClientQuickMessage {
-  /** 消息名称（文件里的键名）。 */
-  name: string;
-  scope: "project" | "global";
-  /** 是否启用（disabled 缺省为启用）。 */
-  enabled: boolean;
-  /** 消息正文（插入草稿时原样追加）。 */
-  text: string;
-  /** 声明这条消息的文件绝对路径。 */
-  filePath: string;
-  /**
-   * 为 true 表示这条**项目**消息与全局条目同源：引用视图（reference）
-   * 恒带此标记；旧版「导入 = 物理复制」时期导入的副本（条目里带导入
-   * 标记）也带此标记。面板据此显示「全局」归属徽标与「移出」按钮。
-   */
-  importedFromGlobal?: boolean;
-  /**
-   * 为 true 表示这条视图是**项目级引用**（内容实时取自同名全局条目，
-   * 启停是引用上的项目级标记）。引用条目不提供「编辑」（请到全局区编辑）。
-   */
-  reference?: boolean;
-  /**
-   * 为 true 表示这条**全局**消息被本项目内的同名条目（原生或引用）遮蔽：
-   * 输入框快捷弹层据此过滤全局原版。
-   */
-  shadowed?: boolean;
-  /**
-   * 为 true 表示这个**全局**快捷消息被当前项目在项目级声明为禁用。
-   * 面板已改为「项目 / 全局」两区 + 导入制，不再展示该标记；输入框
-   * 快捷弹层（composer-quick）仍用它过滤。
-   */
-  disabledInProject?: boolean;
-}
-
-/** 合并列表结果：messages + 非致命的读取错误。 */
-export interface ClientQuickMessagesList {
-  messages: ClientQuickMessage[];
-  errors: string[];
-}
-
-/** 快捷消息域的面板 API。 */
-export interface QuickMessagesApi {
-  list(): Promise<ClientQuickMessagesList>;
-  upsert(input: { scope: "project" | "global"; name: string; text: string }): Promise<OpResult>;
-  remove(input: { scope: "project" | "global"; name: string }): Promise<OpResult>;
-  setEnabled(input: { scope: "project" | "global"; name: string; enabled: boolean }): Promise<OpResult>;
-  /**
-   * 导入全局快捷消息到当前项目：**登记一条引用**（写入
-   * `<项目根>/.agents/capability-imports.json`），不是物理复制——内容始终
-   * 跟随全局条目，全局更新实时生效；项目级启停记录在引用上。
-   * 项目内已有同名原生条目时报硬错误；已有同名引用且未传 overwrite 时
-   * 返回 `{ ok: false, existed: true }`。
-   */
-  importToProject(input: { name: string; overwrite?: boolean }): Promise<OpResult & { existed?: boolean }>;
-}
-
-// ---------------------------------------------------------------------------
 // 项目级"全局能力禁用"域
 // ---------------------------------------------------------------------------
 
 /** 面板视角的完整禁用状态（各域的禁用清单 + 声明文件路径；skills 不走此机制）。 */
 export interface ClientOverrides {
-  quickMessages: string[];
   mcp: string[];
   /** 声明文件绝对路径（无项目时缺省）。 */
   filePath?: string;
@@ -480,11 +418,10 @@ export interface WorkspaceOption {
   title?: string;
 }
 
-/** 面板需要的全部宿主能力（skills + mcp + 快捷消息 + 项目级禁用 + 工作区选择），传输无关。 */
+/** 面板需要的全部宿主能力（skills + mcp + 项目级禁用 + 工作区选择），传输无关。 */
 export interface CapabilityPanelApi {
   skills: SkillsApi;
   mcp: McpApi;
-  quickMessages: QuickMessagesApi;
   overrides: OverridesApi;
   /** 面板头部的"项目作用域"目录标签。 */
   workspaceLabel(): string;

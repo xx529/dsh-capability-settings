@@ -1,6 +1,6 @@
 /**
- * 输入框工具行三个弹层的共用存储与交互辅助（composer-quick /
- * composer-skills / composer-mcp 各自建一份独立实例，互不影响）。
+ * 输入框工具行两个弹层的共用存储与交互辅助（composer-skills /
+ * composer-mcp 各自建一份独立实例，互不影响）。
  *
  * 三个弹层原本各自复制了一份等价的模块级"开合存储"（listeners +
  * openState + openToken + anchorRect）、Esc/外部点击关闭逻辑与锚定样式

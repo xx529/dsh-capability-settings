@@ -1,7 +1,7 @@
 /**
  * 原子写文件：临时文件 + rename（父目录按需创建）。
  *
- * mcp / quick-messages / overrides / skills 四个域原本各复制了一份
+ * mcp / overrides / skills 三个域原本各复制了一份
  * "mkdir + 带时间戳/随机后缀的临时文件 + writeFile + rename"（skills 域的
  * 临时名还缺随机后缀，同进程同毫秒并发写同一文件会撞上同一个临时文件名）。
  * 这里收敛成一份，临时名统一带随机后缀。
@@ -16,6 +16,6 @@
  *
  * @param filePath 目标文件绝对路径
  * @param body 完整文本内容
- * @param tmpPrefix 临时文件名的语义前缀（如 "mcp" / "quick-messages" / "skill"）
+ * @param tmpPrefix 临时文件名的语义前缀（如 "mcp" / "overrides" / "skill"）
  */
 export declare function atomicWriteText(filePath: string, body: string, tmpPrefix: string): Promise<void>;

@@ -18,7 +18,6 @@ import type {
   ClientMcpRuntimeServer,
   ClientMcpUsageEntry,
   ClientOverrides,
-  ClientQuickMessagesList,
   ClientSkillDetail,
   ClientSkillSummary,
   CreateSkillInput,
@@ -372,39 +371,6 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
             })
             .filter((server) => server.serverName.length > 0) as ClientMcpRuntimeServer[],
         };
-      },
-    },
-
-    quickMessages: {
-      /** 列表：宿主的合并视图直接可用，无需投影。 */
-      async list() {
-        const cwd = deps.currentWorkspaceCwd();
-        const result = await rpc("quick.list", { cwd });
-        if (!result.ok) throw new Error(result.errors.join("; "));
-        return result.value as ClientQuickMessagesList;
-      },
-
-      async upsert(input) {
-        const cwd = deps.currentWorkspaceCwd();
-        return unwrap(await rpc("quick.upsert", { ...input, cwd })) as { ok: true } | { ok: false; errors: string[] };
-      },
-
-      async remove(input) {
-        const cwd = deps.currentWorkspaceCwd();
-        return unwrap(await rpc("quick.remove", { ...input, cwd })) as { ok: true } | { ok: false; errors: string[] };
-      },
-
-      async setEnabled(input) {
-        const cwd = deps.currentWorkspaceCwd();
-        return unwrap(await rpc("quick.setEnabled", { ...input, cwd })) as { ok: true } | { ok: false; errors: string[] };
-      },
-
-      /** 导入全局快捷消息到当前项目：与服务端同名词条一致，直接返回信封（existed 字段透传）。 */
-      async importToProject(input) {
-        const cwd = deps.currentWorkspaceCwd();
-        return unwrap(await rpc("quick.importToProject", { ...input, cwd })) as
-          | { ok: true; existed?: boolean }
-          | { ok: false; errors: string[] };
       },
     },
 

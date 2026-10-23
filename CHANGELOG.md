@@ -3,6 +3,78 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 新增
+
+- **能力面板 v2 信息架构**：域 Tab 收敛为「技能 / MCP」并带条目计数（技能 = 项目 + 全局条目数，
+  MCP = 项目 + 全局配置条目数、不含外部注入）；每个域内「本项目 / 全局」两组**同屏**呈现
+  （组头 = 标题 + 计数 + 一句说明，组内独立滚动，空组折叠为一行引导），搜索跨两组即时过滤并把
+  组头计数改为「匹配/总数」，无匹配的组显示「无匹配」而不是消失。
+- **行尾统一开关**：列表每行右端只有一个「label + 30×18 开关」，点击不改变选中、失败回滚、
+  写后静默重拉。技能行 =「启用」（项目条目整体启停 `setEnabled`；全局条目 = 在本项目禁用/恢复
+  `disableInProject` / `enableInProject`；项目屏蔽占位 = 恢复；只读、`项目副本生效中`、
+  无工作区时置灰并给 tooltip）；MCP 行 =「默认」（语义不变：新建对话是否启用，写项目级 overrides）。
+- **技能详情「目录树 + SKILL.md 阅读器」**：根目录 → 文件夹（`/` + 文件计数、可展开）→ 文件
+  （类型徽标 `MD`/`JSON`/`PNG`… + 大小），14px 缩进 + 1px 引导线，`SKILL.md` 置顶并默认选中；
+  点击文件 1 次切换内容（一次拉全量后本地缓存，切换 0 请求）；「预览 / 源码」切换，预览走零依赖
+  Markdown 渲染（标题/列表/代码块/引用/分隔线/行内 code 与粗体；不解析内联 HTML、不加载外链图片、
+  无 `dangerouslySetInnerHTML`，渲染器异常时回落 `<pre>` 原文）。上限：单文件预览 256 KB、
+  目录 200 文件、树深 3 层；二进制 / 空文件 / 截断各有降级；窄容器（内容区 < 632px）目录树
+  折叠为「文件 (N)」下拉。
+- **MCP「工具与参数」左右两栏**（配置条目与外部注入共用 `ToolsInspector`）：左列工具清单
+  （工具名 + 说明，可点选），右列参数表（参数 / 类型 / 必填 / 说明），数据来自 `inputSchema` 的
+  `properties` + `required`；探测成功默认选中第一个工具，切换工具只换右栏、不重新探测；
+  外部注入直接用运行时注册表数据（不需要重连）。
+- 关系标签可点击互跳：`覆盖全局` / `项目副本生效中` / `本项目已禁用` 等会跳到另一组的同名条目。
+
+### 变更
+
+- 面板 IA：取消「项目 / 全局」二选一 Tab（删除 `ZoneTabs`），改为同屏双组；域 Tab 只剩技能 / MCP；
+  头部「项目作用域」钉选行为不变。
+- 列表行：删除行内文字动作按钮（安装 / 禁用 / 导出 / 删除等），其余动作全部收进详情动作区；
+  技能状态点**仅项目行**保留（绿 / 蓝 / 灰 / 空心），全局行改用关系标签；MCP 三组行均保留
+  状态点（绿 / 蓝 / 橙 / 红 / 灰）。
+- 技能删除由「两击确认」改为**确认对话框**（`Modal`，写明作用域后果，`Esc` 取消）；
+  MCP 删除 / 移出与引用覆盖仍为两击确认。
+- MCP 详情：原「查看工具与参数」的卡片式报告改为两栏 Inspector；「使用记录」保留
+  （只读、内存、不落盘）。
+- 域 Tab 计数口径：技能含只读与屏蔽占位、不去重；MCP 不含外部注入（外部注入在第三组单独计数，
+  且仅非空时出现）。
+- 安装对话框的作用域选择取代原「项目 / 全局」区上下文（默认本项目；无工作区时只能装全局）。
+
+### 移除
+
+- **快捷消息模块整体下线**：面板域 Tab、列表 / 详情 / 安装对话框、`quick.*` RPC 端点、宿主
+  `quickMessages` 服务与 `src/quick-messages/**`、`src/client/quick-messages-panel.tsx`、
+  `src/client/composer-quick.tsx`；`overrides` / `imports` 的域键收敛为 `mcp`（旧文件里的
+  `skills` / `quickMessages` 键读取时忽略、写盘时清除）。
+- 用户数据 `.agents/quick-messages.json`（项目 / 全局及旧位置 `.dsh`）**不再读写、文件原样保留**；
+  卸载也不会删除（需要清理请手动处理）。
+- 面板「项目 / 全局」二选一 Tab 与 `ZoneTabs` 组件、行内文字动作按钮，以及 `在文件树中查看` /
+  `查看项目副本` 两个辅助入口（分别由目录树与可点击关系标签覆盖）。
+
+### 内部
+
+- 技能内容区**复用 `skills.export`**（`exportSkillFiles` 已递归返回相对路径 + base64），
+  **不新增宿主 RPC**；新增 `src/client/skill-content.tsx`（建树 / 阅读器 / 解码 / 上限）与
+  `src/client/markdown.tsx`（零依赖 L1 渲染）。
+- `src/client/mcp-panel.tsx` 新增 `ToolsInspector` 与参数表；`src/client/styles.ts` 新增
+  `.skp-group*`、`.skp-file-tree*`、`.skp-file-picker*`、`.skp-reader*`、`.skp-md-*`、
+  `.skp-params*` 等样式（纯自绘、只用宿主 token 与回退值）。
+- 面板渲染改为分组容器 + `listbox` 语义 + 行尾开关；选中项、两组滚动位置与同域搜索词在
+  静默刷新后保持。
+- 构建 / 测试：
+  - `pnpm typecheck` — exit 0，无类型错误。
+  - `pnpm build` — exit 0；`lib/client.js` 328.57 kB（gzip 79.36 kB）、`lib/client.map` 511.00 kB，`lib/quick-messages/**` 死产物已清理。
+  - `bash notes/verify/run-all.sh` — exit 0；render-smoke 17/17、bug1-e2e 21/21、
+    mutation-negative-control `controlOk:true`、composer-api-cache 7/7、workspace-items-key 10/10、
+    api-two-instances 17/17、loader-behavior 81/81、probe-connectivity 12/12、
+    mcp-connectivity-baseline PASS、lib 产物 loader 81/81。
+  - `node notes/verify/panel-upgrade.test.mjs` — 37/37（本批新增：2 Tab / 双组同屏 / 开关语义 /
+    跨组搜索 / 文件树与阅读器 / 源码视图 / MCP 三组与参数表 / 删除确认 / 无工作区置灰）。
+- 版本号未变更（仍为 1.2.0），本批不 bump `package.json`。
+
 ## [1.2.0] - 2026-10-23
 
 ### 新增
@@ -246,7 +318,8 @@
   输出总量上限（对接入的压缩包上限之下再拦一层"膨胀内存"），并修复
   数据区越界被静默截断、短归档负面偏移读越界的问题（zip bomb 防护）。
 
-[Unreleased]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.1.0...master
+[Unreleased]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.2.0...master
+[1.2.0]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.0.0...v1.0.1

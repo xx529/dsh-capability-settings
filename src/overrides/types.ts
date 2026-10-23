@@ -1,12 +1,11 @@
 /**
  * 项目级"全局能力禁用"的共享类型。
  *
- * 用途：允许在**单个项目**里禁用某些**全局**能力（快捷消息 / MCP
- * server），而不改动全局配置文件——禁用声明只写在项目的
+ * 用途：允许在**单个项目**里禁用某些**全局**能力（目前只有 MCP server），
+ * 而不改动全局配置文件——禁用声明只写在项目的
  * `.agents/capability-overrides.json` 里（读取兼容旧位置 `.dsh` / `.claude`），
  * 影响范围仅限该项目：
  *
- *   - 输入框快捷弹层不再展示被禁用的全局快捷消息；
  *   - MCP 自动挂载器在为本项目的 session 解析配置时跳过被禁用的全局 server
  *     （项目自身的同名条目不受影响）。
  *
@@ -18,7 +17,6 @@
  *
  * ```jsonc
  * {
- *   "quickMessages": ["开场白"],
  *   "mcp": ["github"]
  * }
  * ```
@@ -27,12 +25,10 @@
  */
 
 /** 可被项目级禁用的能力域（skills 不在其列——走 frontmatter 原生链路）。 */
-export type CapabilityDomain = "quickMessages" | "mcp";
+export type CapabilityDomain = "mcp";
 
 /** 项目级禁用声明的完整磁盘形状。 */
 export interface CapabilityOverrides {
-  /** 被本项目禁用的全局快捷消息名称列表。 */
-  quickMessages?: string[];
   /** 被本项目禁用的全局 MCP server 键列表。 */
   mcp?: string[];
 }

@@ -101,13 +101,6 @@ export interface PanelRpcService {
      */
     setSessionEnabled(input: unknown): Promise<unknown>;
   };
-  quickMessages: {
-    list(cwd?: string): Promise<unknown>;
-    upsert(input: unknown): Promise<unknown>;
-    remove(input: unknown): Promise<unknown>;
-    setEnabled(input: unknown): Promise<unknown>;
-    importToProject(input: unknown): Promise<unknown>;
-  };
   overrides: {
     get(cwd?: string): Promise<unknown>;
     toggle(input: unknown): Promise<unknown>;
@@ -181,16 +174,6 @@ export async function handleEndpoint(service: PanelRpcService, endpoint: string,
         // 探测自身把失败收进业务信封（value.ok=false），这里保持同一形状：
         // 客户端适配器解出 { ok:false, errors } 后由面板展示。
         return { ok: true, value: await service.mcp.test(p) };
-      case "quick.list":
-        return { ok: true, value: await service.quickMessages.list(cwd) };
-      case "quick.upsert":
-        return { ok: true, value: await service.quickMessages.upsert(p) };
-      case "quick.remove":
-        return { ok: true, value: await service.quickMessages.remove(p) };
-      case "quick.setEnabled":
-        return { ok: true, value: await service.quickMessages.setEnabled(p) };
-      case "quick.importToProject":
-        return { ok: true, value: await service.quickMessages.importToProject(p) };
       case "overrides.get":
         return { ok: true, value: await service.overrides.get(cwd) };
       case "overrides.toggle":

@@ -2,7 +2,7 @@
  * 读写项目级"全局能力禁用"声明文件（首选 `.agents/capability-overrides.json`，
  * 兼容旧位置 `.dsh` / `.claude`，见 overrides/paths.ts）。
  *
- * 与 mcp / quick-messages 两个域的配置文件读写同构：写入原子（临时文件 +
+ * 与 mcp 域的配置文件读写同构：写入原子（临时文件 +
  * rename）、父目录按需创建；读取对"文件缺失 / 文件为空"宽容（视为空声明），
  * 对"JSON 非法 / 形状不符合预期"抛出带文件名的错误，让面板明确展示问题。
  *
