@@ -739,9 +739,9 @@ function SkillsView({
     <div className="skp-domain">
       {opError !== undefined && <div className="skp-error">{opError}</div>}
       {error !== undefined && <div className="skp-error">读取失败：{error}</div>}
-      {loading && <div className="skp-status">加载中…</div>}
+      {loading && allItems === undefined && <div className="skp-status">加载中…</div>}
 
-      {!loading && error === undefined && (
+      {allItems !== undefined && error === undefined && (
         <div className="skp-body">
           {/* 左侧作用域导航：全局 / 项目 + 工作区列表（两种 scope 都保留）。 */}
           <nav className="skp-scope-nav" aria-label="技能作用域">

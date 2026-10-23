@@ -105,42 +105,6 @@ const INSPECT_HEAD_RIGHT_STYLE: CSSProperties = {
   justifyContent: "flex-end",
 };
 
-/** 「工具与参数」两栏容器：左列表 + 右参数表，共用一条外框。 */
-const INSPECTOR_STYLE: CSSProperties = {
-  display: "flex",
-  minWidth: 0,
-  border: "1px solid var(--skp-border)",
-  borderRadius: "var(--skp-radius-sm)",
-  overflow: "hidden",
-};
-
-/** 左栏工具列表：宽 300（窄容器可收缩），自身滚动，行高 34。 */
-const INSPECTOR_LIST_STYLE: CSSProperties = {
-  flex: "0 1 300px",
-  width: 300,
-  minWidth: 0,
-  maxHeight: "min(46vh, 420px)",
-  overflow: "auto",
-  display: "flex",
-  flexDirection: "column",
-  gap: 2,
-  padding: 4,
-  background: "var(--skp-fill)",
-  scrollbarWidth: "thin",
-};
-
-/** 右栏参数表容器：自身滚动，不把详情页顶长。 */
-const INSPECTOR_PANE_STYLE: CSSProperties = {
-  flex: "1 1 auto",
-  minWidth: 0,
-  maxHeight: "min(46vh, 420px)",
-  overflow: "auto",
-  padding: "10px 12px",
-  display: "flex",
-  flexDirection: "column",
-  gap: 8,
-};
-
 /** 工具行公共样式（行高 34；选中态 = 底 + 左蓝条）。 */
 const TOOL_ROW_BASE_STYLE: CSSProperties = {
   display: "flex",
@@ -751,9 +715,9 @@ export function McpView({
       {opError && <div className="skp-error">{opError}</div>}
       {error && <div className="skp-error">{error}</div>}
       {defaultError !== undefined && <div className="skp-error">{defaultError}</div>}
-      {loading && <div className="skp-status">加载中…</div>}
+      {loading && data === undefined && <div className="skp-status">加载中…</div>}
 
-      {!loading && (
+      {data !== undefined && (
         <div className="skp-body">
           {/* 左侧作用域导航：全局 / 项目（项目需先选工作区才能添加）。 */}
           <nav className="skp-scope-nav" aria-label="MCP 作用域">
@@ -1566,8 +1530,8 @@ function ToolsInspector({ tools }: { tools: readonly ClientMcpTool[] }) {
   const parameters = active === undefined ? [] : toolParameters(active);
   const activeDescription = active === undefined ? "" : toolDescription(active);
   return (
-    <div style={INSPECTOR_STYLE}>
-      <div role="listbox" aria-label="工具列表" style={INSPECTOR_LIST_STYLE}>
+    <div className="skp-inspector">
+      <div role="listbox" aria-label="工具列表" className="skp-inspector-list">
         {tools.map((tool) => {
           const selected = active !== undefined && tool.name === active.name;
           const description = toolDescription(tool);
@@ -1587,7 +1551,7 @@ function ToolsInspector({ tools }: { tools: readonly ClientMcpTool[] }) {
           );
         })}
       </div>
-      <div style={INSPECTOR_PANE_STYLE}>
+      <div className="skp-inspector-pane">
         {active === undefined ? (
           <div className="skp-note">没有可查看的工具。</div>
         ) : (

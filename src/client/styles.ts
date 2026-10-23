@@ -213,8 +213,18 @@ export const SKP_CSS = `
 .skp-usage-session{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--skp-text-2);}
 .skp-usage-tool{flex:none;max-width:52%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;color:var(--skp-text);}
 /* 详情页的「查看工具与参数」结果区：与上方字段用一条分隔线隔开。 */
-.skp-detail-inspect{margin-top:14px;padding-top:14px;border-top:1px solid var(--skp-border);display:flex;flex-direction:column;gap:8px;min-width:0;}
+.skp-detail-inspect{margin-top:14px;padding-top:14px;border-top:1px solid var(--skp-border);display:flex;flex-direction:column;gap:8px;min-width:0;container-type:inline-size;}
 .skp-detail-inspect-head{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+/* 工具参数两栏：左工具列表 300 + 右参数表。窄详情（容器 <620）改为上下堆叠，
+   避免左栏被右栏的 min-content 压成细条。 */
+.skp-inspector{display:flex;min-width:0;border:1px solid var(--skp-border);border-radius:var(--skp-radius-sm);overflow:hidden;}
+.skp-inspector-list{flex:0 1 300px;width:300px;min-width:220px;max-height:min(46vh,420px);overflow:auto;display:flex;flex-direction:column;gap:2px;padding:4px;background:var(--skp-fill);scrollbar-width:thin;}
+.skp-inspector-pane{flex:1 1 auto;min-width:0;max-height:min(46vh,420px);overflow:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px;}
+@container (max-width:620px){
+  .skp-inspector{flex-direction:column;}
+  .skp-inspector-list{width:auto;flex:none;min-width:0;max-height:180px;border-bottom:1px solid var(--skp-border);}
+  .skp-inspector-pane{max-height:none;}
+}
 .skp-import-note{margin-left:10px;flex:none;font-size:12px;color:var(--skp-text-3);}
 .skp-import-note-add{color:var(--skp-success);}
 .skp-import-note-over{color:var(--skp-warn);}

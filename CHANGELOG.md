@@ -3,6 +3,34 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.3.3] - 2026-10-23
+
+### 修复
+
+- **切换工作区时整页闪烁**：`useAsyncList` 重新加载时只要已有数据，就保留列表/详情框架
+  （不再卸载 `.skp-body`）；只有首次加载（数据尚未到达）才显示「加载中…」。点项目名/
+  切工作区时页面不再闪一下。
+- **MCP「工具与参数」窄容器被压扁**：两栏改为 `.skp-inspector` / `.skp-inspector-list` /
+  `.skp-inspector-pane` 类；详情区设为容器查询上下文，`@container (max-width:620px)` 时
+  自动改为上下堆叠（工具列表在上、参数表在下），宽详情仍保持左右两栏；左列表
+  `min-width:220`，不会被右栏 min-content 压成细条。
+
+### 内部
+
+- `src/client/panel.tsx` / `mcp-panel.tsx`：数据到达后的重载不再以 loading 卸载 body；
+  ToolsInspector 改用 CSS 类 + 容器查询。
+- `src/client/styles.ts`：新增 `.skp-inspector*` 与容器查询规则；`.skp-detail-inspect`
+  增加 `container-type:inline-size`。
+- 构建 / 测试：
+  - `pnpm typecheck` — exit 0，无类型错误。
+  - `pnpm build` — exit 0；`lib/client.js` 345.12 kB（gzip 82.65 kB）、`lib/client.map` 532.19 kB。
+  - `bash notes/verify/run-all.sh` — exit 0（render-smoke 20/20、bug1-e2e 21/21、
+    mutation controlOk:true、loader-behavior 81/81、probe-connectivity 12/12、baseline PASS 等）。
+  - `node notes/verify/panel-upgrade.test.mjs` — **84/84**（新增：数据在途切工作区不卸载
+    `.skp-body`、仅首次显示加载；`.skp-inspector*` 类与 `@container (max-width:620px)` 堆叠规则）。
+  - 负控制：回退 gating 后 81/84，失败项恰为新增的三条“不闪”断言。
+- 版本号：`1.3.3`（交互稳定性修复）。
+
 ## [1.3.2] - 2026-10-23
 
 ### 修复
@@ -394,6 +422,7 @@
   输出总量上限（对接入的压缩包上限之下再拦一层"膨胀内存"），并修复
   数据区越界被静默截断、短归档负面偏移读越界的问题（zip bomb 防护）。
 
+[1.3.3]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.2.0...v1.3.0
