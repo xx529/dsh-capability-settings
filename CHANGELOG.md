@@ -3,14 +3,15 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [1.3.0] - 2026-10-23
 
 ### 新增
 
-- **能力面板 v2 信息架构**：域 Tab 收敛为「技能 / MCP」并带条目计数（技能 = 项目 + 全局条目数，
-  MCP = 项目 + 全局配置条目数、不含外部注入）；每个域内「本项目 / 全局」两组**同屏**呈现
-  （组头 = 标题 + 计数 + 一句说明，组内独立滚动，空组折叠为一行引导），搜索跨两组即时过滤并把
-  组头计数改为「匹配/总数」，无匹配的组显示「无匹配」而不是消失。
+- **能力面板两域计数**：域 Tab 收敛为「技能 / MCP」并带条目计数（技能 = 项目 + 全局条目数，
+  MCP = 项目 + 全局配置条目数、不含外部注入）。
+- **双作用域呈现（v2 形态，第三轮已演进）**：先在同一个列表里用「本项目 / 全局」两组同屏呈现
+  （组头 = 标题 + 计数 + 一句说明，组内独立滚动，空组折叠为一行引导）；**第三轮改为左导航 +
+  项目按工作区下钻，见「变更 · 第三轮 IA 调整」**。
 - **行尾统一开关**：列表每行右端只有一个「label + 30×18 开关」，点击不改变选中、失败回滚、
   写后静默重拉。技能行 =「启用」（项目条目整体启停 `setEnabled`；全局条目 = 在本项目禁用/恢复
   `disableInProject` / `enableInProject`；项目屏蔽占位 = 恢复；只读、`项目副本生效中`、
@@ -26,12 +27,23 @@
   （工具名 + 说明，可点选），右列参数表（参数 / 类型 / 必填 / 说明），数据来自 `inputSchema` 的
   `properties` + `required`；探测成功默认选中第一个工具，切换工具只换右栏、不重新探测；
   外部注入直接用运行时注册表数据（不需要重连）。
-- 关系标签可点击互跳：`覆盖全局` / `项目副本生效中` / `本项目已禁用` 等会跳到另一组的同名条目。
+- 关系标签可点击互跳：`覆盖全局` / `项目副本生效中` / `本项目已禁用` 等会切到另一 scope 并选中同名条目（第三轮行为）。
 
 ### 变更
 
-- 面板 IA：取消「项目 / 全局」二选一 Tab（删除 `ZoneTabs`），改为同屏双组；域 Tab 只剩技能 / MCP；
-  头部「项目作用域」钉选行为不变。
+- **第三轮 IA 调整**：头部第二行改为「域 Tab（左）+ 搜索框（右）」，删除视图内搜索 / 安装工具条；
+  左列新增 ScopeNav「全局 / 项目」，每行右端「+」为安装 / 添加入口（项目未选工作区时置灰）；
+  项目 scope 改为**工作区下钻**——先列全部工作区（名称 = 文件夹 basename、副标题 = 完整路径），
+  点选后才显示该工作区条目，顶部「‹ 工作区」返回；全局 scope 只显示全局条目，MCP 的
+  「外部注入」从独立第三组归入全局 scope 的第二组（保留组头与计数，仅非空时出现）。
+- 删除上一版「同屏双组」布局与双组组头；详情宽度 864 → 694（内容 816 → 646），
+  目录树 220 → 200、阅读器 580 → 430；内容宽 < 632 时目录树折叠为下拉的阈值随之调整。
+- 搜索语义收敛：只过滤**当前列表**（全局列表 / 工作区列表 / 某工作区条目），不跨 scope；
+  切 scope / 工作区保留搜索词，切域清空；技能全局标题在搜索时显示「匹配/总数」。
+- 空态按 scope 重划：全局空态、工作区列表空态、项目空态、无工作区提示；全局条目在
+  未选工作区时项目级动作（安装到本项目 / 在本项目禁用 / 行尾开关）置灰。
+- 面板 IA（上一轮）：取消「项目 / 全局」二选一 Tab（删除 `ZoneTabs`），域 Tab 只剩技能 / MCP；
+  头部「项目作用域」钉选行为不变（第三轮保留，并与左导航工作区选择共用同一状态）。
 - 列表行：删除行内文字动作按钮（安装 / 禁用 / 导出 / 删除等），其余动作全部收进详情动作区；
   技能状态点**仅项目行**保留（绿 / 蓝 / 灰 / 空心），全局行改用关系标签；MCP 三组行均保留
   状态点（绿 / 蓝 / 橙 / 红 / 灰）。
@@ -39,9 +51,10 @@
   MCP 删除 / 移出与引用覆盖仍为两击确认。
 - MCP 详情：原「查看工具与参数」的卡片式报告改为两栏 Inspector；「使用记录」保留
   （只读、内存、不落盘）。
-- 域 Tab 计数口径：技能含只读与屏蔽占位、不去重；MCP 不含外部注入（外部注入在第三组单独计数，
-  且仅非空时出现）。
-- 安装对话框的作用域选择取代原「项目 / 全局」区上下文（默认本项目；无工作区时只能装全局）。
+- 域 Tab 计数口径：技能含只读与屏蔽占位、不去重；MCP 不含外部注入（外部注入在全局 scope 的
+  第二组单独计数，且仅非空时出现）。
+- 安装/添加对话框的作用域默认跟随所点位置：左导航全局行「+」= 全局、项目行「+」= 该项目的工作区；
+  项目未选工作区时项目侧「+」置灰。
 
 ### 移除
 
@@ -62,18 +75,19 @@
 - `src/client/mcp-panel.tsx` 新增 `ToolsInspector` 与参数表；`src/client/styles.ts` 新增
   `.skp-group*`、`.skp-file-tree*`、`.skp-file-picker*`、`.skp-reader*`、`.skp-md-*`、
   `.skp-params*` 等样式（纯自绘、只用宿主 token 与回退值）。
-- 面板渲染改为分组容器 + `listbox` 语义 + 行尾开关；选中项、两组滚动位置与同域搜索词在
+- 列表面板改为 `listbox` 语义 + 行尾开关；选中项、按 scope / 工作区记忆的滚动位置与搜索词在
   静默刷新后保持。
 - 构建 / 测试：
   - `pnpm typecheck` — exit 0，无类型错误。
   - `pnpm build` — exit 0；`lib/client.js` 328.57 kB（gzip 79.36 kB）、`lib/client.map` 511.00 kB，`lib/quick-messages/**` 死产物已清理。
-  - `bash notes/verify/run-all.sh` — exit 0；render-smoke 17/17、bug1-e2e 21/21、
+  - `bash notes/verify/run-all.sh` — exit 0；render-smoke 19/19、bug1-e2e 21/21、
     mutation-negative-control `controlOk:true`、composer-api-cache 7/7、workspace-items-key 10/10、
     api-two-instances 17/17、loader-behavior 81/81、probe-connectivity 12/12、
     mcp-connectivity-baseline PASS、lib 产物 loader 81/81。
-  - `node notes/verify/panel-upgrade.test.mjs` — 37/37（本批新增：2 Tab / 双组同屏 / 开关语义 /
-    跨组搜索 / 文件树与阅读器 / 源码视图 / MCP 三组与参数表 / 删除确认 / 无工作区置灰）。
-- 版本号未变更（仍为 1.2.0），本批不 bump `package.json`。
+  - `node notes/verify/panel-upgrade.test.mjs` — 55/55（第三轮 IA：2 Tab / 左导航与「+」/ 工作区下钻
+    与返回 / 当前列表搜索 / 行尾开关语义 / 文件树与阅读器 / 源码视图 / MCP 全局两组与参数表 /
+    删除确认 / 未选工作区置灰）。
+- 版本号：`1.3.0`（本批功能与移除均属用户可见变更，minor bump）。
 
 ## [1.2.0] - 2026-10-23
 
@@ -318,7 +332,7 @@
   输出总量上限（对接入的压缩包上限之下再拦一层"膨胀内存"），并修复
   数据区越界被静默截断、短归档负面偏移读越界的问题（zip bomb 防护）。
 
-[Unreleased]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.2.0...master
+[1.3.0]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.0.1...v1.0.2

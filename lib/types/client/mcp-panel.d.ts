@@ -1,15 +1,15 @@
 /**
  * Capability Panel 的 MCP 域视图。
  *
- * 列表**同屏三组**（取消旧的「项目 / 全局」二选一 Tab）：
- *  - 本项目 `<项目根>/.mcp.json`：随项目生效，可启停/编辑/删除；
- *  - 全局 `~/.agents/mcp.json`：所有项目共享，面板里只做「导入到本项目」/
- *    编辑/删除（启停靠项目级引用或默认开关）；
- *  - 外部注入：其它插件 / profile 在运行时挂载的 mcp-client，只读，
- *    仅在该组非空时渲染。
- * 搜索跨三组即时过滤（key / serverName / summary，外部实例另匹配 source）；
- * 每组独立滚动（组头固定 + 组内滚动），组头带计数与一句说明。组容器样式
- * 由 styles.ts 的 `.skp-group*` 统一提供（与 Skills 域共用同一套）。
+ * 布局与 Skills 域**同构**：左侧「全局 / 项目」作用域导航（ScopeNav）+ 中间
+ * 列 + 右侧详情。项目 scope 下中间列先列出所有工作区（名称 = 目录 basename，
+ * 副标题 = 完整路径），点选后才显示该工作区 `/.mcp.json` 的条目，顶部
+ * 「‹ 工作区」可返回重选；全局 scope 显示 `~/.agents/mcp.json` 条目，并把
+ * 「外部注入」（其它插件 / profile 在运行时挂载的 mcp-client）作为**第二组**
+ * 只读展示（保留组头与计数，为空时不占位）。搜索框在根组件头部，由 `query`
+ * prop 传入，只过滤当前列表（全局 → server 名/summary；项目未选工作区 →
+ * 工作区名；项目已选 → server）。组容器样式由 styles.ts 的 `.skp-group*`
+ * 统一提供（与 Skills 域共用同一套）。
  *
  * 行 = 状态点 + 名称 + 标签（项目/全局/引用/导入/外部 + stdio/http +
  * 默认关闭/被遮蔽）+ meta（挂载状态 · 工具数）+ 命令/URL 摘要 + 行尾
@@ -25,18 +25,34 @@
  */
 import type { CapabilityPanelApi } from "./api.js";
 /**
- * MCP 视图主组件：状态管理 + 拉取/重拉 + 三组列表 + 详情/表单。
+ * MCP 视图主组件：左侧「全局 / 项目」导航 + 中间列（全局列表 / 工作区选择 /
+ * 某工作区的项目列表）+ 右侧详情。
  *
- * 写操作语义不变：项目条目可启停/编辑/删除；全局条目可「导入到本项目」
- * （登记项目级引用，内容跟随全局）/编辑/删除；外部注入只读。默认开关写
- * 项目级 overrides（新建对话的默认启用状态）。
+ * - **全局**：全局 `~/.agents/mcp.json` 条目 + 「外部注入」只读第二组；
+ * - **项目**：中间列先列出所有工作区（点选 → `onSelectWorkspace(path)`），
+ *   选中后显示该工作区 `.mcp.json` 的条目，顶部「‹ 工作区」可返回重选；
+ * - **搜索**来自根组件头部输入框（`query` prop），只过滤当前列表；
+ * - scope / 工作区切换清空选中；行尾「默认」开关写项目级 overrides（语义不变），
+ *   行内没有文字按钮——启停/编辑/删除/导入/探测/使用记录都在详情卡。
  */
-export declare function McpView({ api, workspace, onCount, }: {
+export declare function McpView({ api, query, projects, workspace, pinned, onSelectWorkspace, onCount, }: {
     api: CapabilityPanelApi;
+    /** 根组件头部搜索框的值（即时本地过滤当前列表；不跨 scope）。 */
+    query: string;
+    /** 可选工作区列表（项目 scope 的工作区选择页用）。 */
+    projects: Array<{
+        path: string;
+        title?: string;
+    }>;
+    /** 当前作用域解析出的工作区（完整路径；无工作区时是占位串）。 */
     workspace?: string;
+    /** 显式钉选的工作区路径；undefined = 尚未选择工作区。 */
+    pinned?: string;
+    /** 选择/切换工作区（传 undefined = 回到工作区列表）。 */
+    onSelectWorkspace(path?: string): void;
     /**
      * 数据到达后上报配置条目总数（本项目 + 全局，**不含**外部注入实例），供域 Tab
-     * 计数；搜索不影响计数（外部注入在组 C 单独显示计数）。
+     * 计数；搜索不影响计数（外部注入在全局 scope 的第二组里单独显示计数）。
      */
     onCount?: (total: number) => void;
 }): import("react").JSX.Element;

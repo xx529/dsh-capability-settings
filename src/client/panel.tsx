@@ -21,11 +21,15 @@
  *   若把面板这份 api 交给 composer，就会出现在面板里把项目作用域钉到 A
  *   工作区后、B 工作区的对话框弹层列出 A 的项目级技能/MCP 的串味 bug。
  *
- * 根容器按能力域分 Tab（**只剩两个**：技能 / MCP，带数据量计数）：
- *   - Skills：同一列表列里「本项目 / 全局」两组同屏，各自独立滚动；
+ * 根容器按能力域分 Tab（**只剩两个**：技能 / MCP，带数据量计数），第二行
+ * 是「域 Tab + 搜索框」：搜索框由根组件持有，按域切换 placeholder，两个
+ * 视图只接收 `query` 做本地过滤（视图内不再有搜索/安装行）：
+ *   - Skills：左列 200–220px 的 ScopeNav（全局 / 项目 + 行尾「+」安装），
+ *     中间列按 scope 显示全局技能、工作区选择列表或选中工作区的项目技能
+ *     （项目 scope 未选工作区时先列全部工作区，点击 = `api.selectProject`）；
  *     详情页带完整文件树 + SKILL.md 阅读器（见 skill-content.tsx）；
- *   - MCP：项目 `.mcp.json` + 全局 `mcp.json` 的 server 管理，带每个
- *     session 的实时挂载状态（见 mcp-panel.tsx）。
+ *   - MCP：同构的左导航 + 中间列（全局含外部注入 / 项目→工作区下钻），
+ *     带每个 session 的实时挂载状态（见 mcp-panel.tsx）。
  *
  * 快捷消息域已整体下线（2026-10 产品决定），域 Tab 不再有第三个入口。
  *
@@ -58,6 +62,12 @@ const DOMAIN_LABEL: Record<DomainTab, string> = {
 
 const DOMAIN_ORDER: DomainTab[] = ["skills", "mcp"];
 
+/** 各域的搜索占位符（搜索框在根组件头部，切换域时切换文案）。 */
+const DOMAIN_SEARCH_PLACEHOLDER: Record<DomainTab, string> = {
+  skills: "搜索技能…",
+  mcp: "搜索 MCP 服务器…",
+};
+
 /**
  * 面板根组件：头部（标题 + 项目下拉框 + 域 Tab）+ 当前域视图。
  *
@@ -69,6 +79,8 @@ export function CapabilityPanel({ api }: { api: CapabilityPanelApi }) {
   // 域、工作区标签、下拉框选项、钉选状态各自维护一份 useState；
   // 起始值取自 api 的快照方法。
   const [domain, setDomain] = useState<DomainTab>("skills");
+  /** 当前域的搜索词（搜索框在头部，按域切换 placeholder；切域清空）。 */
+  const [query, setQuery] = useState("");
   const [workspace, setWorkspace] = useState<string | undefined>(() => api.workspaceLabel());
   const [projects, setProjects] = useState(() => api.projects());
   const [pinned, setPinned] = useState<string | undefined>(() => api.selectedProject());
@@ -134,27 +146,62 @@ export function CapabilityPanel({ api }: { api: CapabilityPanelApi }) {
             />
           </div>
         </div>
-        {/* 域 Tab：技能 / MCP 两等分，各带数据量计数（加载中显示 —）。 */}
-        <div className="skp-tabs" role="tablist">
-          {DOMAIN_ORDER.map((d) => (
-            <button
-              key={d}
-              role="tab"
-              aria-selected={domain === d}
-              className={domain === d ? "skp-tab skp-tab-active" : "skp-tab"}
-              onClick={() => setDomain(d)}
-            >
-              <span>{DOMAIN_LABEL[d]}</span>
-              <span className="skp-tab-count">{counts[d] ?? "—"}</span>
-            </button>
-          ))}
+        {/* 第二行：域 Tab 在左，搜索框右对齐（同一个 input，按域切 placeholder）。 */}
+        <div className="skp-header-row">
+          <div className="skp-tabs" role="tablist">
+            {DOMAIN_ORDER.map((d) => (
+              <button
+                key={d}
+                role="tab"
+                aria-selected={domain === d}
+                className={domain === d ? "skp-tab skp-tab-active" : "skp-tab"}
+                onClick={() => {
+                  setDomain(d);
+                  setQuery("");
+                }}
+              >
+                <span>{DOMAIN_LABEL[d]}</span>
+                <span className="skp-tab-count">{counts[d] ?? "—"}</span>
+              </button>
+            ))}
+          </div>
+          <input
+            className="skp-search skp-header-search"
+            type="search"
+            aria-label={DOMAIN_SEARCH_PLACEHOLDER[domain]}
+            placeholder={DOMAIN_SEARCH_PLACEHOLDER[domain]}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && query.length > 0) {
+                event.preventDefault();
+                setQuery("");
+              }
+            }}
+          />
         </div>
       </header>
 
       {domain === "skills" ? (
-        <SkillsView api={api} workspace={workspace} onCount={setSkillsCount} />
+        <SkillsView
+          api={api}
+          workspace={workspace}
+          projects={projects}
+          query={query}
+          pinned={pinned}
+          onSelectWorkspace={(path) => api.selectProject(path)}
+          onCount={setSkillsCount}
+        />
       ) : (
-        <McpView api={api} workspace={workspace} onCount={setMcpCount} />
+        <McpView
+          api={api}
+          workspace={workspace}
+          projects={projects}
+          query={query}
+          pinned={pinned}
+          onSelectWorkspace={(path) => api.selectProject(path)}
+          onCount={setMcpCount}
+        />
       )}
     </section>
   );
@@ -269,21 +316,48 @@ function skillSwitchDisabled(item: ClientSkillSummary, hasWorkspace: boolean): {
   };
 }
 
+/** 取路径最后一段作为工作区显示名（兼容 POSIX / Windows 分隔符）。 */
+function basenameOf(path: string): string {
+  const segments = path.split(/[\\/]/).filter((segment) => segment.length > 0);
+  return segments[segments.length - 1] ?? path;
+}
+
 /**
- * Skills 视图：同一列表列里「本项目 / 全局」两组**同屏**、各自独立滚动，
- * 组头带计数与一句说明；搜索同时过滤两组。行 = 状态点（仅项目行）/名称/
- * 标签/两行描述 + 行尾统一「启用」开关；其余动作全部收进右侧详情。
+ * Skills 视图：左侧 ScopeNav（全局 / 项目）+ 中间列 + 右侧详情。
  *
- * 开关语义：
- *   - 项目普通条目：`setEnabled`（frontmatter 双向开关）；
- *   - 项目屏蔽占位：打开 = `enableInProject`（删除占位）；
- *   - 全局条目：打开 = `enableInProject`，关闭 = `disableInProject`
- *     （本项目生成/删除屏蔽占位，不影响其它项目）。
+ *  - 全局：中间列显示全部全局技能（含只读/被本项目遮蔽状态标签）；
+ *  - 项目：未选工作区时先列全部工作区（点击 = api.selectProject，进入该
+ *    工作区的项目技能）；已选工作区时显示「‹ 工作区」返回行 + 该项目技能。
+ *
+ * 搜索词由根组件头部的同一输入框提供（query），按当前列表过滤：技能名称/
+ * 描述，或工作区名/完整路径。行内只有状态点、标签、两行描述与行尾「启用」
+ * 开关；导出/导入/删除等动作全部在右侧详情（含文件树与阅读器）。
  */
-function SkillsView({ api, workspace, onCount }: { api: CapabilityPanelApi; workspace?: string; onCount?: (count: number) => void }) {
+function SkillsView({
+  api,
+  workspace,
+  projects,
+  query,
+  pinned,
+  onSelectWorkspace,
+  onCount,
+}: {
+  api: CapabilityPanelApi;
+  workspace?: string;
+  projects: Array<{ path: string; title?: string }>;
+  /** 根组件头部搜索框的当前值（切域清空）。 */
+  query: string;
+  /** 当前钉选的工作区路径；undefined = 未选工作区（中间列显示工作区列表）。 */
+  pinned?: string;
+  /** 选择 / 清除项目工作区（写回面板作用域）。 */
+  onSelectWorkspace: (path?: string) => void;
+  onCount?: (count: number) => void;
+}) {
   const skillsApi = api.skills;
-  const [query, setQuery] = useState("");
+  const [scope, setScope] = useState<"global" | "project">("project");
   const [selected, setSelected] = useState<string | undefined>(undefined);
+  /** 关系标签互跳的目标行：切 scope / 选工作区后待列表出现再选中。 */
+  const [pendingSelect, setPendingSelect] = useState<string | undefined>(undefined);
   const [installOpen, setInstallOpen] = useState(false);
   const [installScope, setInstallScope] = useState<"project" | "global">("project");
   const [opError, setOpError] = useState<string | undefined>(undefined);
@@ -291,39 +365,57 @@ function SkillsView({ api, workspace, onCount }: { api: CapabilityPanelApi; work
   /** 写操作计数：传给 SkillContent，变化时清空文件缓存并重拉。 */
   const [contentVersion, setContentVersion] = useState(0);
   const rowRefs = useRef(new Map<string, HTMLElement>());
-  const searchRef = useRef<HTMLInputElement | null>(null);
 
   // 挂载时、工作区变化时（项目作用域列表依赖该 cwd 解析）、写操作后重新拉取。
   const { data: allItems, loading, error, reload } = useAsyncList(() => skillsApi.list(), [skillsApi, workspace]);
   const items = allItems ?? [];
   const projectItems = useMemo(() => items.filter((item) => isProjectSource(item.source)), [items]);
   const globalItems = useMemo(() => items.filter((item) => !isProjectSource(item.source)), [items]);
-  const noWorkspace = !hasWorkspaceLabel(workspace);
 
-  // 域 Tab 计数 = 两组条数之和（含只读、含屏蔽占位，不去重；搜索不影响）。
+  // 域 Tab 计数 = 全部条目（含只读、含屏蔽占位，不去重；搜索不影响）。
   useEffect(() => {
     if (!loading && error === undefined) onCount?.(items.length);
   }, [items.length, loading, error, onCount]);
 
   const q = query.trim().toLowerCase();
-  const matches = (item: ClientSkillSummary) =>
+  const matchesSkill = (item: ClientSkillSummary) =>
     q.length === 0 || item.name.toLowerCase().includes(q) || item.description.toLowerCase().includes(q);
-  const projectVisible = useMemo(() => (q.length === 0 ? projectItems : projectItems.filter(matches)), [projectItems, q]);
-  const globalVisible = useMemo(() => (q.length === 0 ? globalItems : globalItems.filter(matches)), [globalItems, q]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const allVisibleKeys = useMemo(() => [...projectVisible, ...globalVisible].map(skillRowKey), [projectVisible, globalVisible]);
+  const globalVisible = useMemo(() => globalItems.filter(matchesSkill), [globalItems, q]);
+  const projectVisible = useMemo(() => projectItems.filter(matchesSkill), [projectItems, q]);
+  const workspaceVisible = useMemo(
+    () =>
+      projects.filter(
+        (project) =>
+          q.length === 0 || basenameOf(project.path).toLowerCase().includes(q) || project.path.toLowerCase().includes(q),
+      ),
+    [projects, q],
+  );
 
+  /** 项目 scope 且尚未选择工作区 → 中间列先显示工作区选择列表。 */
+  const showWorkspacePicker = scope === "project" && pinned === undefined;
+  /** 当前中间列可选的技能行（决定键盘导航与关系互跳的落点）。 */
+  const visibleSkills = useMemo(
+    () => (showWorkspacePicker ? [] : scope === "global" ? globalVisible : projectVisible),
+    [showWorkspacePicker, scope, globalVisible, projectVisible],
+  );
+  const visibleKeys = useMemo(() => visibleSkills.map(skillRowKey), [visibleSkills]);
   const selectedItem = items.find((item) => skillRowKey(item) === selected);
 
-  // 首次到达数据（或删除后）自动选中第一行：本项目优先，其次全局。
+  // 工作区切换（含顶部项目下拉 / 左侧工作区列表 / 返回）一律清空选中；
+  // pendingSelect 不清——关系互跳会在新列表到达后重新选中目标行。
   useEffect(() => {
-    if (loading) return;
-    if (selected !== undefined && items.some((item) => skillRowKey(item) === selected)) return;
-    const first = projectItems[0] ?? globalItems[0];
-    setSelected(first === undefined ? undefined : skillRowKey(first));
-  }, [loading, items, projectItems, globalItems, selected]);
+    setSelected(undefined);
+  }, [workspace, pinned]);
 
-  // `/` 聚焦搜索框（输入框 / 文本域 / contenteditable 内不生效，不劫持浏览器）。
+  // 关系标签互跳：切换 scope / 工作区后，等目标行出现再选中。
+  useEffect(() => {
+    if (pendingSelect === undefined) return;
+    if (!visibleKeys.includes(pendingSelect)) return;
+    setSelected(pendingSelect);
+    setPendingSelect(undefined);
+  }, [pendingSelect, visibleKeys]);
+
+  // `/` 聚焦头部搜索框（输入框 / 文本域 / contenteditable 内不生效）。
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
@@ -331,7 +423,7 @@ function SkillsView({ api, workspace, onCount }: { api: CapabilityPanelApi; work
       const tagName = active?.tagName.toLowerCase();
       if (tagName === "input" || tagName === "textarea" || (active as HTMLElement | null)?.isContentEditable === true) return;
       event.preventDefault();
-      searchRef.current?.focus();
+      document.querySelector<HTMLInputElement>(".skp-header-search")?.focus();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
@@ -349,22 +441,60 @@ function SkillsView({ api, workspace, onCount }: { api: CapabilityPanelApi; work
     element.scrollIntoView({ block: "nearest" });
   };
 
-  /** 关系标签点击：跳到另一组的对应行（滚动 + 选中，不改搜索词）。 */
+  /** 切 scope：清空选中与待跳目标（搜索结果保留，作用域切换后仍可沿用）。 */
+  const switchScope = (next: "global" | "project") => {
+    if (scope === next) return;
+    setScope(next);
+    setSelected(undefined);
+    setPendingSelect(undefined);
+    setOpError(undefined);
+  };
+
+  /** 选择 / 清除工作区：清空选中，写回面板钉选状态（列表随 workspace 重拉）。 */
+  const chooseWorkspace = (path?: string) => {
+    setSelected(undefined);
+    setPendingSelect(undefined);
+    onSelectWorkspace(path);
+  };
+
+  /**
+   * 关系标签互跳：项目行「覆盖全局」→ 全局同名行；全局行「项目副本生效中 /
+   * 本项目已禁用」→ 项目行。跨 scope 时先切换 scope；项目侧尚未选工作区时
+   * 自动钉选当前工作区（若在已知项目列表里），等列表刷新后再选中目标行。
+   */
   const jumpToRelated = (item: ClientSkillSummary) => {
     const isProject = isProjectSource(item.source);
     let target: ClientSkillSummary | undefined;
     if (isProject) {
       if (item.shadowStub === true) return;
-      target = globalItems.find((global) => global.name === item.name);
+      target = globalItems.find((globalItem) => globalItem.name === item.name);
     } else if (item.projectShadow === "stub") {
-      target = projectItems.find((projectEntry) => projectEntry.name === item.name && projectEntry.shadowStub === true);
+      target = projectItems.find((entry) => entry.name === item.name && entry.shadowStub === true);
     } else if (item.projectShadow === "skill") {
-      target = projectItems.find((projectEntry) => projectEntry.name === item.name && projectEntry.shadowStub !== true);
+      target = projectItems.find((entry) => entry.name === item.name && entry.shadowStub !== true);
     }
     if (target === undefined) return;
-    const key = skillRowKey(target);
-    setSelected(key);
-    requestAnimationFrame(() => focusRow(key));
+    const targetKey = skillRowKey(target);
+    if (!isProject) {
+      // 全局行 → 项目行：切到项目 scope；未选工作区时尝试钉选当前工作区。
+      if (pinned !== undefined) {
+        setScope("project");
+        setSelected(undefined);
+        setPendingSelect(targetKey);
+        return;
+      }
+      const match = projects.find((project) => project.path === workspace);
+      if (match === undefined) return;
+      setScope("project");
+      setSelected(undefined);
+      setPendingSelect(targetKey);
+      onSelectWorkspace(match.path);
+      return;
+    }
+    // 项目行 → 全局行：全局 scope 无需工作区，直接切过去。
+    setScope("global");
+    setSelected(undefined);
+    setPendingSelect(targetKey);
   };
 
   /** 行内统一开关：按行类型分派到 setEnabled / enableInProject / disableInProject。 */
@@ -399,19 +529,19 @@ function SkillsView({ api, workspace, onCount }: { api: CapabilityPanelApi; work
   };
 
   const onRowKeyDown = (event: ReactKeyboardEvent<HTMLElement>, key: string) => {
-    if (allVisibleKeys.length === 0) return;
-    const index = allVisibleKeys.indexOf(key);
+    if (visibleKeys.length === 0) return;
+    const index = visibleKeys.indexOf(key);
     if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
       event.preventDefault();
       const next =
         event.key === "Home"
           ? 0
           : event.key === "End"
-            ? allVisibleKeys.length - 1
+            ? visibleKeys.length - 1
             : event.key === "ArrowDown"
-              ? Math.min(allVisibleKeys.length - 1, index + 1)
+              ? Math.min(visibleKeys.length - 1, index + 1)
               : Math.max(0, index - 1);
-      const nextKey = allVisibleKeys[next];
+      const nextKey = visibleKeys[next];
       if (nextKey !== undefined) {
         selectRow(nextKey);
         requestAnimationFrame(() => focusRow(nextKey));
@@ -424,61 +554,74 @@ function SkillsView({ api, workspace, onCount }: { api: CapabilityPanelApi; work
     }
   };
 
-  const openInstall = (scope: "project" | "global") => {
-    setInstallScope(scope);
+  const openInstall = (target: "project" | "global") => {
+    setInstallScope(target);
     setInstallOpen(true);
   };
 
-  /** 组内空态：48 高引导行；搜索无匹配时 36 高「无匹配」行。 */
-  const renderGroupEmpty = (group: "project" | "global", total: number) => {
-    if (q.length > 0 && total > 0) {
-      return <div className="skp-group-empty-row skp-group-nomatch">无匹配</div>;
-    }
-    if (group === "project" && noWorkspace) {
-      return (
-        <div className="skp-group-empty-row">
-          <span>未关联工作区，无法显示项目技能。</span>
-        </div>
-      );
-    }
+  /** ScopeNav 一行：作用域名 + 计数 + 右侧「+」安装入口。 */
+  const renderScopeItem = (target: "global" | "project", label: string, count: number | string) => {
+    const addDisabled = target === "project" && pinned === undefined;
+    const addTitle = addDisabled ? "先选择工作区" : target === "global" ? "安装技能到全局" : "安装技能到本项目";
     return (
-      <div className="skp-group-empty-row">
-        <span>{group === "project" ? "本项目还没有技能。" : "还没有全局技能。"}</span>
-        <button type="button" className="skp-btn" onClick={() => openInstall(group)}>
-          {group === "project" ? "安装到本项目" : "安装到全局"}
+      <div className={scope === target ? "skp-scope-item skp-scope-item-active" : "skp-scope-item"}>
+        <button type="button" className="skp-scope-main" aria-pressed={scope === target} onClick={() => switchScope(target)}>
+          <span className="skp-scope-label">{label}</span>
+          <span className="skp-scope-count">{count}</span>
+        </button>
+        <button type="button" className="skp-scope-add" disabled={addDisabled} title={addTitle} aria-label={addTitle} onClick={() => openInstall(target)}>
+          +
         </button>
       </div>
     );
   };
 
-  const renderGroup = (group: "project" | "global", total: number, visible: ClientSkillSummary[]) => {
-    const isProjectGroup = group === "project";
-    const title = isProjectGroup ? "本项目" : "全局";
-    const note = isProjectGroup ? "随项目走 · 只在本项目生效" : "所有项目共享 · 改动影响全部项目";
-    const empty = visible.length === 0;
-    return (
-      <section className={empty ? "skp-group skp-group-empty" : "skp-group"} role="group" aria-label={`${title}，${total} 项`}>
-        <div className="skp-group-head">
-          <span className="skp-group-title">{title}</span>
-          <span className={q.length > 0 && visible.length === 0 && total > 0 ? "skp-group-count skp-group-count-warn" : "skp-group-count"}>
-            {q.length > 0 ? `${visible.length}/${total}` : total}
-          </span>
-          <span className="skp-group-note">{note}</span>
+  /** 当前 scope 的技能列表（空态区分「没有」与搜索「无匹配」）。 */
+  const renderSkillList = (list: ClientSkillSummary[], group: "global" | "project") => {
+    if (list.length === 0) {
+      if (q.length > 0) {
+        return <div className="skp-empty">没有匹配「{query.trim()}」的技能。</div>;
+      }
+      return (
+        <div className="skp-empty">
+          <div>{group === "global" ? "还没有全局技能。" : "本项目还没有技能。"}</div>
+          <button type="button" className="skp-btn" style={{ marginTop: 10 }} onClick={() => openInstall(group)}>
+            {group === "global" ? "安装到全局" : "安装到本项目"}
+          </button>
         </div>
-        {empty ? (
-          renderGroupEmpty(group, total)
-        ) : (
-          <div className="skp-group-scroll">
-            <ul className="skp-list" role="listbox" aria-label={`${title}技能`}>
-              {visible.map((item) => (
-                <li key={skillRowKey(item)} role="presentation">
-                  {renderRow(item)}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </section>
+      );
+    }
+    return (
+      <div className="skp-group-scroll">
+        <ul className="skp-list" role="listbox" aria-label={group === "global" ? "全局技能" : "本项目技能"}>
+          {list.map((item) => (
+            <li key={skillRowKey(item)} role="presentation">
+              {renderRow(item)}
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  };
+
+  /** 项目 scope 未选工作区：工作区选择列表（点击 = 进入该工作区）。 */
+  const renderWorkspaceList = () => {
+    if (workspaceVisible.length === 0) {
+      return <div className="skp-empty">{q.length > 0 ? `没有匹配「${query.trim()}」的工作区。` : "还没有工作区。"}</div>;
+    }
+    return (
+      <div className="skp-group-scroll">
+        <ul className="skp-list" role="listbox" aria-label="工作区">
+          {workspaceVisible.map((project) => (
+            <li key={project.path} role="presentation">
+              <button type="button" className="skp-workspace-row" title={project.path} onClick={() => chooseWorkspace(project.path)}>
+                <span className="skp-workspace-name">{basenameOf(project.path)}</span>
+                <span className="skp-workspace-path">{project.path}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
     );
   };
 
@@ -487,7 +630,7 @@ function SkillsView({ api, workspace, onCount }: { api: CapabilityPanelApi; work
     const isProject = isProjectSource(item.source);
     const state = invocationState(item);
     const tags = skillTags(item, globalItems.some((global) => global.name === item.name));
-    const switcher = skillSwitchDisabled(item, !noWorkspace);
+    const switcher = skillSwitchDisabled(item, pinned !== undefined);
     const dotClass =
       item.shadowStub === true || item.readOnly
         ? "skp-dot skp-dot-hollow"
@@ -534,7 +677,7 @@ function SkillsView({ api, workspace, onCount }: { api: CapabilityPanelApi; work
         <div className="skp-row-mid">
           <div className="skp-row-tags">
             {tags.map((tag) =>
-              tag.key === "override" || (tag.key === "disabled-in-project" || tag.key === "project-copy") ? (
+              tag.key === "override" || tag.key === "disabled-in-project" || tag.key === "project-copy" ? (
                 <button
                   key={tag.key}
                   type="button"
@@ -582,43 +725,55 @@ function SkillsView({ api, workspace, onCount }: { api: CapabilityPanelApi; work
 
   return (
     <div className="skp-domain">
-      <div className="skp-subheader">
-        <input
-          ref={searchRef}
-          className="skp-search"
-          type="search"
-          placeholder="搜索技能…"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Escape" && query.length > 0) {
-              event.preventDefault();
-              setQuery("");
-            }
-          }}
-        />
-        <button type="button" className="skp-btn skp-btn-primary" onClick={() => openInstall("project")}>
-          + 安装技能
-        </button>
-      </div>
-
       {opError !== undefined && <div className="skp-error">{opError}</div>}
       {error !== undefined && <div className="skp-error">读取失败：{error}</div>}
       {loading && <div className="skp-status">加载中…</div>}
 
       {!loading && error === undefined && (
         <div className="skp-body">
-          <div className="skp-groups">
-            {renderGroup("project", projectItems.length, projectVisible)}
-            {renderGroup("global", globalItems.length, globalVisible)}
+          {/* 左侧作用域导航：全局 / 项目（项目需先选工作区才能安装）。 */}
+          <nav className="skp-scope-nav" aria-label="技能作用域">
+            {renderScopeItem("global", "全局", globalItems.length)}
+            {renderScopeItem("project", "项目", pinned === undefined ? "—" : projectItems.length)}
+          </nav>
+
+          {/* 中间列：全局技能 / 工作区选择 / 本项目技能。 */}
+          <div className="skp-workspace-pane">
+            {scope === "project" && pinned !== undefined && (
+              <button type="button" className="skp-pane-back" onClick={() => chooseWorkspace(undefined)}>
+                ‹ 工作区
+              </button>
+            )}
+            <div className="skp-pane-title">
+              {scope === "global" ? (
+                <>
+                  <span className="skp-pane-title-text">全局技能</span>
+                  <span className="skp-group-count">{globalVisible.length}</span>
+                </>
+              ) : showWorkspacePicker ? (
+                <>
+                  <span className="skp-pane-title-text">选择工作区</span>
+                  <span className="skp-group-count">{workspaceVisible.length}</span>
+                </>
+              ) : (
+                <>
+                  <span className="skp-pane-title-text" title={pinned}>
+                    {basenameOf(pinned ?? "")}
+                  </span>
+                  <span className="skp-group-count">{projectVisible.length}</span>
+                </>
+              )}
+            </div>
+            {scope === "global" ? renderSkillList(globalVisible, "global") : showWorkspacePicker ? renderWorkspaceList() : renderSkillList(projectVisible, "project")}
           </div>
+
           <div className="skp-detail skp-detail-fixed">
             {selectedItem !== undefined ? (
               <SkillDetail
                 key={skillRowKey(selectedItem)}
                 summary={selectedItem}
                 api={skillsApi}
-                hasWorkspace={!noWorkspace}
+                hasWorkspace={pinned !== undefined}
                 contentVersion={contentVersion}
                 onChanged={() => {
                   setContentVersion((value) => value + 1);
@@ -632,7 +787,11 @@ function SkillsView({ api, workspace, onCount }: { api: CapabilityPanelApi; work
               />
             ) : (
               <div className="skp-detail-empty">
-                {items.length === 0 ? "还没有任何技能。技能让 agent 在特定任务上按固定做法工作。" : "选择一个技能查看说明与全部文件内容。"}
+                {items.length === 0
+                  ? "还没有任何技能。技能让 agent 在特定任务上按固定做法工作。"
+                  : scope === "project" && showWorkspacePicker
+                    ? "先选择一个工作区，再查看或安装本项目技能。"
+                    : "选择一个技能查看说明与全部文件内容。"}
               </div>
             )}
           </div>
@@ -642,7 +801,7 @@ function SkillsView({ api, workspace, onCount }: { api: CapabilityPanelApi; work
       {installOpen && (
         <InstallDialog
           api={skillsApi}
-          hasWorkspace={!noWorkspace}
+          hasWorkspace={pinned !== undefined}
           defaultScope={installScope}
           onClose={() => setInstallOpen(false)}
           onInstalled={() => {

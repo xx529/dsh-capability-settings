@@ -1,15 +1,15 @@
 /**
  * Capability Panel 的 MCP 域视图。
  *
- * 列表**同屏三组**（取消旧的「项目 / 全局」二选一 Tab）：
- *  - 本项目 `<项目根>/.mcp.json`：随项目生效，可启停/编辑/删除；
- *  - 全局 `~/.agents/mcp.json`：所有项目共享，面板里只做「导入到本项目」/
- *    编辑/删除（启停靠项目级引用或默认开关）；
- *  - 外部注入：其它插件 / profile 在运行时挂载的 mcp-client，只读，
- *    仅在该组非空时渲染。
- * 搜索跨三组即时过滤（key / serverName / summary，外部实例另匹配 source）；
- * 每组独立滚动（组头固定 + 组内滚动），组头带计数与一句说明。组容器样式
- * 由 styles.ts 的 `.skp-group*` 统一提供（与 Skills 域共用同一套）。
+ * 布局与 Skills 域**同构**：左侧「全局 / 项目」作用域导航（ScopeNav）+ 中间
+ * 列 + 右侧详情。项目 scope 下中间列先列出所有工作区（名称 = 目录 basename，
+ * 副标题 = 完整路径），点选后才显示该工作区 `/.mcp.json` 的条目，顶部
+ * 「‹ 工作区」可返回重选；全局 scope 显示 `~/.agents/mcp.json` 条目，并把
+ * 「外部注入」（其它插件 / profile 在运行时挂载的 mcp-client）作为**第二组**
+ * 只读展示（保留组头与计数，为空时不占位）。搜索框在根组件头部，由 `query`
+ * prop 传入，只过滤当前列表（全局 → server 名/summary；项目未选工作区 →
+ * 工作区名；项目已选 → server）。组容器样式由 styles.ts 的 `.skp-group*`
+ * 统一提供（与 Skills 域共用同一套）。
  *
  * 行 = 状态点 + 名称 + 标签（项目/全局/引用/导入/外部 + stdio/http +
  * 默认关闭/被遮蔽）+ meta（挂载状态 · 工具数）+ 命令/URL 摘要 + 行尾
@@ -25,7 +25,7 @@
  */
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties } from "react";
 import type {
   CapabilityPanelApi,
   ClientMcpRuntimeServer,
@@ -252,8 +252,12 @@ function McpServerRow({
       <button type="button" className={selected ? "skp-row skp-row-active" : "skp-row"} style={{ minHeight: 72 }} onClick={onSelect}>
         <span className="skp-row-name">
           <span className={dot.className} style={dot.style} title={rowDotTitle(server, mount)} />
-          {server.key}
+          <span className="skp-row-title" title={server.key}>
+            {server.key}
+          </span>
           <span className={scopeTag.className}>{scopeTag.label}</span>
+        </span>
+        <span className="skp-row-meta">
           <span className="skp-tag skp-tag-flat">{server.transport}</span>
           {defaultOff && (
             <span className="skp-tag skp-tag-warn" title="默认关闭：新建对话不启用；可在输入框的 MCP 弹层里按当前对话手动开启">
@@ -265,8 +269,8 @@ function McpServerRow({
               被遮蔽
             </span>
           )}
+          <span>{rowMetaText(server, mount, settling, toolCount)}</span>
         </span>
-        <span className="skp-row-meta">{rowMetaText(server, mount, settling, toolCount)}</span>
         <span className="skp-row-desc" style={ROW_SUMMARY_STYLE} title={server.summary}>
           {server.summary}
         </span>
@@ -322,8 +326,12 @@ function McpExternalRow({
       <button type="button" className={selected ? "skp-row skp-row-active" : "skp-row"} style={{ minHeight: 72 }} onClick={onSelect}>
         <span className="skp-row-name">
           <span className={dot.className} style={dot.style} title={defaultOff ? "默认关闭（新建对话不启用）" : "运行时注入的实例"} />
-          {server.serverName}
+          <span className="skp-row-title" title={server.serverName}>
+            {server.serverName}
+          </span>
           <span className="skp-tag skp-tag-readonly">外部</span>
+        </span>
+        <span className="skp-row-meta">
           {server.source !== undefined && <span className="skp-tag skp-tag-flat">{server.source}</span>}
           {server.transport !== undefined && <span className="skp-tag skp-tag-flat">{server.transport}</span>}
           {defaultOff && (
@@ -331,8 +339,8 @@ function McpExternalRow({
               默认关闭
             </span>
           )}
+          <span>{meta}</span>
         </span>
-        <span className="skp-row-meta">{meta}</span>
         <span className="skp-row-desc" style={ROW_SUMMARY_STYLE} title={summary}>
           {summary}
         </span>
@@ -362,67 +370,56 @@ function McpExternalRow({
   );
 }
 
-/**
- * 一组（本项目 / 全局 / 外部注入）：组头 = 标题 + 计数胶囊 + 一句说明；
- * 组内有行时走 `.skp-group-scroll` 独立滚动；空组把 `.skp-group-empty` 加在
- * section 上（`flex:0 0 auto`，不占 1/3 高度），引导行放 `.skp-group-empty-row`。
- */
-function McpGroup({
-  title,
-  note,
-  count,
-  empty,
-  children,
-}: {
-  title: string;
-  note: string;
-  count: number;
-  /** 空组时的引导内容（行内 CTA 等）。 */
-  empty?: ReactNode;
-  children?: ReactNode;
-}) {
-  const isEmpty = count === 0;
-  return (
-    <section className={isEmpty ? "skp-group skp-group-empty" : "skp-group"} role="group" aria-label={`${title}（${count}）`}>
-      <div className="skp-group-head">
-        <span className="skp-group-title">{title}</span>
-        <span className="skp-group-count">{count}</span>
-        <span className="skp-group-note">{note}</span>
-      </div>
-      {isEmpty ? (
-        <div className="skp-group-empty-row">{empty}</div>
-      ) : (
-        <div className="skp-group-scroll">
-          <ul className="skp-list">{children}</ul>
-        </div>
-      )}
-    </section>
-  );
+/** MCP 域的左侧导航作用域：全局 / 项目（项目下再选工作区）。 */
+type McpNavScope = "global" | "project";
+
+/** 路径最后一段（工作区名）；空串/纯分隔符回退为原串。 */
+function baseName(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, "");
+  const at = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return at >= 0 ? trimmed.slice(at + 1) || trimmed : trimmed || path;
 }
 
 /**
- * MCP 视图主组件：状态管理 + 拉取/重拉 + 三组列表 + 详情/表单。
+ * MCP 视图主组件：左侧「全局 / 项目」导航 + 中间列（全局列表 / 工作区选择 /
+ * 某工作区的项目列表）+ 右侧详情。
  *
- * 写操作语义不变：项目条目可启停/编辑/删除；全局条目可「导入到本项目」
- * （登记项目级引用，内容跟随全局）/编辑/删除；外部注入只读。默认开关写
- * 项目级 overrides（新建对话的默认启用状态）。
+ * - **全局**：全局 `~/.agents/mcp.json` 条目 + 「外部注入」只读第二组；
+ * - **项目**：中间列先列出所有工作区（点选 → `onSelectWorkspace(path)`），
+ *   选中后显示该工作区 `.mcp.json` 的条目，顶部「‹ 工作区」可返回重选；
+ * - **搜索**来自根组件头部输入框（`query` prop），只过滤当前列表；
+ * - scope / 工作区切换清空选中；行尾「默认」开关写项目级 overrides（语义不变），
+ *   行内没有文字按钮——启停/编辑/删除/导入/探测/使用记录都在详情卡。
  */
 export function McpView({
   api,
+  query,
+  projects,
   workspace,
+  pinned,
+  onSelectWorkspace,
   onCount,
 }: {
   api: CapabilityPanelApi;
+  /** 根组件头部搜索框的值（即时本地过滤当前列表；不跨 scope）。 */
+  query: string;
+  /** 可选工作区列表（项目 scope 的工作区选择页用）。 */
+  projects: Array<{ path: string; title?: string }>;
+  /** 当前作用域解析出的工作区（完整路径；无工作区时是占位串）。 */
   workspace?: string;
+  /** 显式钉选的工作区路径；undefined = 尚未选择工作区。 */
+  pinned?: string;
+  /** 选择/切换工作区（传 undefined = 回到工作区列表）。 */
+  onSelectWorkspace(path?: string): void;
   /**
    * 数据到达后上报配置条目总数（本项目 + 全局，**不含**外部注入实例），供域 Tab
-   * 计数；搜索不影响计数（外部注入在组 C 单独显示计数）。
+   * 计数；搜索不影响计数（外部注入在全局 scope 的第二组里单独显示计数）。
    */
   onCount?: (total: number) => void;
 }) {
   const mcpApi = api.mcp;
+  const [scope, setScope] = useState<McpNavScope>("project");
   const [opError, setOpError] = useState<string | undefined>(undefined);
-  const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string | undefined>(undefined);
   /** 选中的「外部注入」实例（serverName）；与 selected 互斥。 */
   const [selectedExternalName, setSelectedExternalName] = useState<string | undefined>(undefined);
@@ -432,8 +429,8 @@ export function McpView({
   const [editServer, setEditServer] = useState<ClientMcpServer | undefined>(undefined);
   // 新增弹窗开关（表单 / JSON 两种模式见 McpAddDialog）。
   const [addOpen, setAddOpen] = useState(false);
-  // 新增弹窗的默认作用域（顶部「+ 添加 MCP」按有无工作区自适应；空组的 CTA 显式指定）。
-  const [addScope, setAddScope] = useState<McpScope>("project");
+  // 新增弹窗的默认作用域（scope nav 的「+」按行作用域；空组 CTA 显式指定）。
+  const [addScope, setAddScope] = useState<McpScope>("global");
   // 二次确认删除：记录"待确认的行 id"，再点一次才真正删除。
   const [confirmDelete, setConfirmDelete] = useState<string | undefined>(undefined);
   // 二次确认导入覆盖：项目内已有同名时记录"待确认的行 id"，再点一次带 overwrite。
@@ -481,11 +478,11 @@ export function McpView({
   const listErrors = data?.listErrors ?? [];
   const mounts = data?.mounts ?? {};
   const settling = data?.settling === true;
-  /** 外部注入（非本插件配置）的 MCP：单独成组展示，只读。 */
+  /** 外部注入（非本插件配置）的 MCP：归入全局 scope 的第二组展示，只读。 */
   const runtimeServers = data?.runtimeServers ?? [];
 
-  // 域 Tab 计数：只算配置条目（本项目 + 全局）；外部注入实例在组 C 单独显示计数。
-  // 数据到达后上报，搜索不改变计数（Lead 裁决 / UX §3.2）。
+  // 域 Tab 计数：只算配置条目（本项目 + 全局）；外部注入在全局 scope 的第二组里
+  // 单独显示计数。数据到达后上报，搜索不改变计数（Lead 裁决 / UX §3.2）。
   useEffect(() => {
     if (data === undefined) return;
     onCount?.(data.servers.length);
@@ -514,34 +511,46 @@ export function McpView({
     return () => window.clearTimeout(timer);
   }, [settling, data, reload]);
 
+  const noWorkspace = !hasWorkspaceLabel(workspace);
+  /** 项目 scope 下已钉选的工作区（未选 = 先显示工作区列表）。 */
+  const projectPath = pinned;
+  const projectName = projectPath === undefined ? undefined : (projects.find((project) => project.path === projectPath)?.title ?? baseName(projectPath));
+
+  /** scope / 工作区切换：清空选中与待确认态（详情跟走）。 */
+  useEffect(() => {
+    setSelected(undefined);
+    setSelectedExternalName(undefined);
+    setEditServer(undefined);
+    setConfirmDelete(undefined);
+    setConfirmImport(undefined);
+  }, [scope, projectPath, workspace]);
+
   const trimmedQuery = query.trim();
-  // 过滤跨全部组：配置条目命中 key / serverName / summary；外部实例另匹配 source。
-  const filteredServers = useMemo(() => {
-    const q = trimmedQuery.toLowerCase();
-    if (q.length === 0) return servers;
-    return servers.filter(
-      (server) => server.key.toLowerCase().includes(q) || server.serverName.toLowerCase().includes(q) || server.summary.toLowerCase().includes(q),
-    );
-  }, [servers, trimmedQuery]);
-  const filteredExternal = useMemo(() => {
-    const q = trimmedQuery.toLowerCase();
-    if (q.length === 0) return runtimeServers;
-    return runtimeServers.filter(
-      (server) =>
-        server.serverName.toLowerCase().includes(q) ||
-        (server.source ?? "").toLowerCase().includes(q) ||
-        (server.summary ?? "").toLowerCase().includes(q),
-    );
-  }, [runtimeServers, trimmedQuery]);
-  const projectRows = filteredServers.filter((server) => server.scope === "project");
-  const globalRows = filteredServers.filter((server) => server.scope === "global");
-  /** 搜索中且三组都没有命中：整块显示「没有匹配」空态（不逐个组报空）。 */
-  const noMatches = trimmedQuery.length > 0 && filteredServers.length === 0 && filteredExternal.length === 0;
+  const q = trimmedQuery.toLowerCase();
+  const matchesServer = (server: ClientMcpServer) =>
+    q.length === 0 ||
+    server.key.toLowerCase().includes(q) ||
+    server.serverName.toLowerCase().includes(q) ||
+    server.summary.toLowerCase().includes(q);
+  const matchesExternal = (server: ClientMcpRuntimeServer) =>
+    q.length === 0 ||
+    server.serverName.toLowerCase().includes(q) ||
+    (server.source ?? "").toLowerCase().includes(q) ||
+    (server.summary ?? "").toLowerCase().includes(q);
+  const globalServers = servers.filter((server) => server.scope === "global");
+  const projectServers = servers.filter((server) => server.scope === "project");
+  const visibleGlobal = globalServers.filter(matchesServer);
+  const visibleProject = projectServers.filter(matchesServer);
+  const visibleExternal = runtimeServers.filter(matchesExternal);
+  const searching = trimmedQuery.length > 0;
+  const visibleProjects = projects.filter((project) => {
+    if (q.length === 0) return true;
+    return baseName(project.path).toLowerCase().includes(q) || project.path.toLowerCase().includes(q);
+  });
 
   const selectedServer = servers.find((s) => rowId(s) === selected);
   const selectedExternal =
     selectedExternalName === undefined ? undefined : runtimeServers.find((s) => s.serverName === selectedExternalName);
-  const noWorkspace = !hasWorkspaceLabel(workspace);
 
   /** 执行一次写操作：失败写 opError；成功清错误并重拉列表。返回是否成功。 */
   const runOp = async (op: Promise<OpResult>): Promise<boolean> => {
@@ -612,34 +621,132 @@ export function McpView({
     setConfirmImport(undefined);
   };
 
-  const openAdd = (scope: McpScope) => {
+  const openAdd = (target: McpScope) => {
     setEditServer(undefined);
-    setAddScope(scope);
+    setAddScope(target);
     setAddOpen(true);
   };
 
-  return (
-    <div className="skp-domain">
-      <div className="skp-subheader">
-        {/* 搜索跨三组（无网络请求）；顶部只保留主 CTA，作用域不再用 Tab 二选一。 */}
-        <input
-          className="skp-search"
-          type="search"
-          placeholder="搜索 MCP 服务器…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <button
-          type="button"
-          className="skp-btn skp-btn-primary"
-          title={noWorkspace ? "当前没有可写工作区：新增默认落到全局配置" : "新增服务器（默认添加到本项目，可在弹窗里改成全局）"}
-          onClick={() => openAdd(noWorkspace ? "global" : "project")}
-        >
-          + 添加 MCP
+  /** 回到工作区列表（并清空当前工作区钉选与选中）。 */
+  const backToWorkspaces = () => {
+    setSelected(undefined);
+    setSelectedExternalName(undefined);
+    onSelectWorkspace(undefined);
+  };
+
+  /** ScopeNav 一行：作用域名 + 计数 + 右侧「+」添加入口（与技能域同构）。 */
+  const renderScopeItem = (target: McpNavScope, label: string, count: number | string) => {
+    const disabled = target === "project" && projectPath === undefined;
+    const title = disabled
+      ? "先选择工作区"
+      : target === "global"
+        ? "添加全局 MCP 服务器"
+        : `添加项目 MCP 服务器（${projectName ?? projectPath}）`;
+    return (
+      <div className={scope === target ? "skp-scope-item skp-scope-item-active" : "skp-scope-item"}>
+        <button type="button" className="skp-scope-main" aria-pressed={scope === target} onClick={() => setScope(target)}>
+          <span className="skp-scope-label">{label}</span>
+          <span className="skp-scope-count">{count}</span>
+        </button>
+        <button type="button" className="skp-scope-add" disabled={disabled} title={title} aria-label={title} onClick={() => openAdd(target)}>
+          +
         </button>
       </div>
+    );
+  };
 
-      {/* 非致命错误行：列表读取问题 / 写操作失败提示。 */}
+  /** 非空的服务器列表（组内滚动 + listbox 语义）。 */
+  const renderServerScroll = (list: ClientMcpServer[], label: string) => (
+    <div className="skp-group-scroll">
+      <ul className="skp-list" role="listbox" aria-label={label}>
+        {list.map((server) => (
+          <McpServerRow
+            key={rowId(server)}
+            server={server}
+            mount={mounts[server.key]}
+            settling={settling}
+            toolCount={toolCounts[server.serverName]}
+            selected={selected === rowId(server)}
+            onSelect={() => selectServer(server)}
+            onToggleDefault={() => void toggleDefault(server.key)}
+          />
+        ))}
+      </ul>
+    </div>
+  );
+
+  /** 当前 scope 的服务器列表（空态区分「还没有」与搜索「无匹配」）。 */
+  const renderServerList = (list: ClientMcpServer[], group: "global" | "project") => {
+    if (list.length === 0) {
+      if (searching) return <div className="skp-empty">没有匹配「{trimmedQuery}」的 MCP 服务器。</div>;
+      return (
+        <div className="skp-empty">
+          <div>{group === "global" ? "还没有全局 MCP 服务器。" : "本项目还没有 MCP 服务器。"}</div>
+          <button type="button" className="skp-btn" style={{ marginTop: 10 }} onClick={() => openAdd(group)}>
+            {group === "global" ? "添加全局 MCP" : "添加到本项目"}
+          </button>
+        </div>
+      );
+    }
+    return renderServerScroll(list, group === "global" ? "全局 MCP 服务器" : "本项目 MCP 服务器");
+  };
+
+  /** 项目 scope 未选工作区：工作区选择列表（点击 = 进入该工作区）。 */
+  const renderWorkspaceList = () => {
+    if (projects.length === 0) {
+      return (
+        <div className="skp-empty">
+          {noWorkspace ? "当前没有关联工作区，无法读写项目 .mcp.json。" : "还没有工作区。"}
+        </div>
+      );
+    }
+    if (visibleProjects.length === 0) {
+      return <div className="skp-empty">没有匹配「{trimmedQuery}」的工作区。</div>;
+    }
+    return (
+      <div className="skp-group-scroll">
+        <ul className="skp-list" role="listbox" aria-label="工作区">
+          {visibleProjects.map((project) => (
+            <li key={project.path} role="presentation">
+              <button type="button" className="skp-workspace-row" title={project.path} onClick={() => onSelectWorkspace(project.path)}>
+                <span className="skp-workspace-name">{baseName(project.path)}</span>
+                <span className="skp-workspace-path">{project.path}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  };
+
+  /** 全局 scope 的第二组：外部注入（只读，保留组头与计数；为空时不占位）。 */
+  const renderExternalGroup = () =>
+    visibleExternal.length > 0 ? (
+      <section className="skp-group" role="group" aria-label={`外部注入（${visibleExternal.length}）`}>
+        <div className="skp-group-head">
+          <span className="skp-group-title">外部注入</span>
+          <span className="skp-group-count">{visibleExternal.length}</span>
+          <span className="skp-group-note">运行时注入 · 只读</span>
+        </div>
+        <div className="skp-group-scroll">
+          <ul className="skp-list" role="listbox" aria-label="外部注入 MCP">
+            {visibleExternal.map((server) => (
+              <McpExternalRow
+                key={`external:${server.serverName}`}
+                server={server}
+                selected={selectedExternalName === server.serverName}
+                onSelect={() => selectExternal(server)}
+                onToggleDefault={() => void toggleDefault(server.serverName)}
+              />
+            ))}
+          </ul>
+        </div>
+      </section>
+    ) : null;
+
+  return (
+    <div className="skp-domain">
+      {/* 搜索框在根组件头部（`.skp-header-search`）；这里不再有视图内搜索/安装行。 */}
       {listErrors.length > 0 && <div className="skp-error">{listErrors.join("\n")}</div>}
       {opError && <div className="skp-error">{opError}</div>}
       {error && <div className="skp-error">{error}</div>}
@@ -648,93 +755,54 @@ export function McpView({
 
       {!loading && (
         <div className="skp-body">
-          <div className="skp-groups">
-            {noMatches ? (
-              <div className="skp-empty">
-                没有匹配「{trimmedQuery}」的 MCP 服务器。
-                <button type="button" className="skp-link-btn" onClick={() => setQuery("")}>
-                  清空搜索
-                </button>
-              </div>
+          {/* 左侧作用域导航：全局 / 项目（项目需先选工作区才能添加）。 */}
+          <nav className="skp-scope-nav" aria-label="MCP 作用域">
+            {renderScopeItem("global", "全局", globalServers.length)}
+            {renderScopeItem("project", "项目", projectPath === undefined ? "—" : projectServers.length)}
+          </nav>
+
+          {/* 中间列：全局 MCP（+外部注入）/ 工作区选择 / 本工作区项目 MCP。 */}
+          <div className="skp-workspace-pane">
+            {scope === "project" && projectPath !== undefined && (
+              <button type="button" className="skp-pane-back" onClick={backToWorkspaces}>
+                ‹ 工作区
+              </button>
+            )}
+            <div className="skp-pane-title">
+              {scope === "global" ? (
+                <>
+                  <span className="skp-pane-title-text">全局 MCP</span>
+                  <span className="skp-group-count">{visibleGlobal.length}</span>
+                </>
+              ) : projectPath === undefined ? (
+                <>
+                  <span className="skp-pane-title-text">选择工作区</span>
+                  <span className="skp-group-count">{visibleProjects.length}</span>
+                </>
+              ) : (
+                <>
+                  <span className="skp-pane-title-text" title={projectPath}>
+                    {projectName ?? baseName(projectPath)}
+                  </span>
+                  <span className="skp-group-count">{visibleProject.length}</span>
+                </>
+              )}
+            </div>
+            {scope === "global" ? (
+              searching && visibleGlobal.length === 0 && visibleExternal.length === 0 ? (
+                <div className="skp-empty">没有匹配「{trimmedQuery}」的 MCP 服务器。</div>
+              ) : (
+                <>
+                  {searching
+                    ? visibleGlobal.length > 0 && renderServerScroll(visibleGlobal, "全局 MCP 服务器")
+                    : renderServerList(visibleGlobal, "global")}
+                  {renderExternalGroup()}
+                </>
+              )
+            ) : projectPath === undefined ? (
+              renderWorkspaceList()
             ) : (
-              <>
-                {/* 本项目组：无工作区时只给引导，不显示添加按钮（项目作用域需要 cwd）。 */}
-                {(trimmedQuery.length === 0 || projectRows.length > 0) && (
-                  <McpGroup
-                    title="本项目"
-                    note="随项目走 · 只在本项目生效"
-                    count={projectRows.length}
-                    empty={
-                      noWorkspace ? (
-                        <span>未关联工作区，无法读写项目 .mcp.json。</span>
-                      ) : (
-                        <>
-                          <span>本项目还没有 MCP 服务器。</span>
-                          <button type="button" className="skp-btn" onClick={() => openAdd("project")}>
-                            + 添加到项目
-                          </button>
-                        </>
-                      )
-                    }
-                  >
-                    {projectRows.map((server) => (
-                      <McpServerRow
-                        key={rowId(server)}
-                        server={server}
-                        mount={mounts[server.key]}
-                        settling={settling}
-                        toolCount={toolCounts[server.serverName]}
-                        selected={selected === rowId(server)}
-                        onSelect={() => selectServer(server)}
-                        onToggleDefault={() => void toggleDefault(server.key)}
-                      />
-                    ))}
-                  </McpGroup>
-                )}
-                {/* 全局组：所有项目共享；启停只出现在项目条目（全局条目靠导入引用控制）。 */}
-                {(trimmedQuery.length === 0 || globalRows.length > 0) && (
-                  <McpGroup
-                    title="全局"
-                    note="所有项目共享 · 改动影响全部项目"
-                    count={globalRows.length}
-                    empty={
-                      <>
-                        <span>还没有全局 MCP 服务器。</span>
-                        <button type="button" className="skp-btn" onClick={() => openAdd("global")}>
-                          + 添加
-                        </button>
-                      </>
-                    }
-                  >
-                    {globalRows.map((server) => (
-                      <McpServerRow
-                        key={rowId(server)}
-                        server={server}
-                        mount={mounts[server.key]}
-                        settling={settling}
-                        toolCount={toolCounts[server.serverName]}
-                        selected={selected === rowId(server)}
-                        onSelect={() => selectServer(server)}
-                        onToggleDefault={() => void toggleDefault(server.key)}
-                      />
-                    ))}
-                  </McpGroup>
-                )}
-                {/* 外部注入组：只读、仅非空时渲染（为 0 时不占位）。 */}
-                {filteredExternal.length > 0 && (
-                  <McpGroup title="外部注入" note="运行时注入 · 只读" count={filteredExternal.length}>
-                    {filteredExternal.map((server) => (
-                      <McpExternalRow
-                        key={`external:${server.serverName}`}
-                        server={server}
-                        selected={selectedExternalName === server.serverName}
-                        onSelect={() => selectExternal(server)}
-                        onToggleDefault={() => void toggleDefault(server.serverName)}
-                      />
-                    ))}
-                  </McpGroup>
-                )}
-              </>
+              renderServerList(visibleProject, "project")
             )}
           </div>
 
@@ -747,7 +815,7 @@ export function McpView({
                 api={mcpApi}
                 server={selectedServer}
                 mount={mounts[selectedServer.key]}
-                hasWorkspace={!noWorkspace}
+                hasWorkspace={projectPath !== undefined}
                 confirmingDelete={confirmDelete === rowId(selectedServer)}
                 confirmingImport={confirmImport === rowId(selectedServer)}
                 onEdit={() => setEditServer(selectedServer)}
@@ -759,13 +827,17 @@ export function McpView({
                 }
               />
             ) : (
-              <div className="skp-detail-empty">选择一个服务器查看详情，或新增一个。</div>
+              <div className="skp-detail-empty">
+                {scope === "project" && projectPath === undefined
+                  ? "先选择一个工作区，再查看或添加本项目 MCP 服务器。"
+                  : "选择一个服务器查看详情，或新增一个。"}
+              </div>
             )}
           </div>
         </div>
       )}
 
-      {/* 新增弹窗：表单 / JSON 两种模式（与技能安装弹窗同构；默认作用域自适应）。 */}
+      {/* 新增弹窗：表单 / JSON 两种模式（与技能安装弹窗同构；默认作用域跟随 scope nav）。 */}
       {addOpen && (
         <McpAddDialog
           api={mcpApi}
