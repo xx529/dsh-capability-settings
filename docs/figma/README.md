@@ -1,14 +1,16 @@
-# Figma 原型（Capability Dock v5 + 能力面板升级 v6）
+# Figma 原型（Capability Dock v5 + 能力面板 v6/v7/v8）
 
 本目录是能力面板相关 UI 的 Figma 设计源，供人工查看 / 未来智能体继续改原型：
 
 - **Capability Dock · 终稿 v5**（`4:2`）：「输入框下方会话能力配置区」的终稿（历史，保留）；
 - **Capability Panel · 升级原型 v6**（`10:2`）：「能力面板」v2 升级原型（同屏双组版，历史）；
-- **Capability Panel · 交互原型 v7**（`21:2353`）：第三轮 IA（工作区列表移入左侧导航）确认稿，
-  当前设计基线；可编辑图层由 `prototype/v7/` 脚本生成。
+- **Capability Panel · 交互原型 v7**（`21:2353`）：第三轮 IA（工作区列表移入左侧导航）确认稿（历史）；
+- **Capability Panel · 终稿 v8**（`42:3373`）：当前设计基线（1.3.4 实现同步：工作区列表两种
+  scope 常驻、MCP 工具参数手风琴、全局 MCP 含外部注入组）；可编辑图层由 `prototype/v8/` 脚本生成，
+  并已导出可重导入的 `scenes/v8-01..04.scene.json` + `preview/v8-*.png`。
 
 设计文档说明见 [`../../notes/design/capability-dock.md`](../../notes/design/capability-dock.md)
-（v5）与 [`../ux/panel-upgrade.md`](../ux/panel-upgrade.md)（v6 交互规格，入库）。
+（v5）与 [`../ux/panel-upgrade.md`](../ux/panel-upgrade.md)（能力面板交互规格，入库）。
 
 ## 1. 设计文件与节点
 
@@ -25,6 +27,10 @@ Figma 本地文档：**`dsh`**（DSH to Figma 本地桥，见根 `AGENTS.md`「F
 | 同上 | | 04 · MCP 详情（外部只读） | `10:173` |
 | Capability Panel · 交互原型 v7 | `21:2353` | 01 · 技能 · 项目（工作区列表在左导航） | `21:2356` |
 | 同上 | | 02 · MCP · 项目（工作区列表在左导航） | `21:2413` |
+| Capability Panel · 终稿 v8 | `42:3373` | 01 · 技能 · 项目 | `42:3376` |
+| 同上 | | 02 · 技能 · 全局 | `42:3433` |
+| 同上 | | 03 · MCP · 项目 | `42:3490` |
+| 同上 | | 04 · MCP · 全局 | `42:3547` |
 | Capability Dock · 交互原型（历史 v1–v4） | `1:2` | 保留不动，仅作演进记录 | — |
 
 ## 2. 文件
@@ -34,7 +40,11 @@ docs/figma/
 ├── README.md                      ← 本文件
 ├── scenes/
 │   ├── 01-hero.scene.json         ← v5：import_scene 契约：{ nodes: [FRAME...] }
-│   └── 02-capability-tab.scene.json
+│   ├── 02-capability-tab.scene.json
+│   ├── v8-01-skills-project.scene.json  ← v8 四帧（当前基线，可直接 import_scene）
+│   ├── v8-02-skills-global.scene.json
+│   ├── v8-03-mcp-project.scene.json
+│   └── v8-04-mcp-global.scene.json
 ├── preview/
 │   ├── 01-hero.png                ← v5 导出预览图（1440×900）
 │   ├── 02-capability-tab.png
@@ -43,8 +53,12 @@ docs/figma/
 │   ├── v6-03-mcp-overview.png
 │   ├── v6-04-mcp-detail.png
 │   ├── v7-01-skills-project.png   ← v7：工作区列表在左导航（技能）
-│   └── v7-02-mcp-project.png      ← v7：工作区列表在左导航（MCP）
-├── prototype/                     ← v6 建稿脚本（v7 在 prototype/v7/）
+│   ├── v7-02-mcp-project.png      ← v7：工作区列表在左导航（MCP）
+│   ├── v8-01-skills-project.png   ← v8 四帧真实导出（当前基线）
+│   ├── v8-02-skills-global.png
+│   ├── v8-03-mcp-project.png
+│   └── v8-04-mcp-global.png
+├── prototype/                     ← v6 建稿脚本（v7/v8 在各自子目录）
 │   ├── 00-init.js                 ← 建页 + 4 画框 + 克隆 v5 sidebar
 │   ├── 01-skill-overview.js
 │   ├── 02-skill-detail.js
@@ -52,11 +66,18 @@ docs/figma/
 │   ├── 04-mcp-detail.js
 │   ├── 05-sidebar-fix.js          ← 侧栏高亮「能力面板」（幂等，最后跑）
 │   ├── spec-v6.md                 ← 节点树 / 坐标 / 验收点
-│   └── v7/                        ← 第三轮 IA 原型（工作区列表移入左导航）
+│   ├── v7/                        ← 第三轮 IA 原型
+│   │   ├── 00-init.js
+│   │   ├── 01-skills-project.js
+│   │   ├── 02-mcp-project.js
+│   │   └── spec-v7.md
+│   └── v8/                        ← 当前终稿（1.3.4 同步）
 │       ├── 00-init.js
 │       ├── 01-skills-project.js
-│       ├── 02-mcp-project.js
-│       └── spec-v7.md
+│       ├── 02-skills-global.js
+│       ├── 03-mcp-project.js
+│       ├── 04-mcp-global.js
+│       └── spec-v8.md
 └── tools/
     └── export-scene.js            ← 从 Figma 重新导出 scene JSON 的 use_figma 脚本
 ```
@@ -75,6 +96,10 @@ docs/figma/
    - **01 与 02 可一次导入**（165 + 142 = 307 节点 < 500）：画框自带 x/y（01 在 `0,150`，02 在 `1520,150`），会并排出现。
    - 单次工具参数很大时，分两次导入（每个文件一次）。
    - 导入后可 `get_screenshot` / `download_assets` 与 `docs/figma/preview/*.png` 对照。
+   - **v8（当前基线）一次性导入**：四个 `scenes/v8-*.scene.json` 各含一个独立画框
+     （01/02 在 y=150，03/04 在 y=1200，x=0/1520），合计约 229 个节点 < 500，可一次
+     `import_scene({ nodes: [ ...v8-01, ...v8-02, ...v8-03, ...v8-04 ] })` 重建 4 帧；
+     也可只导入其中一帧，或分文件导入。对应页面/node id 见 §1，预览见 `preview/v8-*.png`。
 4. 若导入后想改设计：直接编辑 Figma 节点，然后**重新导出**（见下一节）并覆盖 scene JSON + 预览图。
 
 ## 4. 从 Figma 重新导出
