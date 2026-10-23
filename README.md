@@ -5,12 +5,11 @@
 **全局级 / 项目级（逐工作区）**双作用域。安装、启停、内容浏览与分发都能
 **不离开浏览器**完成。
 
-![能力面板（上一版 v6 预览）· 技能总览](docs/figma/preview/v6-01-skill-overview.png)
+![能力面板 v7 · 技能 · 项目（工作区列表在左导航）](docs/figma/preview/v7-01-skills-project.png)
 
-> **界面版本提示**：上图与本文其余三张截图来自 **v6 预览（上一版：同屏双组布局）**，
-> 仅作能力与内容示意。**当前实现是第三轮 IA**：头部第二行 =「域 Tab 左 + 搜索右」，
-> 左列导航 =「全局 / 项目」，进入项目后先列工作区、点选后才显示该工作区条目；
-> 详见下文「一个面板，管住两个能力域」与
+> **界面版本提示**：顶部两张截图是 **v7 预览**（当前 IA：工作区列表在左导航）；
+> 文中「技能详情」「MCP 详情」两张仍是 **v6 预览（上一版）**——详情区在 v7 未改版式，
+> 仅中列/导航变化。当前 IA 说明见下文「一个面板，管住两个能力域」与
 > [docs/ux/panel-upgrade.md](docs/ux/panel-upgrade.md)（§3 信息架构、§9 线框）。
 
 > **外壳版本要求**：侧栏入口用的是 root 作用域的 `sidebar.panellist` 槽
@@ -61,14 +60,17 @@
 - 点 **全局**：中间列只列全局条目（`~/.agents/skills`、`~/.agents/mcp.json`）；
   MCP 还会在下方显示第二组「外部注入」（运行时注入的只读实例，组头带计数，
   为空时不占位）。
-- 点 **项目**：中间列**先列出全部工作区**——名称 = 文件夹 basename、副标题 =
-  完整路径；点某个工作区才显示该工作区 `.mcp.json` / 项目技能，顶部「‹ 工作区」
-  可返回重选。头部「项目作用域」下拉与这个选择是**同一个状态**，两边同步。
-- 默认进入「项目」scope；若还没选过工作区，先看到工作区列表。
-- 搜索只过滤**当前列表**（全局列表 / 工作区列表 / 某工作区的条目），不跨 scope；
-  技能全局列表的标题计数在搜索时显示「匹配/总数」。
+- 点 **项目**：左导航「项目」行下方**直接列出全部工作区**——名称 = 文件夹
+  basename，`title` = 完整路径；点某个工作区才显示该工作区 `.mcp.json` / 项目技能，
+  选中行高亮 + 左侧蓝条。工作区多时列表在左导航内自身滚动；**没有「‹ 工作区」返回行**，
+  切回未选状态用左导航/头部下拉。头部「项目作用域」下拉与这个选择是**同一个状态**，两边同步。
+- 默认进入「项目」scope；若还没选过工作区，中间列只给一句「请选择左侧工作区」
+  （不再把工作区列表塞进中间列）。
+- 搜索只过滤**当前可见列表**，不跨 scope：项目未选工作区时过滤**左导航工作区名/路径**；
+  已选工作区后左导航保持完整、只过滤中间列条目。技能全局列表的标题计数在搜索时
+  显示「匹配/总数」。
 
-![能力面板（上一版 v6 预览）· 技能总览](docs/figma/preview/v6-01-skill-overview.png)
+![能力面板 v7 · 技能 · 项目](docs/figma/preview/v7-01-skills-project.png)
 
 ### 📥 Skills：三种方式安装，一键导出分享
 
@@ -137,12 +139,13 @@ v2 把手写文字按钮全部收进详情，**列表每行右端只有一个开
   解码与缓存。窄容器（内容区 < 632px）时目录树折叠为「文件 (N)」下拉，
   阅读器占满宽度。
 
-![技能详情：目录树 + SKILL.md 阅读器](docs/figma/preview/v6-02-skill-detail.png)
+![技能详情（v6 预览，v7 未改版式）：目录树 + SKILL.md 阅读器](docs/figma/preview/v6-02-skill-detail.png)
 
 ### 🗃 Skills：全局 / 项目分离，项目级控制落实为真实文件
 
-技能按来源分进「全局」与「项目」两个 scope（左导航切换），各自按真实文件
-列举——全局 = `~/.agents/skills` 等，项目 = 选中工作区的 `<项目>/.agents/skills` 等。
+技能按来源分进「全局」与「项目」两个 scope（左导航切换；项目的工作区列表也挂在左导航
+「项目」行下方），各自按真实文件列举——全局 = `~/.agents/skills` 等，项目 = 选中工作区的
+`<项目>/.agents/skills` 等。
 同名关系直接在行上标出，点击关系标签会切到另一 scope 并选中对应条目
 （全局 → 项目时若还没选工作区，会尝试自动进入当前会话工作区）：
 
@@ -218,9 +221,9 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   启停都即时可见），重挂在后台按队列进行：重挂期间还没拿到状态的条目显示
   「挂载中…」，面板静默轮询直到挂载状态收敛，且不会闪「加载中…」。
 
-![MCP（上一版 v6 预览）：全局 + 外部注入 + 工具与参数两栏](docs/figma/preview/v6-03-mcp-overview.png)
+![MCP v7 · 项目（工作区列表在左导航 + 工具与参数两栏）](docs/figma/preview/v7-02-mcp-project.png)
 
-![MCP 详情：外部注入只读](docs/figma/preview/v6-04-mcp-detail.png)
+![MCP 详情（v6 预览，v7 未改版式）：外部注入只读](docs/figma/preview/v6-04-mcp-detail.png)
 
 ### 🎯 项目级控制全局能力
 
@@ -378,16 +381,18 @@ src/
 
 ## 设计文档与截图
 
-- 交互与信息架构规格：[docs/ux/panel-upgrade.md](docs/ux/panel-upgrade.md)（v2，含尺寸、文案与验收标准）
-- 原型预览：`docs/figma/preview/v6-01-skill-overview.png`、`v6-02-skill-detail.png`、
-  `v6-03-mcp-overview.png`、`v6-04-mcp-detail.png`；Figma 页 **`Capability Panel · 升级原型 v6`**
-- 建稿/坐标规格：`docs/figma/prototype/spec-v6.md`
+- 交互与信息架构规格：[docs/ux/panel-upgrade.md](docs/ux/panel-upgrade.md)（v1.4 / v7 IA，含尺寸、文案与验收标准）
+- 原型预览（v7，当前）：`docs/figma/preview/v7-01-skills-project.png`、`v7-02-mcp-project.png`；
+  Figma 页 **`Capability Panel · 交互原型 v7`**
+- 建稿/坐标规格：`docs/figma/prototype/v7/spec-v7.md`
+- 上一版（v6，同屏双组，留档）：`docs/figma/preview/v6-01..04-*.png`；`docs/figma/prototype/spec-v6.md`
 
 > `docs/screenshots/` 下的图片是 1.1–1.2 旧版界面留档（包含已下线的快捷消息域与
 > 已移除的输入框能力工具组），仅作历史对照，不再在本文中引用。
-> 另：`docs/figma/preview/v6-*.png` 是**上一版（同屏双组）** 的 Figma 预览，
-> 当前第三轮 IA（左导航 + 工作区下钻 + 头部搜索）尚未出 Figma 帧，版式以
-> `docs/ux/panel-upgrade.md` 的 §4 尺寸与 §9 线框为准。
+> Figma 预览：**v7（当前）** = `v7-01-skills-project.png`、`v7-02-mcp-project.png`（页
+> `Capability Panel · 交互原型 v7`，另有技能/全局等帧待补）；**v6（上一版，同屏双组）**
+> = `v6-01..04-*.png`，仅作详情区与历史对照。尺寸与线框见
+> `docs/ux/panel-upgrade.md` 的 §4 与 §9。
 
 ## License
 

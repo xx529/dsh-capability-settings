@@ -3,8 +3,9 @@
 本目录是能力面板相关 UI 的 Figma 设计源，供人工查看 / 未来智能体继续改原型：
 
 - **Capability Dock · 终稿 v5**（`4:2`）：「输入框下方会话能力配置区」的终稿（历史，保留）；
-- **Capability Panel · 升级原型 v6**（`10:2`）：「能力面板」v2 升级原型（当前设计基线；
-  可编辑图层由 `prototype/` 下的 `use_figma` 脚本生成，可随时重跑复现）。
+- **Capability Panel · 升级原型 v6**（`10:2`）：「能力面板」v2 升级原型（同屏双组版，历史）；
+- **Capability Panel · 交互原型 v7**（`21:2353`）：第三轮 IA（工作区列表移入左侧导航）确认稿，
+  当前设计基线；可编辑图层由 `prototype/v7/` 脚本生成。
 
 设计文档说明见 [`../../notes/design/capability-dock.md`](../../notes/design/capability-dock.md)
 （v5）与 [`../ux/panel-upgrade.md`](../ux/panel-upgrade.md)（v6 交互规格，入库）。
@@ -22,6 +23,8 @@ Figma 本地文档：**`dsh`**（DSH to Figma 本地桥，见根 `AGENTS.md`「F
 | 同上 | | 02 · 技能详情（SKILL.md + 文件树） | `10:61` |
 | 同上 | | 03 · MCP 总览（三组） | `10:117` |
 | 同上 | | 04 · MCP 详情（外部只读） | `10:173` |
+| Capability Panel · 交互原型 v7 | `21:2353` | 01 · 技能 · 项目（工作区列表在左导航） | `21:2356` |
+| 同上 | | 02 · MCP · 项目（工作区列表在左导航） | `21:2413` |
 | Capability Dock · 交互原型（历史 v1–v4） | `1:2` | 保留不动，仅作演进记录 | — |
 
 ## 2. 文件
@@ -38,15 +41,22 @@ docs/figma/
 │   ├── v6-01-skill-overview.png   ← v6 四帧真实导出（1440×900）
 │   ├── v6-02-skill-detail.png
 │   ├── v6-03-mcp-overview.png
-│   └── v6-04-mcp-detail.png
-├── prototype/                     ← v6 建稿脚本（按帧拆分，use_figma 可直接执行）
+│   ├── v6-04-mcp-detail.png
+│   ├── v7-01-skills-project.png   ← v7：工作区列表在左导航（技能）
+│   └── v7-02-mcp-project.png      ← v7：工作区列表在左导航（MCP）
+├── prototype/                     ← v6 建稿脚本（v7 在 prototype/v7/）
 │   ├── 00-init.js                 ← 建页 + 4 画框 + 克隆 v5 sidebar
 │   ├── 01-skill-overview.js
 │   ├── 02-skill-detail.js
 │   ├── 03-mcp-overview.js
 │   ├── 04-mcp-detail.js
 │   ├── 05-sidebar-fix.js          ← 侧栏高亮「能力面板」（幂等，最后跑）
-│   └── spec-v6.md                 ← 节点树 / 坐标 / 验收点
+│   ├── spec-v6.md                 ← 节点树 / 坐标 / 验收点
+│   └── v7/                        ← 第三轮 IA 原型（工作区列表移入左导航）
+│       ├── 00-init.js
+│       ├── 01-skills-project.js
+│       ├── 02-mcp-project.js
+│       └── spec-v7.md
 └── tools/
     └── export-scene.js            ← 从 Figma 重新导出 scene JSON 的 use_figma 脚本
 ```

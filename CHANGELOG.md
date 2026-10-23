@@ -3,6 +3,40 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.3.1] - 2026-10-23
+
+### 变更
+
+- **v7 IA 调整：工作区列表移入左导航**：工作区列表从中间列移到左 ScopeNav「项目」行下方
+  （**仅 project scope 显示，global scope 隐藏**；行高 34、名称 = 文件夹 basename、`title` =
+  完整路径、选中态 = 高亮 + 左侧 2px 蓝条、列表在 nav 内自身滚动）；中间列只保留标题 + 条目，
+  项目未选工作区时显示居中空态「请选择左侧工作区」；**删除「‹ 工作区」返回行**。未选工作区时
+  头部搜索过滤左导航工作区名/路径，已选后 nav 保持完整、搜索只过滤中间列条目。全局/项目行
+  右侧「+」入口不变。
+- 设计源切到 Figma 页 `Capability Panel · 交互原型 v7`（2 帧，技能 · 项目 / MCP · 项目），
+  预览 `docs/figma/preview/v7-01-skills-project.png`、`v7-02-mcp-project.png`；v6 的 4 帧
+  与预览转为上一版留档。
+- 宽度取舍：实现沿用「中列 280 + 详情 694（内容 646，目录树常驻 200）」，不采用 v7 原型
+  的 300/676；v7 帧中列标题的蓝色「+」**不补入实现**——添加入口只保留在「全局 / 项目」行
+  右侧（避免两套入口）。
+
+### 内部
+
+- `src/client/panel.tsx` / `mcp-panel.tsx`：工作区列表移入 ScopeNav（`.skp-scope-workspaces` /
+  `.skp-scope-workspace[-active]`），中间列删除 `.skp-workspace-pane` / `‹ 工作区` 返回行；
+  搜索两口径（未选工作区过滤 nav，已选过滤条目）。
+- 构建 / 测试：
+  - `pnpm typecheck` — exit 0，无类型错误。
+  - `pnpm build` — exit 0；`lib/client.js` 344.47 kB（gzip 82.52 kB）、`lib/client.map` 531.67 kB。
+  - `bash notes/verify/run-all.sh` — exit 0；render-smoke 20/20、bug1-e2e 21/21、
+    mutation-negative-control `controlOk:true`、composer-api-cache 7/7、workspace-items-key 10/10、
+    api-two-instances 17/17、loader-behavior 81/81、probe-connectivity 12/12、
+    mcp-connectivity-baseline PASS、lib 产物 loader 81/81。
+  - `node notes/verify/panel-upgrade.test.mjs` — 70/70（v7 IA：工作区列表在 nav 内且 global
+    隐藏 / 中间列提示空态 / 无返回行 / 两种搜索口径 / 行尾开关 / 文件树与阅读器 / MCP 参数表 /
+    删除确认 / 未选工作区置灰）。
+- 版本号：`1.3.1`（在 1.3.0 已推送基础上的交互布局修订）。
+
 ## [1.3.0] - 2026-10-23
 
 ### 新增
@@ -11,7 +45,7 @@
   MCP = 项目 + 全局配置条目数、不含外部注入）。
 - **双作用域呈现（v2 形态，第三轮已演进）**：先在同一个列表里用「本项目 / 全局」两组同屏呈现
   （组头 = 标题 + 计数 + 一句说明，组内独立滚动，空组折叠为一行引导）；**第三轮改为左导航 +
-  项目按工作区下钻，见「变更 · 第三轮 IA 调整」**。
+  项目按工作区下钻，v7 再把工作区列表收进左导航，见「变更」两条 IA 调整**。
 - **行尾统一开关**：列表每行右端只有一个「label + 30×18 开关」，点击不改变选中、失败回滚、
   写后静默重拉。技能行 =「启用」（项目条目整体启停 `setEnabled`；全局条目 = 在本项目禁用/恢复
   `disableInProject` / `enableInProject`；项目屏蔽占位 = 恢复；只读、`项目副本生效中`、
@@ -31,17 +65,19 @@
 
 ### 变更
 
-- **第三轮 IA 调整**：头部第二行改为「域 Tab（左）+ 搜索框（右）」，删除视图内搜索 / 安装工具条；
+- **第三轮 IA 调整（v7 的基础）**：头部第二行改为「域 Tab（左）+ 搜索框（右）」，删除视图内搜索 / 安装工具条；
   左列新增 ScopeNav「全局 / 项目」，每行右端「+」为安装 / 添加入口（项目未选工作区时置灰）；
-  项目 scope 改为**工作区下钻**——先列全部工作区（名称 = 文件夹 basename、副标题 = 完整路径），
-  点选后才显示该工作区条目，顶部「‹ 工作区」返回；全局 scope 只显示全局条目，MCP 的
-  「外部注入」从独立第三组归入全局 scope 的第二组（保留组头与计数，仅非空时出现）。
+  项目 scope 改为**工作区下钻**——先选工作区再显示该工作区条目（v7 进一步把工作区列表移入
+  左导航，见上一条）；全局 scope 只显示全局条目，MCP 的「外部注入」从独立第三组归入全局
+  scope 的第二组（保留组头与计数，仅非空时出现）。
 - 删除上一版「同屏双组」布局与双组组头；详情宽度 864 → 694（内容 816 → 646），
   目录树 220 → 200、阅读器 580 → 430；内容宽 < 632 时目录树折叠为下拉的阈值随之调整。
-- 搜索语义收敛：只过滤**当前列表**（全局列表 / 工作区列表 / 某工作区条目），不跨 scope；
-  切 scope / 工作区保留搜索词，切域清空；技能全局标题在搜索时显示「匹配/总数」。
-- 空态按 scope 重划：全局空态、工作区列表空态、项目空态、无工作区提示；全局条目在
-  未选工作区时项目级动作（安装到本项目 / 在本项目禁用 / 行尾开关）置灰。
+- 搜索语义收敛：只过滤**当前可见列表**，不跨 scope；**未选工作区时过滤左导航工作区名/路径，
+  已选后工作区列表保持完整、只过滤中间列条目**（v7 口径）；切 scope / 工作区保留搜索词，
+  切域清空；技能全局标题在搜索时显示「匹配/总数」。
+- 空态按 scope 重划：全局空态、左导航工作区空态（没有工作区 / 无匹配）、中间列「请选择左侧
+  工作区」提示、项目空态；全局条目在未选工作区时项目级动作（安装到本项目 / 在本项目禁用 /
+  行尾开关）置灰。
 - 面板 IA（上一轮）：取消「项目 / 全局」二选一 Tab（删除 `ZoneTabs`），域 Tab 只剩技能 / MCP；
   头部「项目作用域」钉选行为不变（第三轮保留，并与左导航工作区选择共用同一状态）。
 - 列表行：删除行内文字动作按钮（安装 / 禁用 / 导出 / 删除等），其余动作全部收进详情动作区；
@@ -84,9 +120,9 @@
     mutation-negative-control `controlOk:true`、composer-api-cache 7/7、workspace-items-key 10/10、
     api-two-instances 17/17、loader-behavior 81/81、probe-connectivity 12/12、
     mcp-connectivity-baseline PASS、lib 产物 loader 81/81。
-  - `node notes/verify/panel-upgrade.test.mjs` — 55/55（第三轮 IA：2 Tab / 左导航与「+」/ 工作区下钻
-    与返回 / 当前列表搜索 / 行尾开关语义 / 文件树与阅读器 / 源码视图 / MCP 全局两组与参数表 /
-    删除确认 / 未选工作区置灰）。
+  - `node notes/verify/panel-upgrade.test.mjs` — 55/55（第三轮 IA：2 Tab / 左导航与「+」/
+    工作区下钻与返回 / 当前列表搜索 / 行尾开关语义 / 文件树与阅读器 / 源码视图 / MCP 两组与
+    参数表 / 删除确认 / 未选工作区置灰）。
 - 版本号：`1.3.0`（本批功能与移除均属用户可见变更，minor bump）。
 
 ## [1.2.0] - 2026-10-23
@@ -332,6 +368,7 @@
   输出总量上限（对接入的压缩包上限之下再拦一层"膨胀内存"），并修复
   数据区越界被静默截断、短归档负面偏移读越界的问题（zip bomb 防护）。
 
+[1.3.1]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.0.2...v1.1.0

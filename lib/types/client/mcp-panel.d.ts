@@ -2,14 +2,14 @@
  * Capability Panel 的 MCP 域视图。
  *
  * 布局与 Skills 域**同构**：左侧「全局 / 项目」作用域导航（ScopeNav）+ 中间
- * 列 + 右侧详情。项目 scope 下中间列先列出所有工作区（名称 = 目录 basename，
- * 副标题 = 完整路径），点选后才显示该工作区 `/.mcp.json` 的条目，顶部
- * 「‹ 工作区」可返回重选；全局 scope 显示 `~/.agents/mcp.json` 条目，并把
- * 「外部注入」（其它插件 / profile 在运行时挂载的 mcp-client）作为**第二组**
- * 只读展示（保留组头与计数，为空时不占位）。搜索框在根组件头部，由 `query`
- * prop 传入，只过滤当前列表（全局 → server 名/summary；项目未选工作区 →
- * 工作区名；项目已选 → server）。组容器样式由 styles.ts 的 `.skp-group*`
- * 统一提供（与 Skills 域共用同一套）。
+ * 列 + 右侧详情。项目 scope 下，工作区列表挂在 ScopeNav「项目」行下方（名称 =
+ * 目录 basename，点选后钉选该项目，列表自身滚动；全局 scope 隐藏）；中间列只
+ * 渲染当前列表标题与条目，未选工作区时显示「请选择左侧工作区」。全局 scope 显示
+ * `~/.agents/mcp.json` 条目，并把「外部注入」（其它插件 / profile 在运行时挂载的
+ * mcp-client）作为**第二组**只读展示（保留组头与计数，为空时不占位）。搜索框在
+ * 根组件头部，由 `query` prop 传入，只过滤当前列表（全局 → server 名/summary；
+ * 项目未选工作区 → 左侧工作区名/路径；项目已选 → server）。组容器样式由
+ * styles.ts 的 `.skp-group*` / `.skp-scope-workspaces*` 统一提供（与 Skills 域共用）。
  *
  * 行 = 状态点 + 名称 + 标签（项目/全局/引用/导入/外部 + stdio/http +
  * 默认关闭/被遮蔽）+ meta（挂载状态 · 工具数）+ 命令/URL 摘要 + 行尾

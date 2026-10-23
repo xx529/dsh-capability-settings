@@ -391,7 +391,7 @@ function SkillsView({
     [projects, q],
   );
 
-  /** 项目 scope 且尚未选择工作区 → 中间列先显示工作区选择列表。 */
+  /** 项目 scope 且尚未选择工作区 → 中间列只显示空态，工作区列表在左导航内。 */
   const showWorkspacePicker = scope === "project" && pinned === undefined;
   /** 当前中间列可选的技能行（决定键盘导航与关系互跳的落点）。 */
   const visibleSkills = useMemo(
@@ -604,23 +604,33 @@ function SkillsView({
     );
   };
 
-  /** 项目 scope 未选工作区：工作区选择列表（点击 = 进入该工作区）。 */
-  const renderWorkspaceList = () => {
-    if (workspaceVisible.length === 0) {
-      return <div className="skp-empty">{q.length > 0 ? `没有匹配「${query.trim()}」的工作区。` : "还没有工作区。"}</div>;
+  /**
+   * ScopeNav「项目」行下方的工作区列表（仅 project scope 渲染，nav 内自身滚动）。
+   * 未选工作区时跟随搜索词过滤名称/路径；已选中工作区时保持完整列表方便切换。
+   */
+  const renderScopeWorkspaces = () => {
+    const list = pinned === undefined ? workspaceVisible : projects;
+    if (list.length === 0) {
+      return <div className="skp-scope-empty">{pinned === undefined && q.length > 0 ? "无匹配" : "没有工作区"}</div>;
     }
     return (
-      <div className="skp-group-scroll">
-        <ul className="skp-list" role="listbox" aria-label="工作区">
-          {workspaceVisible.map((project) => (
-            <li key={project.path} role="presentation">
-              <button type="button" className="skp-workspace-row" title={project.path} onClick={() => chooseWorkspace(project.path)}>
-                <span className="skp-workspace-name">{basenameOf(project.path)}</span>
-                <span className="skp-workspace-path">{project.path}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
+      <div className="skp-scope-workspaces" role="listbox" aria-label="工作区">
+        {list.map((project) => {
+          const active = project.path === pinned;
+          return (
+            <button
+              key={project.path}
+              type="button"
+              role="option"
+              aria-selected={active}
+              className={active ? "skp-scope-workspace skp-scope-workspace-active" : "skp-scope-workspace"}
+              title={project.path}
+              onClick={() => chooseWorkspace(project.path)}
+            >
+              <span className="skp-scope-workspace-name">{basenameOf(project.path)}</span>
+            </button>
+          );
+        })}
       </div>
     );
   };
@@ -731,40 +741,39 @@ function SkillsView({
 
       {!loading && error === undefined && (
         <div className="skp-body">
-          {/* 左侧作用域导航：全局 / 项目（项目需先选工作区才能安装）。 */}
+          {/* 左侧作用域导航：全局 / 项目 +（project scope 时）工作区列表。 */}
           <nav className="skp-scope-nav" aria-label="技能作用域">
             {renderScopeItem("global", "全局", globalItems.length)}
             {renderScopeItem("project", "项目", pinned === undefined ? "—" : projectItems.length)}
+            {scope === "project" && renderScopeWorkspaces()}
           </nav>
 
-          {/* 中间列：全局技能 / 工作区选择 / 本项目技能。 */}
+          {/* 中间列：只渲染当前列表标题 + 条目；未选工作区时显示空态引导。 */}
           <div className="skp-workspace-pane">
-            {scope === "project" && pinned !== undefined && (
-              <button type="button" className="skp-pane-back" onClick={() => chooseWorkspace(undefined)}>
-                ‹ 工作区
-              </button>
-            )}
             <div className="skp-pane-title">
               {scope === "global" ? (
                 <>
                   <span className="skp-pane-title-text">全局技能</span>
                   <span className="skp-group-count">{globalVisible.length}</span>
                 </>
-              ) : showWorkspacePicker ? (
-                <>
-                  <span className="skp-pane-title-text">选择工作区</span>
-                  <span className="skp-group-count">{workspaceVisible.length}</span>
-                </>
+              ) : pinned === undefined ? (
+                <span className="skp-pane-title-text">项目</span>
               ) : (
                 <>
                   <span className="skp-pane-title-text" title={pinned}>
-                    {basenameOf(pinned ?? "")}
+                    {basenameOf(pinned)}
                   </span>
                   <span className="skp-group-count">{projectVisible.length}</span>
                 </>
               )}
             </div>
-            {scope === "global" ? renderSkillList(globalVisible, "global") : showWorkspacePicker ? renderWorkspaceList() : renderSkillList(projectVisible, "project")}
+            {scope === "global" ? (
+              renderSkillList(globalVisible, "global")
+            ) : pinned === undefined ? (
+              <div className="skp-empty">请选择左侧工作区</div>
+            ) : (
+              renderSkillList(projectVisible, "project")
+            )}
           </div>
 
           <div className="skp-detail skp-detail-fixed">
@@ -790,7 +799,7 @@ function SkillsView({
                 {items.length === 0
                   ? "还没有任何技能。技能让 agent 在特定任务上按固定做法工作。"
                   : scope === "project" && showWorkspacePicker
-                    ? "先选择一个工作区，再查看或安装本项目技能。"
+                    ? "请选择左侧工作区，再查看或安装本项目技能。"
                     : "选择一个技能查看说明与全部文件内容。"}
               </div>
             )}

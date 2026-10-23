@@ -2,14 +2,14 @@
  * Capability Panel 的 MCP 域视图。
  *
  * 布局与 Skills 域**同构**：左侧「全局 / 项目」作用域导航（ScopeNav）+ 中间
- * 列 + 右侧详情。项目 scope 下中间列先列出所有工作区（名称 = 目录 basename，
- * 副标题 = 完整路径），点选后才显示该工作区 `/.mcp.json` 的条目，顶部
- * 「‹ 工作区」可返回重选；全局 scope 显示 `~/.agents/mcp.json` 条目，并把
- * 「外部注入」（其它插件 / profile 在运行时挂载的 mcp-client）作为**第二组**
- * 只读展示（保留组头与计数，为空时不占位）。搜索框在根组件头部，由 `query`
- * prop 传入，只过滤当前列表（全局 → server 名/summary；项目未选工作区 →
- * 工作区名；项目已选 → server）。组容器样式由 styles.ts 的 `.skp-group*`
- * 统一提供（与 Skills 域共用同一套）。
+ * 列 + 右侧详情。项目 scope 下，工作区列表挂在 ScopeNav「项目」行下方（名称 =
+ * 目录 basename，点选后钉选该项目，列表自身滚动；全局 scope 隐藏）；中间列只
+ * 渲染当前列表标题与条目，未选工作区时显示「请选择左侧工作区」。全局 scope 显示
+ * `~/.agents/mcp.json` 条目，并把「外部注入」（其它插件 / profile 在运行时挂载的
+ * mcp-client）作为**第二组**只读展示（保留组头与计数，为空时不占位）。搜索框在
+ * 根组件头部，由 `query` prop 传入，只过滤当前列表（全局 → server 名/summary；
+ * 项目未选工作区 → 左侧工作区名/路径；项目已选 → server）。组容器样式由
+ * styles.ts 的 `.skp-group*` / `.skp-scope-workspaces*` 统一提供（与 Skills 域共用）。
  *
  * 行 = 状态点 + 名称 + 标签（项目/全局/引用/导入/外部 + stdio/http +
  * 默认关闭/被遮蔽）+ meta（挂载状态 · 工具数）+ 命令/URL 摘要 + 行尾
@@ -511,8 +511,7 @@ export function McpView({
     return () => window.clearTimeout(timer);
   }, [settling, data, reload]);
 
-  const noWorkspace = !hasWorkspaceLabel(workspace);
-  /** 项目 scope 下已钉选的工作区（未选 = 先显示工作区列表）。 */
+  /** 项目 scope 下已钉选的工作区（未选 = 中间列提示先选左侧工作区）。 */
   const projectPath = pinned;
   const projectName = projectPath === undefined ? undefined : (projects.find((project) => project.path === projectPath)?.title ?? baseName(projectPath));
 
@@ -547,6 +546,8 @@ export function McpView({
     if (q.length === 0) return true;
     return baseName(project.path).toLowerCase().includes(q) || project.path.toLowerCase().includes(q);
   });
+  /** 左侧导航工作区列表：未选工作区时搜索过滤（已选工作区时搜索只过滤服务器）。 */
+  const navProjects = projectPath === undefined ? visibleProjects : projects;
 
   const selectedServer = servers.find((s) => rowId(s) === selected);
   const selectedExternal =
@@ -627,13 +628,6 @@ export function McpView({
     setAddOpen(true);
   };
 
-  /** 回到工作区列表（并清空当前工作区钉选与选中）。 */
-  const backToWorkspaces = () => {
-    setSelected(undefined);
-    setSelectedExternalName(undefined);
-    onSelectWorkspace(undefined);
-  };
-
   /** ScopeNav 一行：作用域名 + 计数 + 右侧「+」添加入口（与技能域同构）。 */
   const renderScopeItem = (target: McpNavScope, label: string, count: number | string) => {
     const disabled = target === "project" && projectPath === undefined;
@@ -651,6 +645,37 @@ export function McpView({
         <button type="button" className="skp-scope-add" disabled={disabled} title={title} aria-label={title} onClick={() => openAdd(target)}>
           +
         </button>
+      </div>
+    );
+  };
+
+  /**
+   * ScopeNav「项目」行下方的工作区列表（仅 project scope 渲染，nav 内自身滚动）。
+   * 未选工作区时跟随搜索词过滤名称/路径；已选中工作区时保持完整列表方便切换。
+   */
+  const renderScopeWorkspaces = () => {
+    const list = navProjects;
+    if (list.length === 0) {
+      return <div className="skp-scope-empty">{projectPath === undefined && searching ? "无匹配" : "没有工作区"}</div>;
+    }
+    return (
+      <div className="skp-scope-workspaces" role="listbox" aria-label="工作区">
+        {list.map((project) => {
+          const active = project.path === projectPath;
+          return (
+            <button
+              key={project.path}
+              type="button"
+              role="option"
+              aria-selected={active}
+              className={active ? "skp-scope-workspace skp-scope-workspace-active" : "skp-scope-workspace"}
+              title={project.path}
+              onClick={() => onSelectWorkspace(project.path)}
+            >
+              <span className="skp-scope-workspace-name">{baseName(project.path)}</span>
+            </button>
+          );
+        })}
       </div>
     );
   };
@@ -689,34 +714,6 @@ export function McpView({
       );
     }
     return renderServerScroll(list, group === "global" ? "全局 MCP 服务器" : "本项目 MCP 服务器");
-  };
-
-  /** 项目 scope 未选工作区：工作区选择列表（点击 = 进入该工作区）。 */
-  const renderWorkspaceList = () => {
-    if (projects.length === 0) {
-      return (
-        <div className="skp-empty">
-          {noWorkspace ? "当前没有关联工作区，无法读写项目 .mcp.json。" : "还没有工作区。"}
-        </div>
-      );
-    }
-    if (visibleProjects.length === 0) {
-      return <div className="skp-empty">没有匹配「{trimmedQuery}」的工作区。</div>;
-    }
-    return (
-      <div className="skp-group-scroll">
-        <ul className="skp-list" role="listbox" aria-label="工作区">
-          {visibleProjects.map((project) => (
-            <li key={project.path} role="presentation">
-              <button type="button" className="skp-workspace-row" title={project.path} onClick={() => onSelectWorkspace(project.path)}>
-                <span className="skp-workspace-name">{baseName(project.path)}</span>
-                <span className="skp-workspace-path">{project.path}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
-    );
   };
 
   /** 全局 scope 的第二组：外部注入（只读，保留组头与计数；为空时不占位）。 */
@@ -759,15 +756,12 @@ export function McpView({
           <nav className="skp-scope-nav" aria-label="MCP 作用域">
             {renderScopeItem("global", "全局", globalServers.length)}
             {renderScopeItem("project", "项目", projectPath === undefined ? "—" : projectServers.length)}
+            {/* 工作区列表：仅项目 scope 显示，挂在「项目」行下方（v7 原型；列表自身滚动）。 */}
+            {scope === "project" && renderScopeWorkspaces()}
           </nav>
 
-          {/* 中间列：全局 MCP（+外部注入）/ 工作区选择 / 本工作区项目 MCP。 */}
+          {/* 中间列：全局 MCP（+外部注入）/ 未选工作区提示 / 本工作区项目 MCP。 */}
           <div className="skp-workspace-pane">
-            {scope === "project" && projectPath !== undefined && (
-              <button type="button" className="skp-pane-back" onClick={backToWorkspaces}>
-                ‹ 工作区
-              </button>
-            )}
             <div className="skp-pane-title">
               {scope === "global" ? (
                 <>
@@ -775,14 +769,11 @@ export function McpView({
                   <span className="skp-group-count">{visibleGlobal.length}</span>
                 </>
               ) : projectPath === undefined ? (
-                <>
-                  <span className="skp-pane-title-text">选择工作区</span>
-                  <span className="skp-group-count">{visibleProjects.length}</span>
-                </>
+                <span className="skp-pane-title-text">本项目</span>
               ) : (
                 <>
                   <span className="skp-pane-title-text" title={projectPath}>
-                    {projectName ?? baseName(projectPath)}
+                    {baseName(projectPath)}
                   </span>
                   <span className="skp-group-count">{visibleProject.length}</span>
                 </>
@@ -800,7 +791,7 @@ export function McpView({
                 </>
               )
             ) : projectPath === undefined ? (
-              renderWorkspaceList()
+              <div className="skp-empty">请选择左侧工作区。</div>
             ) : (
               renderServerList(visibleProject, "project")
             )}
