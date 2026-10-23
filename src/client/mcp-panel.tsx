@@ -248,7 +248,7 @@ function McpServerRow({
           : { label: "项目", className: "skp-tag skp-tag-project" };
   const defaultOff = server.enabled !== false && server.disabledInProject === true;
   return (
-    <li className="skp-row-wrap">
+    <li className={selected ? "skp-row-wrap skp-row-wrap-active" : "skp-row-wrap"}>
       <button type="button" className={selected ? "skp-row skp-row-active" : "skp-row"} style={{ minHeight: 72 }} onClick={onSelect}>
         <span className="skp-row-name">
           <span className={dot.className} style={dot.style} title={rowDotTitle(server, mount)} />
@@ -322,7 +322,7 @@ function McpExternalRow({
   const meta = server.calls > 0 ? `${toolText} · 调用 ${server.calls} 次` : toolText;
   const summary = server.summary ?? "运行时注入，不由能力面板管理（只读）";
   return (
-    <li className="skp-row-wrap">
+    <li className={selected ? "skp-row-wrap skp-row-wrap-active" : "skp-row-wrap"}>
       <button type="button" className={selected ? "skp-row skp-row-active" : "skp-row"} style={{ minHeight: 72 }} onClick={onSelect}>
         <span className="skp-row-name">
           <span className={dot.className} style={dot.style} title={defaultOff ? "默认关闭（新建对话不启用）" : "运行时注入的实例"} />
@@ -670,7 +670,10 @@ export function McpView({
               aria-selected={active}
               className={active ? "skp-scope-workspace skp-scope-workspace-active" : "skp-scope-workspace"}
               title={project.path}
-              onClick={() => onSelectWorkspace(project.path)}
+              onClick={() => {
+                setScope("project");
+                onSelectWorkspace(project.path);
+              }}
             >
               <span className="skp-scope-workspace-name">{baseName(project.path)}</span>
             </button>
@@ -756,8 +759,8 @@ export function McpView({
           <nav className="skp-scope-nav" aria-label="MCP 作用域">
             {renderScopeItem("global", "全局", globalServers.length)}
             {renderScopeItem("project", "项目", projectPath === undefined ? "—" : projectServers.length)}
-            {/* 工作区列表：仅项目 scope 显示，挂在「项目」行下方（v7 原型；列表自身滚动）。 */}
-            {scope === "project" && renderScopeWorkspaces()}
+            {/* 工作区列表：挂在「项目」行下方，两种 scope 都保留（列表自身滚动）。 */}
+            {renderScopeWorkspaces()}
           </nav>
 
           {/* 中间列：全局 MCP（+外部注入）/ 未选工作区提示 / 本工作区项目 MCP。 */}

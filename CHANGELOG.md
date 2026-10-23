@@ -3,6 +3,32 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.3.2] - 2026-10-23
+
+### 修复
+
+- **全局 scope 下左侧工作区列表被隐藏**：v7 实现只在 project scope 渲染工作区列表，
+  点「全局」后列表消失、无法直接切到其它工作区。现在两种 scope 都保留「项目」下方的工作区
+  列表；点任一工作区会切回 project scope 并钉选该工作区。
+- **MCP 行 hover/选中底色错位**：底色原先只落在左侧卡片（`.skp-row`），右侧「默认」开关
+  落在底色之外，hover 时像被切成两块。现在 hover/选中底色放在整行 wrapper
+  （`.skp-row-wrap` / `.skp-row-wrap-active`），右侧开关与卡片处于同一块高亮内。
+
+### 内部
+
+- `src/client/panel.tsx` / `mcp-panel.tsx`：工作区列表去掉 scope 条件；选中工作区时
+  `setScope("project")`；MCP 行 `<li>` 增加选中类。
+- `src/client/styles.ts`：`.skp-row-wrap` 承载 hover/选中底色，`.skp-row` 在其内透明。
+- 构建 / 测试：
+  - `pnpm typecheck` — exit 0，无类型错误。
+  - `pnpm build` — exit 0；`lib/client.js` 345.06 kB（gzip 82.64 kB）、`lib/client.map` 532.45 kB。
+  - `bash notes/verify/run-all.sh` — exit 0（render-smoke 20/20、bug1-e2e 21/21、
+    mutation controlOk:true、loader-behavior 81/81、probe-connectivity 12/12、baseline PASS 等）。
+  - `node notes/verify/panel-upgrade.test.mjs` — **75/75**（新增：两种 scope 下 nav 工作区列表
+    均可见；全局态点工作区 → 项目 scope + selectProject + 条目；MCP 选中行 `.skp-row-wrap-active`；
+    CSS 含整行 hover 规则）。
+- 版本号：`1.3.2`（交互缺陷修复）。
+
 ## [1.3.1] - 2026-10-23
 
 ### 变更
@@ -368,6 +394,7 @@
   输出总量上限（对接入的压缩包上限之下再拦一层"膨胀内存"），并修复
   数据区越界被静默截断、短归档负面偏移读越界的问题（zip bomb 防护）。
 
+[1.3.2]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.1.0...v1.2.0

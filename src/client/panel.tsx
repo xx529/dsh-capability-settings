@@ -452,6 +452,8 @@ function SkillsView({
 
   /** 选择 / 清除工作区：清空选中，写回面板钉选状态（列表随 workspace 重拉）。 */
   const chooseWorkspace = (path?: string) => {
+    // 点工作区 = 进入项目 scope（全局态下也保留工作区列表，点选即切回项目）。
+    setScope("project");
     setSelected(undefined);
     setPendingSelect(undefined);
     onSelectWorkspace(path);
@@ -741,11 +743,11 @@ function SkillsView({
 
       {!loading && error === undefined && (
         <div className="skp-body">
-          {/* 左侧作用域导航：全局 / 项目 +（project scope 时）工作区列表。 */}
+          {/* 左侧作用域导航：全局 / 项目 + 工作区列表（两种 scope 都保留）。 */}
           <nav className="skp-scope-nav" aria-label="技能作用域">
             {renderScopeItem("global", "全局", globalItems.length)}
             {renderScopeItem("project", "项目", pinned === undefined ? "—" : projectItems.length)}
-            {scope === "project" && renderScopeWorkspaces()}
+            {renderScopeWorkspaces()}
           </nav>
 
           {/* 中间列：只渲染当前列表标题 + 条目；未选工作区时显示空态引导。 */}
