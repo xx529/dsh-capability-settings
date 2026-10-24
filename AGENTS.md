@@ -75,6 +75,22 @@ danger-full-access 审批重试同一条命令即可。手动兜底通道仍是 
 
 ---
 
+## 插件市场收录（awesome-dsh-plugin）
+
+市场 <https://awesome-dsh-plugin.com/> 的目录唯一来源是上游仓库
+`awesome-dsh-plugin/awesome-dsh-plugin` 的 `data/plugins/<owner>__<repo>.yml`
+（一个插件一个文件，README 与站点自动生成）。本仓库条目的副本在
+`docs/marketplace/awesome-dsh-plugin.yml`，提交流程 / CI 检查 / PR 模板在
+`docs/marketplace/README.md`——要改描述或重新提交时照那份文档走，不要重新探索。
+
+- 收录门槛：`dsh.bundle`（本仓库已满足）+ 仓库 `dsh-plugin` topic + 仓库满 1 天 +
+  **描述与代码一致**（评审逐条核对，夸大是主要打回原因）；
+- 本仓库条目：`data/plugins/xx529__dsh-capability-settings.yml`，分类 `ui`；
+- 改包名 / 插件能力时同步改这份 yml（两处：本仓库副本 + 上游 PR），一个 PR 只动自己这一条；
+- 未发 npm / Release tarball：源码安装走已提交的 `lib/`，市场条目无需 `tarball:`。
+
+---
+
 ## 架构地图（src/）
 
 | 文件 | 职责 |

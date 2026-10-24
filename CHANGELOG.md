@@ -30,6 +30,12 @@
   重启。参数：`--dry-run` / `--profile` / `--ref` / `--remote` / `--dsh-home` /
   `--dsh-cli` / `--no-push` / `--no-install` / `--no-build` / `--force-reinstall` /
   `--force`。AGENTS.md 与 README 新增「推送 + 重装」说明，后续不需要再探索安装方式。
+- **收录到 Awesome DSH Plugin 市场**（<https://awesome-dsh-plugin.com/>）：上游目录为
+  `data/plugins/<owner>__<repo>.yml` 单文件条目，本次新增
+  `data/plugins/xx529__dsh-capability-settings.yml`（分类 `ui`）。条目副本与提交流程 /
+  CI 检查 / PR 模板沉淀在 `docs/marketplace/`（`awesome-dsh-plugin.yml` + `README.md`），
+  AGENTS.md 增加「插件市场收录」章节：改包名或插件能力时同步改市场条目，避免描述与
+  代码不一致被评审打回。
 
 ## [1.4.2] - 2026-10-24
 
