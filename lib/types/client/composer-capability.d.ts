@@ -29,12 +29,20 @@ export interface CapabilitySnapshot {
     mounts: Record<string, MountInfo>;
     settling: boolean;
 }
+/** 卡片底部的来源标签配色（项目蓝 / 全局绿 / 内置琥珀 / 插件紫 / 预设灰 / 外部橙）。 */
+type TagTone = "project" | "global" | "bundled" | "plugin" | "preset" | "external";
 export interface SkillRow {
     id: string;
     kind: "skill";
     name: string;
     description: string;
     tag: string;
+    /** 来源标签配色（与 tag 文案配对）。 */
+    tone: TagTone;
+    /** 注入行的注入方 / 渠道名（如 `dsh-to-figma` / `cordis`）；磁盘行缺省。 */
+    channel?: string;
+    /** true = 宿主 registry 注入行（来源标签 + 渠道小标签，内容只读但可在会话启停）。 */
+    injected?: boolean;
     enabled: boolean;
     disabled: boolean;
     meta?: string;
@@ -44,6 +52,7 @@ export interface McpRow {
     kind: "mcp";
     name: string;
     tag: string;
+    tone: TagTone;
     meta: string;
     enabled: boolean;
     disabled: boolean;

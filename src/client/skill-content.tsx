@@ -58,6 +58,13 @@ interface SkillFile {
   /** 文本内容（二进制时为空串）；超 256 KB 时只含前 256 KB。 */
   text: string;
   truncated: boolean;
+  /**
+   * 注入行的资源文件：正文按需读取（`skills.readResource`），避免一次拉全
+   * 目录内容。`done` / 缺省 = 已有正文；`idle` = 尚未请求；`error` = 读取失败。
+   */
+  lazyState?: "idle" | "loading" | "error" | "done";
+  /** 懒加载失败的可读原因。 */
+  lazyError?: string;
 }
 
 interface TreeNode {
@@ -78,6 +85,10 @@ type LoadState =
       status: "ready";
       files: SkillFile[];
       root: TreeNode;
+      /** 注入行的一层目录名（registry 只给条目名，目录无文件清单）。 */
+      dirs: string[];
+      /** 注入行的资源基准说明（url / opaque 基准不可浏览时展示）。 */
+      note?: string;
       /** 导出清单里的文件总数（含隐藏/超深/被 200 上限截掉的）。 */
       totalCount: number;
       shownCount: number;
@@ -155,8 +166,24 @@ function sortFiles<T extends { path: string }>(files: T[]): T[] {
   return skill === undefined ? rest : [skill, ...rest];
 }
 
-/** 以文件清单构建树（目录由路径前缀推导）；同层 SKILL.md → 目录 → 文件 → 名称。 */
-function buildTree(files: SkillFile[], rootName: string): TreeNode {
+/** 文本 → SkillFile（注入技能正文：没有 base64 往返）。 */
+function textFile(path: string, text: string, truncated = false): SkillFile {
+  const bytes = new TextEncoder().encode(text);
+  return { path, bytes, size: bytes.length, binary: false, text, truncated, lazyState: "done" };
+}
+
+/** 注入行资源条目：没有扩展名 ⇒ 视作目录（registry 只列一层条目名）。 */
+function looksLikeDirectory(name: string): boolean {
+  return !name.includes(".");
+}
+
+/** 注入行的空占位文件（正文按需通过 `skills.readResource` 读取）。 */
+function lazyFile(path: string): SkillFile {
+  return { path, bytes: new Uint8Array(), size: 0, binary: false, text: "", truncated: false, lazyState: "idle" };
+}
+
+/** 以文件清单构建树（目录由路径前缀推导；同层 SKILL.md → 目录 → 文件 → 名称）。 */
+function buildTree(files: SkillFile[], rootName: string, extraDirs: readonly string[] = []): TreeNode {
   const root: TreeNode = { name: rootName, path: "", kind: "root", depth: 0, children: [] };
   for (const file of files) {
     const segments = file.path.split("/");
@@ -170,6 +197,21 @@ function buildTree(files: SkillFile[], rootName: string): TreeNode {
         node = isLeaf
           ? { name: segment, path, kind: "file", depth: index + 1, file }
           : { name: segment, path, kind: "dir", depth: index + 1, children: [] };
+        parent.children.push(node);
+      }
+      parent = node;
+    });
+  }
+  // 注入行的空目录（registry 只给一层条目名，目录内文件无法枚举）。
+  for (const dir of extraDirs) {
+    const segments = dir.split("/");
+    let parent = root;
+    segments.forEach((segment, index) => {
+      const path = segments.slice(0, index + 1).join("/");
+      parent.children ??= [];
+      let node = parent.children.find((child) => child.path === path);
+      if (node === undefined) {
+        node = { name: segment, path, kind: "dir", depth: index + 1, children: [] };
         parent.children.push(node);
       }
       parent = node;
@@ -256,6 +298,57 @@ export function SkillContent({
     setSelectedPath(undefined);
     setCollapsed(new Set());
     setView("preview");
+
+    // 注入行没有磁盘目录：正文走 `skills.read` 的 registry fallback，资源
+    // 只拿到一层条目名，文件正文在选中时按需 `skills.readResource` 读取。
+    if (summary.injected === true) {
+      api
+        .read(summary.name, skillRefOf(summary))
+        .then((detail) => {
+          if (!alive || version !== resetVersion.current) return;
+          if (detail === undefined) {
+            setState({
+              status: "error",
+              message: `无法读取技能「${summary.name}」：它可能已被插件卸载，或需要先在会话中激活所属预设。`,
+            });
+            return;
+          }
+          const files: SkillFile[] = [textFile("SKILL.md", detail.body)];
+          const dirs: string[] = [];
+          for (const resource of detail.resources) {
+            if (isHiddenPath(resource)) continue;
+            if (looksLikeDirectory(resource)) {
+              dirs.push(resource);
+              continue;
+            }
+            files.push(lazyFile(resource));
+          }
+          const root = buildTree(files, summary.name, dirs);
+          setState({
+            status: "ready",
+            files,
+            root,
+            dirs,
+            ...(detail.resourceBaseNote !== undefined ? { note: detail.resourceBaseNote } : {}),
+            totalCount: files.length + dirs.length,
+            shownCount: files.length + dirs.length,
+            hiddenCount: 0,
+            deeperCount: 0,
+            overLimitCount: 0,
+          });
+          setSelectedPath("SKILL.md");
+          const index = flattenTree(root, new Set()).findIndex((row) => row.node.path === "SKILL.md");
+          setActiveIndex(index >= 0 ? index : 0);
+        })
+        .catch((error) => {
+          if (!alive || version !== resetVersion.current) return;
+          setState({ status: "error", message: String(error) });
+        });
+      return () => {
+        alive = false;
+      };
+    }
+
     api
       .exportFiles(skillRefOf(summary))
       .then((result) => {
@@ -278,6 +371,7 @@ export function SkillContent({
           status: "ready",
           files: shown,
           root,
+          dirs: [],
           totalCount: result.files.length,
           shownCount: shown.length,
           hiddenCount: hidden,
@@ -297,7 +391,7 @@ export function SkillContent({
     return () => {
       alive = false;
     };
-  }, [api, summary.name, summary.root, summary.source, refreshKey, retry]);
+  }, [api, summary.name, summary.root, summary.source, summary.injected, refreshKey, retry]);
 
   /** 监听内容区宽度，决定文件树宽度与是否折叠为下拉（UX §4.5）。 */
   useEffect(() => {
@@ -324,6 +418,55 @@ export function SkillContent({
     if (state.status !== "ready" || selectedPath === undefined) return undefined;
     return state.files.find((file) => file.path === selectedPath);
   }, [state, selectedPath]);
+
+  /** 就地更新一个文件对象（重建 root，保持树节点指向最新数据）。 */
+  const patchFile = (path: string, patch: Partial<SkillFile>) => {
+    setState((previous) => {
+      if (previous.status !== "ready") return previous;
+      const files = previous.files.map((file) => (file.path === path ? { ...file, ...patch } : file));
+      return { ...previous, files, root: buildTree(files, summary.name, previous.dirs) };
+    });
+  };
+
+  /**
+   * 注入行资源文件的懒加载：选中文件时按需 `skills.readResource`，避免打开
+   * 详情就拉取整目录。（宿主限制路径边界：`..` / 绝对路径 / 符号链接 / 超
+   * 256 KiB 都返回业务失败，这里原样展示原因。）
+   */
+  useEffect(() => {
+    if (summary.injected !== true || state.status !== "ready" || selectedPath === undefined) return;
+    const file = state.files.find((item) => item.path === selectedPath);
+    if (file === undefined || file.lazyState !== "idle") return;
+    let alive = true;
+    patchFile(file.path, { lazyState: "loading" });
+    api
+      .readResource({ name: summary.name, path: file.path })
+      .then((result) => {
+        if (!alive) return;
+        if (!result.ok) {
+          patchFile(file.path, { lazyState: "error", lazyError: result.errors.join("; ") });
+          return;
+        }
+        const bytes = new TextEncoder().encode(result.content);
+        patchFile(file.path, {
+          lazyState: "done",
+          text: result.content,
+          bytes,
+          size: result.size > 0 ? result.size : bytes.length,
+          binary: result.content.includes("\u0000"),
+          truncated: result.truncated,
+        });
+      })
+      .catch((error) => {
+        if (!alive) return;
+        patchFile(file.path, { lazyState: "error", lazyError: String(error) });
+      });
+    return () => {
+      alive = false;
+    };
+    // patchFile 每次渲染重建，刻意不加入依赖（避免自触发循环）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api, selectedPath, state, summary.injected, summary.name]);
 
   // 折叠树时把下拉的当前项对齐到已选文件（保持选中，不丢状态）。
   const showTree = summary.format !== "flat";
@@ -503,14 +646,19 @@ export function SkillContent({
                     {!isFile && (
                       <>
                         <span className="skp-tree-name">{node.name}/</span>
-                        <span className="skp-tree-count">{node.count ?? 0}</span>
+                        {/* 注入行的资源目录只给了一层条目名，子项无法枚举：不显示 0 计数。 */}
+                        {(node.count ?? 0) > 0 && <span className="skp-tree-count">{node.count}</span>}
                       </>
                     )}
                     {isFile && (
                       <>
                         <span className="skp-tree-badge">{fileTypeLabel(node.path)}</span>
                         <span className="skp-tree-name">{node.name}</span>
-                        <span className="skp-tree-size">{formatSize(node.file?.size ?? 0)}</span>
+                        <span className="skp-tree-size">
+                          {node.file?.lazyState === "idle" || node.file?.lazyState === "loading"
+                            ? "按需"
+                            : formatSize(node.file?.size ?? 0)}
+                        </span>
                       </>
                     )}
                   </div>
@@ -518,6 +666,9 @@ export function SkillContent({
               })}
             {state.status === "ready" && state.deeperCount > 0 && (
               <div className="skp-tree-note">…（{state.deeperCount} 个更深层文件未显示）</div>
+            )}
+            {state.status === "ready" && state.note !== undefined && (
+              <div className="skp-tree-note">{state.note}</div>
             )}
           </div>
         </div>
@@ -543,7 +694,9 @@ export function SkillContent({
           </span>
           {selectedFile !== undefined && (
             <span className="skp-reader-meta">
-              {formatSize(selectedFile.size)} · {fileTypeLabel(selectedFile.path)}
+              {selectedFile.lazyState === "idle" || selectedFile.lazyState === "loading"
+                ? "按需读取"
+                : `${formatSize(selectedFile.size)} · ${fileTypeLabel(selectedFile.path)}`}
             </span>
           )}
           <div className="skp-reader-seg" role="group" aria-label="内容视图">
@@ -564,11 +717,13 @@ export function SkillContent({
               源码
             </button>
           </div>
-          {selectedFile !== undefined && !selectedFile.binary && (
-            <button type="button" className="skp-link-btn skp-reader-copy" onClick={() => void copySelected()}>
-              {copied ? "已复制" : "复制全文"}
-            </button>
-          )}
+          {selectedFile !== undefined &&
+            !selectedFile.binary &&
+            (selectedFile.lazyState === undefined || selectedFile.lazyState === "done") && (
+              <button type="button" className="skp-link-btn skp-reader-copy" onClick={() => void copySelected()}>
+                {copied ? "已复制" : "复制全文"}
+              </button>
+            )}
         </div>
         <div className="skp-reader-body" tabIndex={0} aria-label={selectedFile === undefined ? "文件内容" : `${basename(selectedFile.path)} 内容`}>
           {state.status === "loading" && <ReaderSkeleton />}
@@ -583,13 +738,25 @@ export function SkillContent({
           {state.status === "ready" && selectedFile === undefined && (
             <div className="skp-reader-state skp-reader-state-muted">此技能没有可预览的文件</div>
           )}
-          {state.status === "ready" && selectedFile !== undefined && (
-            <ReaderContent
-              key={selectedFile.path}
-              file={selectedFile}
-              view={view}
-            />
+          {/* 注入行资源文件的懒加载态：请求中 / 失败。 */}
+          {state.status === "ready" && selectedFile !== undefined && selectedFile.lazyState === "loading" && <ReaderSkeleton />}
+          {state.status === "ready" && selectedFile !== undefined && selectedFile.lazyState === "error" && (
+            <div className="skp-reader-state">
+              <p className="skp-reader-error">资源读取失败：{selectedFile.lazyError ?? "未知错误"}</p>
+              <button
+                type="button"
+                className="skp-link-btn"
+                onClick={() => patchFile(selectedFile.path, { lazyState: "idle", lazyError: undefined })}
+              >
+                重试
+              </button>
+            </div>
           )}
+          {state.status === "ready" &&
+            selectedFile !== undefined &&
+            (selectedFile.lazyState === undefined || selectedFile.lazyState === "done") && (
+              <ReaderContent key={selectedFile.path} file={selectedFile} view={view} />
+            )}
         </div>
       </div>
     </div>

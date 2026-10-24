@@ -3,6 +3,98 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.5.0] - 2026-10-25
+
+### 新增
+
+- **注入技能来源展示（面板 / 会话 / 能力决策）**：新增宿主技能注册表桥
+  （`src/skills/registry.ts`），把 `ctx.get("skills").snapshot()` 里**不在受管
+  磁盘根**的条目 additive 合并进 `skills.list` / `skills.sessionList`：
+  - 面板「全局」scope 新增「注入技能」分组（计数 +「内容只读 · 可启停」说明）；
+    行内标签 = 来源类别（**内置** / **插件** / **预设**）+ 格式（目录 / `.md`）+
+    **渠道名**（`DSH 内置（Office）`、`dsh-to-figma`、`dsh-remote`、
+    `插件运行时注入`、preset id；preset 名解析失败显示「预设（未知）」，条目不丢）。
+    同名磁盘条目优先、本插件自身 shadow 被过滤、`project-*` / `user-*` 等宿主
+    磁盘根条目不算注入（面板磁盘视图是权威来源）。
+  - 会话能力区（首屏 hero / 顶部「能力」Tab）注入行与磁盘技能同列，带来源 +
+    渠道标签；开关仍只写当前会话。
+  - **能力决策结果行显示来源小标签**（内置 / 插件 / 预设渠道）：`rank` 回包
+    新增 additive `origin / channel / provider / contentReadOnly`，`jev.apply`
+    原样透传；旧宿主没有这些字段时按原样不显示，不影响评分/勾选/应用。
+- **注入技能的项目默认启停**：`capability-overrides.json` 新增 `skills` 域
+  （与 `mcp` 并列；空数组不落盘、旧文件无该键读成 `[]`）。面板注入行开关 =
+  「本项目默认」，写该名单；`agent/created` / 项目默认热更新时按名单在 agent
+  作用域注册同名 runtime shadow（注入技能没有磁盘文件，**不写 frontmatter**）。
+  优先级：显式会话开关 > 项目默认；会话显式可再打开/关闭（内存态、不落盘）。
+- **注入技能详情 / 资源读取 / 导出**：`skills.read` 增加 registry fallback
+  （磁盘读不到时用 `ctx.skills.get` 取正文）；新增 `skills.readResource`——
+  仅 `resourceBase.kind === "directory"` 允许浏览一层条目并按需读取单个文件
+  （基准目录只来自宿主；`../`、绝对路径、反斜杠、符号链接、realpath 逃逸、
+  非 UTF-8、超过 256 KiB 均返回带 `code` 的业务错误），`url` / `opaque` 只给
+  正文 + 说明。导出注入行为单文件正文快照（`lossy: true`，资源文件不打包）。
+- **Jev 枚举纳入注入技能**：`sessionList` 合并后自动进入 `enumerateCapabilities`，
+  评分 / 应用与磁盘技能完全一致（`capabilityId` 仍为 `skill:<name>`、`reason`
+  不新增枚举）；冷会话只含 global 层注入。
+- **RPC**：新增 `skills.readResource`；`overrides.get` 返回 `skills` 域、
+  `overrides.toggle` 支持 `domain: "skills"`。全部 additive，旧客户端忽略新字段。
+
+### 变更
+
+- 面板 / 会话技能列表从「仅受管磁盘根」改为「磁盘行 + registry 注入行」合并
+  视图；注入行 `source: "external"`、`format: "directory"`、
+  `contentReadOnly: true`、**不带 `root`**，因此所有写 RPC 在宿主侧一律返回
+  `read-only` 业务失败（不是只在 UI 隐藏按钮）。注入行不参与项目/全局的磁盘
+  归属判断，改由 `injected` / `origin` 单独渲染。
+- 会话技能视图 `enabledInSession` 由「是否注册 shadow」改为状态机
+  （显式会话覆盖 > 项目默认 > 始终可切换的既有语义），冷会话按项目默认给初值；
+  注入行被自己 shadow 遮蔽时用内存元数据缓存补行（仍可见、可再打开）。
+- 技能计数与搜索：注入行计入「全局」域计数（含只读、含注入、不去重）；
+  渠道名（插件 / preset 名）参与搜索。
+- 详情页对注入行隐藏 编辑 / 删除 / 导入 / 调用方向 / 导出到宿主路径 等写操作，
+  显示来源 + 渠道 + 只读原因条；保留 查看正文、浏览资源、导出 `.md`、启停。
+- **Figma 设计基线同步**：v12 提案（注入技能来源）**补丁式并入**基线——
+  `Capability Panel · 终稿 v8` 的 02 技能·全局帧（`42:3433`）新增「注入技能 5」分组
+  （`v12/group/*`）+ 5 个注入行（`v12/row/figma-workbench` / `dsh-remote-deploy` /
+  `dsh-diff-approval-annotate` / `office` / `office-docx`，来源标签 + 渠道名 + 本项目
+  默认开关；磁盘第 3–5 行与详情写按钮**隐藏不删**）并把详情切到注入技能
+  figma-workbench（只读原因条 `v12/detail/readonly`、`v12/meta/mode`、资源树
+  `v12/tree/*`、阅读器 `v12/reader/*`）；01 技能·项目帧（`42:3376`）仅同步左导航全局
+  计数 157；`Capability Panel · 能力决策 v11` 的 04 结果帧（`56:7679`，panel `56:7791`）
+  6 行结果新增来源标签（`v12/src/0..5`）、说明列右移、「已选 5 / 52」。
+  历史页面（v5 / v6 / v7 / v9 / v10 与 v12 提案页 `88:8519`）**全部保留不动**；
+  重导预览 `docs/figma/preview/v8-01-skills-project.png`（152633 B）、
+  `v8-02-skills-global.png`（165194 B）、`v11-04-results.png`（159880 B），以及
+  `docs/figma/scenes/v8-01-skills-project.scene.json`（264 节点）、
+  `v8-02-skills-global.scene.json`（278）、`v11-04-results.scene.json`（170）
+  （README 已注明旧截图不覆盖新 UI；scene 重导方式见 `docs/figma/README.md` §3.1.3）。
+
+### 修复
+
+- **项目技能详情恒 not found**：客户端 `api.read` 只传 `{name, cwd}`、且不解
+  业务信封，导致有 `root` 的项目技能详情打不开、失败被当成空详情。现在 `read`
+  传 `root`（优先）/ `scope` / `sessionId`，适配器用 `unwrap` 解业务信封；
+  注入行则由宿主回落到 registry。
+- **`overrides.toggle` 会抹掉其它域**：旧实现写盘时重建 `{ mcp: [...] }` 硬编码，
+  新增 `skills` 域后切换一个域会清掉另一个域的名单。改为按 `DOMAIN_KEYS`
+  （`mcp` / `skills`）重建。
+- **降级路径（不误判为缺陷）**：宿主 registry 缺失 / `snapshot` 抛错 → 只显示
+  磁盘技能并 `warn` 一次，磁盘功能不受影响；`snapshot.complete === false` →
+  不更新 last-good、沿用上次缓存；`skills/change` / `agent/disposed` 清缓存；
+  注入插件卸载后条目随 `skills/change` 刷新、不留死行；`origin=preset` 技能在
+  冷会话（无 live agent）不可见是宿主 scope 语义的上游边界，文档与空态已写明
+  「会话开始后可评分」。
+
+### 内部
+
+- 新增 `src/skills/registry.ts`（分类表为 `origin/channel` 的单一事实源、合并、
+  detail fallback、资源边界、导出快照、LRU 元数据缓存）；`src/skills/session.ts`
+  扩展项目默认 / 显式开关 / reconcile 校验；`src/skills/{types,manager,crud,
+  disk,transfer}.ts`、`src/overrides/*`、`src/remote.ts`、`src/index.ts`、
+  `src/jev/{apply,types}.ts`、`src/client/*` 做字段透传与 UI；契约与证据见
+  `docs/architecture/skill-sources.md`（task-1）。
+- 不新增运行时依赖；客户端 bundle 仍只外置 `react` / `react/jsx-runtime`；
+  写入仍走 `atomicWriteText` + `withFileLock`。
+
 ## [1.4.3] - 2026-10-24
 
 ### 修复
@@ -624,6 +716,7 @@
   输出总量上限（对接入的压缩包上限之下再拦一层"膨胀内存"），并修复
   数据区越界被静默截断、短归档负面偏移读越界的问题（zip bomb 防护）。
 
+[1.5.0]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.4.3...v1.5.0
 [1.4.3]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.4.0...v1.4.1

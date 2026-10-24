@@ -62,6 +62,8 @@ export interface PanelRpcService {
      */
     setSessionEnabled(input: unknown): Promise<unknown>;
     read(input: unknown): Promise<unknown>;
+    /** 读取注入技能的资源文件（路径边界见 skills/registry.ts；业务失败在 value.code 里）。 */
+    readResource(input: unknown): Promise<unknown>;
     create(input: unknown): Promise<unknown>;
     update(input: unknown): Promise<unknown>;
     remove(input: unknown): Promise<unknown>;
@@ -139,6 +141,10 @@ export async function handleEndpoint(service: PanelRpcService, endpoint: string,
         return { ok: true, value: await service.skills.setSessionEnabled(p) };
       case "skills.read":
         return { ok: true, value: await service.skills.read(p) };
+      case "skills.readResource":
+        // 注入技能的资源读取：业务失败（escape / too-large / not-text …）
+        // 收进 value.ok=false + value.code，传输层信封仍恒 ok:true。
+        return { ok: true, value: await service.skills.readResource(p) };
       case "skills.create":
         return { ok: true, value: await service.skills.create(p) };
       case "skills.update":

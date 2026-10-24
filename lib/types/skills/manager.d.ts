@@ -13,12 +13,26 @@
  *
  * @module dsh-capability-settings/skills/manager
  */
-import type { TransferFile } from "./transfer.js";
+import type { ReadResult } from "./crud.js";
+import type { TransferFile, TransferResult } from "./transfer.js";
 import type { SkillFormat, SkillSummaryView, WritableScope } from "./types.js";
+import type { SkillRegistryBridge } from "./registry.js";
 /** 服务的构造依赖（用于覆盖默认目录解析）。 */
 export interface ManagerDeps {
     dshHome?: string;
     agentsHome?: string;
+    /**
+     * 宿主技能注册表桥（见 `skills/registry.ts`）：提供注入技能的详情/资源/
+     * 导出 fallback，以及写操作对注入行的 `read-only` 拦截。缺省时行为与旧版
+     * 完全一致（纯磁盘）。
+     */
+    registry?: SkillRegistryBridge;
+}
+/** 写操作失败（业务信封里的失败支；`code` 供客户端区分降级原因）。 */
+export interface SkillWriteFailure {
+    ok: false;
+    errors: string[];
+    code?: string;
 }
 /** 一个受管 skill 根及其来源分类（claude 系为只读兼容根）。 */
 export interface ManagedRoot {
@@ -31,16 +45,16 @@ export interface ManagedRoot {
  */
 export declare function isGlobalSource(source: SkillSummaryView["source"]): boolean;
 /**
- * 构建 `ctx.capabilityPanel.skills` 服务。`ctx` 预留给将来需要 registry
- * （`ctx.skills`）的读取路径；当前实现直接读盘。
+ * 构建 `ctx.capabilityPanel.skills` 服务。
+ *
+ * 读取直接走**受管磁盘视图**；宿主 registry 的注入条目由 `registry.ts` 桥
+ * 在上层（`index.ts` 组装）合并进 `list` / `sessionList`，本模块只在
+ * 详情/资源/导出与写操作入口使用它（避免磁盘写路径被注入条目污染）。
  *
  * @param ctx 宿主上下文
- * @param config dshHome / agentsHome 覆盖
+ * @param config dshHome / agentsHome 覆盖 + registry 桥
  */
-export declare function createService(ctx: any, config?: {
-    dshHome?: string;
-    agentsHome?: string;
-}): {
+export declare function createService(ctx: any, config?: ManagerDeps): {
     list: (cwd?: string) => Promise<SkillSummaryView[]>;
     /** 创建 skill（scope / target / cwd 未给时按 project + .agents 解析根）。 */
     create(input: {
@@ -48,27 +62,30 @@ export declare function createService(ctx: any, config?: {
         scope?: WritableScope;
         target?: ".dsh" | ".agents";
         cwd?: string;
+        sessionId?: string;
         format: SkillFormat;
         spec: unknown;
         body: string;
         overwrite?: boolean;
-    }): Promise<import("./crud.js").CreateResult>;
+    }): Promise<import("./crud.js").CreateResult | SkillWriteFailure>;
     /** 更新 skill（scope 缺省按 global 解析根）。 */
     update(input: {
         root?: string;
         scope?: WritableScope;
         target?: ".dsh" | ".agents";
         cwd?: string;
+        sessionId?: string;
         name: string;
         spec: unknown;
         body: string;
-    }): Promise<import("./crud.js").CreateResult>;
+    }): Promise<import("./crud.js").CreateResult | SkillWriteFailure>;
     /** 删除 skill（scope 缺省按 global 解析根）。 */
     remove(input: {
         root?: string;
         scope?: WritableScope;
         target?: ".dsh" | ".agents";
         cwd?: string;
+        sessionId?: string;
         name: string;
     }): Promise<{
         ok: boolean;
@@ -80,6 +97,7 @@ export declare function createService(ctx: any, config?: {
         scope?: WritableScope;
         target?: ".dsh" | ".agents";
         cwd?: string;
+        sessionId?: string;
         name: string;
         enabled: boolean;
     }): Promise<{
@@ -92,6 +110,7 @@ export declare function createService(ctx: any, config?: {
         scope?: WritableScope;
         target?: ".dsh" | ".agents";
         cwd?: string;
+        sessionId?: string;
         name: string;
         modelInvocable: boolean;
         userInvocable: boolean;
@@ -99,14 +118,40 @@ export declare function createService(ctx: any, config?: {
         ok: boolean;
         errors?: string[];
     }>;
-    /** 读取 skill 详情（scope 缺省按 global 解析根）。 */
+    /** 读取 skill 详情（scope 缺省按 global 解析根；磁盘读不到时走 registry fallback）。 */
     read(input: {
         root?: string;
         scope?: WritableScope;
         target?: ".dsh" | ".agents";
         cwd?: string;
+        sessionId?: string;
         name: string;
-    }): Promise<import("./crud.js").ReadResult>;
+    }): Promise<ReadResult>;
+    /**
+     * 读取注入条目的资源文件（架构契约 §8.3 的路径边界：基准目录只来自宿主
+     * registry，客户端只传 POSIX 相对路径；拒绝 `..` / 绝对路径 / 反斜杠 /
+     * 符号链接 / realpath 逃逸，单文件上限 256 KiB）。
+     */
+    readResource(input: {
+        name: string;
+        path: string;
+        cwd?: string;
+        sessionId?: string;
+    }): Promise<{
+        ok: true;
+        path: string;
+        size: number;
+        content: string;
+        truncated: boolean;
+    } | {
+        ok: false;
+        errors: string[];
+        code?: import("./registry.js").SkillResourceErrorCode;
+    } | {
+        ok: false;
+        errors: string[];
+        code: string;
+    }>;
     /**
      * 安装 skill：`sourcePath` 走宿主路径复制，`url` 走 HTTP 下载（GitHub
      * 仓库 / .zip / raw .md），`files` 走客户端上传落盘；三者都缺时报错。
@@ -117,11 +162,12 @@ export declare function createService(ctx: any, config?: {
         scope?: WritableScope;
         target?: ".dsh" | ".agents";
         cwd?: string;
+        sessionId?: string;
         sourcePath?: string;
         url?: string;
         files?: TransferFile[];
         overwrite?: boolean;
-    }): Promise<import("./transfer.js").TransferResult>;
+    }): Promise<TransferResult>;
     /**
      * 把 skill 从全局导入到当前项目：**物理复制**到 `<项目>/.agents/skills`
      * （目录型连资源文件），此后在本项目内独立启停/调节调用方向（写项目
@@ -134,8 +180,9 @@ export declare function createService(ctx: any, config?: {
         cwd: string;
         name: string;
         fromRoot?: string;
+        sessionId?: string;
         overwrite?: boolean;
-    }): Promise<import("./crud.js").CloneResult | {
+    }): Promise<import("./crud.js").CloneResult | SkillWriteFailure | {
         ok: false;
         errors: string[];
         existed: boolean;
@@ -152,7 +199,7 @@ export declare function createService(ctx: any, config?: {
         cwd?: string;
         name: string;
         fromRoot?: string;
-    }): Promise<import("./shadow.js").ShadowResult>;
+    }): Promise<import("./shadow.js").ShadowResult | SkillWriteFailure>;
     /**
      * 恢复全局 skill 在本项目可用：删除 shadow stub（幂等）。同名条目不是
      * stub 时拒绝删除（可能是用户的真实项目技能）。
@@ -164,14 +211,18 @@ export declare function createService(ctx: any, config?: {
     /**
      * 导出 skill：给 `destDir` 复制到宿主目录；否则读成 base64 文件清单
      * 返回给客户端下载。scope 缺省按 global 解析根。
+     *
+     * 注入行（无磁盘文件）走 registry fallback：单文件正文快照
+     * （`lossy: true`，资源不打包，架构契约 §8.4）。
      */
     export(input: {
         root?: string;
         scope?: WritableScope;
         target?: ".dsh" | ".agents";
         cwd?: string;
+        sessionId?: string;
         name: string;
         destDir?: string;
         overwrite?: boolean;
-    }): Promise<import("./transfer.js").TransferResult>;
+    }): Promise<TransferResult>;
 };

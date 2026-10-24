@@ -28,6 +28,9 @@ import type {} from "@deepseek-ai/dsh-skill";
 import { createService } from "./skills/manager.js";
 import { createSkillSessionRegistry } from "./skills/session.js";
 import type { SessionSkillView, SkillSessionRegistry } from "./skills/session.js";
+import { createSkillRegistryBridge } from "./skills/registry.js";
+import type { SkillRegistryBridge } from "./skills/registry.js";
+import type { SkillSummaryView } from "./skills/types.js";
 import { createMcpLoader } from "./mcp/loader.js";
 import { createMcpManager } from "./mcp/manager.js";
 import { createMcpUsageLog, registerMcpUsageGuard } from "./mcp/usage.js";
@@ -118,12 +121,24 @@ export function apply(ctx: any, config: Config = {}) {
     overrides: overridesRaw,
     imports,
   });
+  /**
+   * skills 域的项目默认热应用钩子：写盘成功后对同项目的 live 会话增量
+   * reconcile（注册/解除 agent 作用域 runtime shadow）。由组合根注入到
+   * `skillSessions` 的构造里（延迟求值，避免构造顺序耦合）。
+   */
+  const reconcileProjectRef: { current?: (cwd: string) => Promise<{ ok: true } | { ok: false; errors: string[] }> } = {};
   const overrides = {
     ...overridesRaw,
     toggle: async (input: OverrideToggleInput) => {
       const result = await overridesRaw.toggle(input);
-      if (result.ok && input.domain === "mcp" && input.cwd !== undefined) {
+      if (!result.ok) return result;
+      if (input.domain === "mcp" && input.cwd !== undefined) {
         await loader.reload(findProjectRoot(input.cwd));
+      }
+      // skills：项目默认变更后热应用到同项目的 live 会话（无 live 会话时是 no-op，
+      // 新会话在 agent/created 时按文件内容应用）。逐名独立、失败不回滚文件。
+      if (input.domain === "skills" && input.cwd !== undefined && reconcileProjectRef.current !== undefined) {
+        return reconcileProjectRef.current(input.cwd);
       }
       return result;
     },
@@ -132,11 +147,55 @@ export function apply(ctx: any, config: Config = {}) {
   // 旁路记录 mcp__* 调用，供面板详情页的「使用记录」展示。disposer 随插件卸载。
   const mcpUsage = createMcpUsageLog();
   const disposeUsageGuard = registerMcpUsageGuard(ctx, mcpUsage);
-  // skills 域 = 磁盘管理器（原有，见 skills/manager.ts）+ 会话级开关
-  // （内存 shadow，见 skills/session.ts）。会话列表复用同一个磁盘 list，
-  // 避免两处读取口径分叉。
-  const skillsBase = createService(ctx, config);
-  const skillSessions = createSkillSessionRegistry(ctx);
+  // skills 域 = 磁盘管理器（原有，见 skills/manager.ts）+ registry 桥
+  // （注入技能读取/详情/资源，见 skills/registry.ts）+ 会话级开关
+  // （内存 shadow + 项目默认投影，见 skills/session.ts）。
+  //
+  // 构造顺序：桥需要"按 sessionId 取 live agent"，会话注册表需要桥的
+  // read-before/after-shadow；两者用延迟访问器互相引用。
+  const skillSessionsRef: { current?: SkillSessionRegistry } = {};
+  const skillsRegistry: SkillRegistryBridge = createSkillRegistryBridge({
+    ctx,
+    logger: ctx.logger,
+    agentOf: (sessionId: string) => skillSessionsRef.current?.agentOf(sessionId),
+    isShadowed: (sessionId: string, name: string) => skillSessionsRef.current?.isShadowed(sessionId, name) ?? false,
+  });
+  const skillsBase = createService(ctx, {
+    dshHome: config.dshHome,
+    agentsHome: config.agentsHome,
+    registry: skillsRegistry,
+  });
+  // 磁盘原始 list 的稳定引用：装配阶段**不能**再把 skillsBase.list 原地覆盖成
+  // 注入合并版，否则 mergePanelList → skillsBase.list 会自我递归（RangeError）。
+  const diskList = skillsBase.list.bind(skillsBase);
+  const skillSessions = createSkillSessionRegistry(ctx, {
+    logger: ctx.logger,
+    registry: skillsRegistry,
+    projectDisabled: async (cwd?: string) => (await overridesRaw.sets(cwd)).skills,
+  });
+  skillSessionsRef.current = skillSessions;
+  reconcileProjectRef.current = (cwd: string) => skillSessions.reconcileProject(cwd);
+  /**
+   * 面板 `skills.list` 的组合视图：受管磁盘行 + 宿主 registry 注入行。
+   *
+   * registry 任何异常都降级为「仅磁盘行」，不影响面板其它功能
+   * （架构契约 §5.7 失败降级矩阵）。
+   */
+  async function mergePanelList(cwd?: string): Promise<SkillSummaryView[]> {
+    const diskRows = await diskList(cwd);
+    let projectDisabled = new Set<string>();
+    try {
+      projectDisabled = new Set((await overridesRaw.sets(cwd)).skills);
+    } catch {
+      projectDisabled = new Set();
+    }
+    try {
+      const injected = await skillsRegistry.merge({ cwd, diskRows, projectDisabled });
+      return [...diskRows, ...injected].sort((a, b) => a.name.localeCompare(b.name));
+    } catch {
+      return diskRows;
+    }
+  }
   // Jev 管理器：内部持有冷会话排队表与 agent/created|disposed 监听。service
   // 访问器延迟求值（jev 与 service 互相引用），disposer 随插件卸载清监听与
   // 内存队列（架构 §8.7）。
@@ -148,10 +207,15 @@ export function apply(ctx: any, config: Config = {}) {
     logger: ctx.logger,
   });
   const service: CapabilityPanelService = {
-    skills: Object.assign(skillsBase, {
-      sessionList: (cwd?: string, sessionId?: string) => skillSessions.list(skillsBase.list, cwd, sessionId),
+    // 用对象展开装配（不原地改 skillsBase）：三个覆盖方法都基于 `diskList`
+    // 这一份原始磁盘 list，避免装配顺序造成的自引用/无限递归。
+    skills: {
+      ...skillsBase,
+      /** 面板列表 = 磁盘视图 + 宿主 registry 注入行（同名磁盘优先）。 */
+      list: (cwd?: string): Promise<SkillSummaryView[]> => mergePanelList(cwd),
+      sessionList: (cwd?: string, sessionId?: string) => skillSessions.list(diskList, cwd, sessionId),
       setSessionEnabled: skillSessions.setEnabled,
-    }),
+    },
     mcp: createMcpManager(
       // tools 访问器用于反推"运行时注入"的 MCP 实例（见 manager.runtime）。
       {
@@ -197,6 +261,7 @@ export function apply(ctx: any, config: Config = {}) {
   ctx.provide("capabilityPanel", () => service);
   const disposers: Array<() => void> = [
     disposeUsageGuard,
+    () => skillsRegistry.dispose(),
     () => skillSessions.dispose(),
     () => jev.dispose(),
   ];
@@ -217,7 +282,26 @@ export function apply(ctx: any, config: Config = {}) {
 
 export { createService, isGlobalSource } from "./skills/manager.js";
 export { createSkillSessionRegistry } from "./skills/session.js";
-export type { SkillSessionRegistry, SessionSkillView, SessionSkillOpResult } from "./skills/session.js";
+export type { SkillSessionRegistry, SkillSessionDeps, SessionSkillView, SessionSkillOpResult } from "./skills/session.js";
+export {
+  createSkillRegistryBridge,
+  isOwnShadow,
+  SHADOW_DESCRIPTION,
+  SHADOW_METADATA_KEY,
+} from "./skills/registry.js";
+export type {
+  ClassifiedInjectedRow,
+  HostSkillCatalogSnapshot,
+  HostSkillDefinition,
+  HostSkillSummary,
+  HostSkillsService,
+  InjectedMergeInput,
+  RegistryNameVerdict,
+  RegistryReadResult,
+  SkillRegistryBridge,
+  SkillRegistryBridgeDeps,
+  SkillResourceResult,
+} from "./skills/registry.js";
 export { createMcpLoader } from "./mcp/loader.js";
 export { createMcpManager } from "./mcp/manager.js";
 export { createOverridesManager } from "./overrides/manager.js";
@@ -257,7 +341,17 @@ export { isSkillName, validateSpec } from "./skills/validate.js";
 export { invocationPolicy } from "./skills/types.js";
 export { globalMcpFile, projectMcpFile } from "./mcp/paths.js";
 export { readMcpFile, writeMcpFile, sanitizeServerName, toClientConfig, validateEntry } from "./mcp/config-file.js";
-export type { SkillSummaryView, SkillSpec, SkillFormat, WritableScope, InvocationPolicy } from "./skills/types.js";
+export type {
+  SkillSummaryView,
+  SkillSpec,
+  SkillFormat,
+  WritableScope,
+  InvocationPolicy,
+  InjectedSkillFields,
+  RegistryResourceBaseKind,
+  SkillOrigin,
+  SkillSource,
+} from "./skills/types.js";
 export type { McpScope, McpServerEntry, McpServerView, McpListResult, McpStatusView, McpMountState } from "./mcp/types.js";
 export type { CapabilityDomain, CapabilityOverrides, OverridesSet, OverridesView } from "./overrides/types.js";
 export type { OverridesManager } from "./overrides/manager.js";

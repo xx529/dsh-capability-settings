@@ -311,9 +311,15 @@ export function toRankItem(capability: JevCapability, noul: number | null): JevR
     score: noul === null ? 0 : noul,
     applicable: capability.applicable,
     enabledInSession: capability.enabledInSession,
+    source: capability.source,
   };
   const reason = capability.applicable ? (noul === null ? "no-answer" : undefined) : capability.reason;
   if (reason !== undefined) item.reason = reason;
+  // 注入来源字段（additive；磁盘行不带）。
+  if (capability.origin !== undefined) item.origin = capability.origin;
+  if (capability.channel !== undefined) item.channel = capability.channel;
+  if (capability.provider !== undefined) item.provider = capability.provider;
+  if (capability.contentReadOnly === true) item.contentReadOnly = true;
   return item;
 }
 

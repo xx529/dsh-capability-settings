@@ -34,6 +34,11 @@ export interface TransferResult {
     files?: TransferFile[];
     /** 导出清单对应的磁盘布局（客户端据此决定单文件下载还是打包）。 */
     format?: SkillFormat;
+    /**
+     * 仅注入行（registry fallback）的导出：true = 这是「正文内容快照」，
+     * 资源文件不会被打包（见 skills/registry.ts / 架构契约 §8.4）。
+     */
+    lossy?: boolean;
 }
 /** 从宿主路径安装 skill 的入参。 */
 export interface InstallFromPathOptions {

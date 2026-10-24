@@ -52,7 +52,7 @@ function frontmatterForSpec(spec: SkillSpec): string {
  * @param body 技能正文（写盘前会 trim）
  * @returns 完整的 `<name>.md` / `SKILL.md` 文本
  */
-function serializeSkill(spec: SkillSpec, body: string): string {
+export function serializeSkill(spec: SkillSpec, body: string): string {
   const fm = frontmatterForSpec(spec).trimEnd();
   return `---\n${fm}\n---\n\n${body.trim()}\n`;
 }

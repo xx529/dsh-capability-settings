@@ -81,12 +81,21 @@ export interface CapabilitySnapshot {
   settling: boolean;
 }
 
+/** 卡片底部的来源标签配色（项目蓝 / 全局绿 / 内置琥珀 / 插件紫 / 预设灰 / 外部橙）。 */
+type TagTone = "project" | "global" | "bundled" | "plugin" | "preset" | "external";
+
 export interface SkillRow {
   id: string;
   kind: "skill";
   name: string;
   description: string;
   tag: string;
+  /** 来源标签配色（与 tag 文案配对）。 */
+  tone: TagTone;
+  /** 注入行的注入方 / 渠道名（如 `dsh-to-figma` / `cordis`）；磁盘行缺省。 */
+  channel?: string;
+  /** true = 宿主 registry 注入行（来源标签 + 渠道小标签，内容只读但可在会话启停）。 */
+  injected?: boolean;
   enabled: boolean;
   disabled: boolean;
   meta?: string;
@@ -97,6 +106,7 @@ export interface McpRow {
   kind: "mcp";
   name: string;
   tag: string;
+  tone: TagTone;
   meta: string;
   enabled: boolean;
   disabled: boolean;
@@ -117,11 +127,29 @@ function sourceIsProject(source: string): boolean {
   return source.startsWith("project-");
 }
 
+/**
+ * 技能卡片的来源标签：
+ *   - 注入行按 `origin` 显示 内置 / 插件 / 预设（配色见 tone），渠道名单独成小标签；
+ *   - 磁盘行仍是 项目 / 全局（只读兼容根加「只读」后缀）。
+ */
 function skillTag(skill: ClientSkillSummary): string {
+  if (skill.injected === true) {
+    return skill.origin === "bundled" ? "内置" : skill.origin === "preset" ? "预设" : "插件";
+  }
   return sourceIsProject(skill.source) ? "项目" : skill.readOnly ? "全局 · 只读" : "全局";
 }
 
+/** 技能卡片来源标签的配色。 */
+function skillTone(skill: ClientSkillSummary): TagTone {
+  if (skill.injected === true) {
+    return skill.origin === "bundled" ? "bundled" : skill.origin === "preset" ? "preset" : "plugin";
+  }
+  return sourceIsProject(skill.source) ? "project" : "global";
+}
+
 function skillEnabled(skill: ClientSkillSummary): boolean {
+  // 注入行：会话视图的 enabledInSession 已含项目默认；缺失时按项目默认回落。
+  if (skill.injected === true && typeof skill.enabledInSession !== "boolean") return skill.disabledInProject !== true;
   return skill.enabledInSession !== false;
 }
 
@@ -605,6 +633,31 @@ function isCheckedItem(item: JevRankItem, manual: Record<string, boolean>, thres
   const override = manual[item.id];
   if (override !== undefined) return override;
   return item.applicable && item.score >= threshold;
+}
+
+/**
+ * 决策结果行的来源小标签（Figma v12-03）：
+ * 全局（绿）/ 项目（蓝）/ 内置（琥珀）/ 注入插件（紫，显示渠道名）/
+ * 预设渠道（灰，`预设 <channel>`）。
+ *
+ * 字段全部是宿主 additive：旧宿主没有 `origin` / `channel` 时按 `source`
+ * 回落（注入行缺 `source` 时只显示 kind，不猜来源）。
+ */
+function rankSourceTag(item: JevRankItem): { label: string; tone: TagTone } | undefined {
+  if (item.origin === "bundled") return { label: "内置", tone: "bundled" };
+  if (item.origin === "plugin") {
+    return { label: item.channel !== undefined && item.channel.length > 0 ? item.channel : "插件注入", tone: "plugin" };
+  }
+  if (item.origin === "preset") {
+    return {
+      label: item.channel !== undefined && item.channel.length > 0 ? `预设 ${item.channel}` : "预设渠道",
+      tone: "preset",
+    };
+  }
+  if (item.source === "external") return { label: "注入", tone: "external" };
+  if (item.source === "project") return { label: "项目", tone: "project" };
+  if (item.source === "global") return { label: "全局", tone: "global" };
+  return undefined;
 }
 
 /** 当前勾选项（不可切换项永不进入计划）。 */
@@ -1236,6 +1289,8 @@ function DecisionPanel(props: DecisionPanelProps) {
             const below = !unavailable && !checked && !manual && item.score < state.threshold;
             const reasonText = item.reason === undefined ? undefined : RANK_REASON_TEXT[item.reason] ?? item.reason;
             const reasonId = `skp-decision-reason-${item.id.slice(4)}`;
+            // 来源小标签（全局 / 项目 / 内置 / 注入插件 / 预设渠道）；旧宿主缺字段时不渲染。
+            const srcTag = rankSourceTag(item);
             return (
               <li
                 key={item.id}
@@ -1253,8 +1308,15 @@ function DecisionPanel(props: DecisionPanelProps) {
                   />
                 </label>
                 <span className={`skp-decision-kind skp-decision-kind-${item.kind}`}>{item.kind === "skill" ? "技能" : "MCP"}</span>
-                <span className="skp-decision-name" title={item.name}>
-                  {item.name}
+                <span className="skp-decision-name-cell">
+                  <span className="skp-decision-name" title={item.name}>
+                    {item.name}
+                  </span>
+                  {srcTag !== undefined && (
+                    <span className={`skp-decision-src skp-decision-src-${srcTag.tone}`} title="能力来源">
+                      {srcTag.label}
+                    </span>
+                  )}
                 </span>
                 <span className="skp-decision-desc-cell">
                   <span className="skp-decision-desc" title={item.description}>
@@ -1359,6 +1421,9 @@ export function buildSkillRows(snapshot: CapabilitySnapshot, pending: Record<str
       name: skill.name,
       description: skill.description,
       tag: skillTag(skill),
+      tone: skillTone(skill),
+      ...(skill.injected === true ? { injected: true } : {}),
+      ...(skill.injected === true && skill.channel !== undefined && skill.channel.length > 0 ? { channel: skill.channel } : {}),
       enabled: pending[id] ?? skillEnabled(skill),
       disabled: !canToggle,
       ...(canToggle ? {} : { meta: "会话未激活" }),
@@ -1385,6 +1450,7 @@ export function buildMcpRows(snapshot: CapabilitySnapshot, pending: Record<strin
       kind: "mcp",
       name: server.key,
       tag: server.scope === "project" ? "项目" : "全局",
+      tone: server.scope === "project" ? "project" : "global",
       meta,
       enabled: pending[id] ?? mcpEnabled(server),
       disabled: false,
@@ -1401,6 +1467,7 @@ export function buildMcpRows(snapshot: CapabilitySnapshot, pending: Record<strin
       kind: "mcp",
       name: server.serverName,
       tag: "外部",
+      tone: "external",
       meta:
         server.restrictable !== true
           ? "不可在当前对话关闭"
@@ -1433,8 +1500,7 @@ function DockSwitch({ checked, disabled, title, onChange }: { checked: boolean; 
   );
 }
 
-function Tag({ label }: { label: string }) {
-  const tone = label === "项目" ? "project" : label === "外部" ? "external" : "global";
+function Tag({ label, tone }: { label: string; tone: TagTone }) {
   return <span className={`skp-dock-tag skp-dock-tag-${tone}`}>{label}</span>;
 }
 
@@ -1474,7 +1540,12 @@ export function CapabilityCard({ row, busy, onToggle }: { row: Row; busy: boolea
       </div>
       <p className="skp-dock-card-desc">{row.kind === "skill" ? row.description : row.meta}</p>
       <div className="skp-dock-card-foot">
-        <Tag label={row.tag} />
+        <Tag label={row.tag} tone={row.tone} />
+        {row.kind === "skill" && row.channel !== undefined && (
+          <span className="skp-dock-tag-channel" title="注入方 / 渠道名（内容只读，开关只作用于当前会话）">
+            {row.channel}
+          </span>
+        )}
         {row.kind === "skill" ? (
           row.meta !== undefined && <span className="skp-dock-card-meta">{row.meta}</span>
         ) : (
@@ -1527,6 +1598,8 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
 
   const skillsOn = skillRows.filter((row) => row.enabled).length;
   const mcpOn = mcpRows.filter((row) => row.enabled).length;
+  // 已启用的注入技能数（来源为插件 / DSH 内置 / Agent 预设），用于底栏统计文案。
+  const injectedOn = skillRows.filter((row) => row.injected === true && row.enabled).length;
   const rows: Row[] = tab === "skills" ? skillRows : mcpRows;
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -1643,7 +1716,7 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
       {/* 底栏 */}
       <div className="skp-dock-foot">
         <span className="skp-dock-foot-note">
-          {totalOn} / {total} 项已启用 · 开关只作用于当前对话
+          {totalOn} / {total} 项已启用{injectedOn > 0 ? ` · 其中 ${injectedOn} 项来自插件 / DSH 内置 / Agent 预设` : ""} · 开关只作用于当前对话
         </span>
         <button
           type="button"

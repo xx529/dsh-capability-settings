@@ -19,6 +19,14 @@ export interface ParsedSkill {
     body: string;
 }
 /**
+ * 序列化完整的 skill 文件内容（frontmatter 分隔 + YAML + 空行 + 正文）。
+ *
+ * @param spec skill 元数据
+ * @param body 技能正文（写盘前会 trim）
+ * @returns 完整的 `<name>.md` / `SKILL.md` 文本
+ */
+export declare function serializeSkill(spec: SkillSpec, body: string): string;
+/**
  * 把 skill 文件文本解析回 spec + 正文。
  *
  * 与 provider 的 `parseFrontmatter` 口径一致：首行必须是 `---`、找到闭合的

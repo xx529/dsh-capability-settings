@@ -28,7 +28,12 @@ export type SkillSource =
   | "bundled"
   /** 只读兼容根：Claude Code 生态的项目/全局技能目录（见 skills/roots.ts）。 */
   | "project-claude"
-  | "user-claude";
+  | "user-claude"
+  /**
+   * 宿主 registry 注入的条目（不是面板受管磁盘根）：宿主内置 / 插件注册 /
+   * preset 层条目。见 `skills/registry.ts`。
+   */
+  | "external";
 
 /** 项目 skill 所在的物理子目录（.claude 为只读兼容根，见 skills/manager.ts）。 */
 export type ProjectTargetDir = ".dsh" | ".agents" | ".claude";
@@ -78,8 +83,46 @@ export function invocationPolicy(frontmatter: InvocationFrontmatter): Invocation
   };
 }
 
-/** 面板列表中的一行摘要（各受管根目录磁盘视图的合并结果）。 */
-export interface SkillSummaryView {
+/**
+ * 注入条目的来源类别（仅 `injected` 行携带）。
+ *
+ * - `bundled`：DSH 随包提供的技能（Office provider / 随包技能目录）；
+ * - `plugin`：插件或宿主部署级 provider 在运行时注入；
+ * - `preset`：只在该 preset 绑定的会话里可见（preset 层 provider）。
+ *
+ * 注意：磁盘受管行**不带** `origin`（其来源仍由 `source` 表达）。
+ */
+export type SkillOrigin = "bundled" | "plugin" | "preset";
+
+/** registry 资源基准类别（决定能否浏览资源文件，见 `skills/registry.ts`）。 */
+export type RegistryResourceBaseKind = "directory" | "url" | "opaque";
+
+/**
+ * 叠加在 {@link SkillSummaryView} 上的「宿主 registry 注入条目」字段。
+ *
+ * 全部可选、全部 additive：磁盘行不出现任何字段，旧客户端忽略即可。
+ */
+export interface InjectedSkillFields {
+  /** true = 该行来自宿主 registry 注入，不是面板受管磁盘根。 */
+  injected?: true;
+  /** 来源类别（仅 injected 行）。 */
+  origin?: SkillOrigin;
+  /** 展示用注入方名（「DSH 内置（Office）」/ `dsh-to-figma` / preset id / 「插件运行时注入」）。 */
+  channel?: string;
+  /** registry `SkillSummary.provider`（runtime / filesystem / dsh-figma / dsh-office …）。 */
+  provider?: string;
+  /** registry `SkillSummary.source` 原值（bundled / custom / runtime / 插件自定义 source）。 */
+  registrySource?: string;
+  /** registry `SkillSummary.resourceBase.kind`；缺省 = 该技能无资源基准。 */
+  resourceBaseKind?: RegistryResourceBaseKind;
+  /** true = 正文/资源只读（不提供创建/编辑/删除/调用方向修改；启停仍可）。 */
+  contentReadOnly?: true;
+  /** 仅 injected 行：本项目默认是否禁用（来自 overrides.skills）。 */
+  disabledInProject?: boolean;
+}
+
+/** 面板列表中的一行摘要（受管根目录磁盘视图 + 宿主 registry 注入条目的合并结果）。 */
+export interface SkillSummaryView extends InjectedSkillFields {
   /** 技能名。 */
   name: string;
   /** 一句话描述。 */

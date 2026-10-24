@@ -110,12 +110,34 @@ export interface JevRankInput {
 }
 /** 一条能力在会话里的可应用原因（不可应用时写进 `reason`）。 */
 export type JevApplySkipReason = "unknown-id" | "hard-disabled" | "not-restrictable" | "not-toggleable" | "shadowed" | "already-applied";
+/**
+ * 注入来源的展示字段（additive；磁盘行不带）。
+ *
+ * 与面板 `SkillSummaryView` 的注入字段同源（`skills/registry.ts` 单一事实源），
+ * 只用于前端角标 / 诊断，不参与 `capabilityId`（id 仍是 `skill:<name>`）。
+ */
+export interface JevCapabilitySourceFields {
+    /** 注入来源类别；磁盘行缺省。 */
+    origin?: "bundled" | "plugin" | "preset";
+    /** 展示用注入方名（与面板 channel 同源）。 */
+    channel?: string;
+    /** registry provider id（诊断用）。 */
+    provider?: string;
+    /** true = 内容只读（启用/禁用仍可）。 */
+    contentReadOnly?: boolean;
+}
 /** rank 结果里的一行（前端勾选/排序用）。 */
-export interface JevRankItem {
+export interface JevRankItem extends JevCapabilitySourceFields {
     /** `cap_<36 位小写 hex>`。 */
     id: string;
     kind: "skill" | "mcp";
     name: string;
+    /**
+     * 能力作用域（additive）：项目 / 全局 / 注入（external）。
+     *
+     * 旧宿主没有该字段，前端需按缺省回落（注入行由 `origin` 判定）。
+     */
+    source?: "project" | "global" | "external";
     /** 已按 200 码点截断。 */
     description: string;
     /** 0..1，`noul`；无答案记 0。 */
@@ -234,7 +256,7 @@ export type JevSetConfigResult = {
  * 原始快照（`canToggleInSession`，冷会话重试就绪用）、MCP 显式会话覆盖
  * （`mcpExplicitToggle`，回滚用）。
  */
-export interface JevCapability {
+export interface JevCapability extends JevCapabilitySourceFields {
     id: string;
     kind: "skill" | "mcp";
     name: string;

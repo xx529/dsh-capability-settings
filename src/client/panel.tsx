@@ -310,10 +310,69 @@ function invocationState(item: Pick<ClientSkillSummary, "modelInvocable" | "user
   return "partial";
 }
 
+/** 注入来源的展示文案（与 Figma v12 标签语义一致）。 */
+function originLabel(item: Pick<ClientSkillSummary, "origin">): string {
+  return item.origin === "bundled" ? "内置" : item.origin === "preset" ? "预设" : "插件";
+}
+
+/** 注入来源标签的配色类（内置琥珀 / 插件紫 / 预设灰）。 */
+function originTagClass(item: Pick<ClientSkillSummary, "origin">): string {
+  return item.origin === "bundled" ? "skp-tag skp-tag-bundled" : item.origin === "preset" ? "skp-tag skp-tag-preset" : "skp-tag skp-tag-plugin";
+}
+
+/** 注入行的「来源 + 渠道」说明（详情页 meta 用）。 */
+function injectedOriginText(item: Pick<ClientSkillSummary, "origin" | "channel" | "provider">): string {
+  if (item.origin === "bundled") return "DSH 内置（随包提供）";
+  if (item.origin === "preset") return `Agent 预设 · 仅在「${item.channel ?? "未知预设"}」的会话可见`;
+  return item.channel !== undefined && item.channel.length > 0 ? `${item.channel} 运行时注入（不落盘）` : "插件运行时注入（不落盘）";
+}
+
+/** 注入行的只读原因条文案（详情页顶部）。 */
+function injectedReadonlyNote(item: ClientSkillSummary): string {
+  const channel = item.channel !== undefined && item.channel.length > 0 ? item.channel : "插件";
+  if (item.origin === "bundled") {
+    return "内容只读 · DSH 内置技能（无磁盘副本）；可在列表 / 会话中启用或禁用，不可编辑或删除。";
+  }
+  if (item.origin === "preset") {
+    return `内容只读 · 由 Agent 预设「${channel}」提供（无磁盘副本，仅该预设的会话可见）；只能在会话中启用或禁用，不可编辑或删除。`;
+  }
+  return `内容只读 · 由插件 ${channel} 运行时注册（无磁盘副本）；可在列表 / 会话中启用或禁用，不可编辑或删除。`;
+}
+
 /** 行左标签的排序与文案：scope → 格式 → 关系（最多 3 个）。 */
 function skillTags(item: ClientSkillSummary, hasGlobal: boolean): Array<{ key: string; label: string; className: string; title?: string }> {
+  const tags: Array<{ key: string; label: string; className: string; title?: string }> = [];
+  if (item.injected === true) {
+    // 注入行没有「全局/项目」磁盘归属：来源标签（内置/插件/预设）+ 格式 + 渠道名。
+    tags.push({
+      key: "origin",
+      label: originLabel(item),
+      className: originTagClass(item),
+      title:
+        item.origin === "bundled"
+          ? "DSH 随包提供的技能（只读）"
+          : item.origin === "preset"
+            ? "由当前 Agent 预设渠道提供，只在绑定该预设的会话里可见"
+            : "由插件在运行时注册的技能（只读）",
+    });
+    tags.push({
+      key: "format",
+      label: item.format === "directory" ? "目录" : ".md",
+      className: "skp-tag skp-tag-flat",
+      title: item.format === "directory" ? "目录型技能（SKILL.md + 其他文件）" : "单文件技能",
+    });
+    if (item.channel !== undefined && item.channel.length > 0) {
+      tags.push({
+        key: "channel",
+        label: item.channel,
+        className: "skp-tag skp-tag-channel",
+        title: "注入方 / 渠道名（只读来源：没有可编辑的磁盘副本）",
+      });
+    }
+    return tags;
+  }
   const isProject = isProjectSource(item.source);
-  const tags: Array<{ key: string; label: string; className: string; title?: string }> = [
+  tags.push(
     {
       key: "scope",
       label: isProject ? "项目" : "全局",
@@ -326,7 +385,7 @@ function skillTags(item: ClientSkillSummary, hasGlobal: boolean): Array<{ key: s
       className: "skp-tag skp-tag-flat",
       title: item.format === "directory" ? "目录型技能（SKILL.md + 其他文件）" : "单文件技能",
     },
-  ];
+  );
   if (item.readOnly) {
     tags.push({ key: "readonly", label: "只读", className: "skp-tag skp-tag-readonly", title: "只读来源，无法修改或删除" });
   } else if (isProject && item.shadowStub === true) {
@@ -358,6 +417,10 @@ function skillTags(item: ClientSkillSummary, hasGlobal: boolean): Array<{ key: s
 
 /** 行开关的勾选态（语义见任务规格 / docs/ux/panel-upgrade.md §3.5、§5.3）。 */
 function skillSwitchChecked(item: ClientSkillSummary): boolean {
+  if (item.injected === true) {
+    // 注入行：开关表达「本项目默认是否禁用」（写 capability-overrides.json 的 skills 清单）。
+    return item.disabledInProject !== true;
+  }
   if (isProjectSource(item.source)) {
     // 屏蔽占位 = "在本项目禁用同名全局"的占位条目，本身不应显示为启用。
     if (item.shadowStub === true) return false;
@@ -370,13 +433,24 @@ function skillSwitchChecked(item: ClientSkillSummary): boolean {
 
 /** 行开关是否置灰 + tooltip（只读 / 项目副本生效中 / 无工作区）。 */
 function skillSwitchDisabled(item: ClientSkillSummary, hasWorkspace: boolean): { disabled: boolean; title: string } {
-  const isProject = isProjectSource(item.source);
+  if (item.injected === true) {
+    if (!hasWorkspace) {
+      return { disabled: true, title: "先选择工作区，才能设置此注入技能在本项目的默认启停" };
+    }
+    return {
+      disabled: false,
+      title: skillSwitchChecked(item)
+        ? "关闭：在本项目默认禁用此注入技能（写入 .agents/capability-overrides.json，不影响其它项目与其它会话）"
+        : "打开：恢复此注入技能在本项目默认可用",
+    };
+  }
   if (item.readOnly) {
     return { disabled: true, title: "只读来源（.claude 兼容目录），无法修改或删除" };
   }
   if (!hasWorkspace) {
     return { disabled: true, title: "需要可写的工作区才能修改技能" };
   }
+  const isProject = isProjectSource(item.source);
   if (isProject) {
     if (item.shadowStub === true) {
       return { disabled: false, title: "打开：删除屏蔽占位，恢复同名全局技能在本项目可用" };
@@ -456,17 +530,30 @@ function SkillsView({
   const { data: allItems, loading, error, reload } = useAsyncList(() => skillsApi.list(), [skillsApi, workspace]);
   const items = allItems ?? [];
   const projectItems = useMemo(() => items.filter((item) => isProjectSource(item.source)), [items]);
-  const globalItems = useMemo(() => items.filter((item) => !isProjectSource(item.source)), [items]);
+  // 注入行（宿主 registry：内置 / 插件运行时 / preset）单独分组；它们既不是
+  // 项目条目也不是磁盘全局条目，但按架构口径计入「全局」计数。
+  const injectedItems = useMemo(() => items.filter((item) => item.injected === true), [items]);
+  const diskGlobalItems = useMemo(
+    () => items.filter((item) => !isProjectSource(item.source) && item.injected !== true),
+    [items],
+  );
+  const globalItems = useMemo(() => [...diskGlobalItems, ...injectedItems], [diskGlobalItems, injectedItems]);
 
-  // 域 Tab 计数 = 全部条目（含只读、含屏蔽占位，不去重；搜索不影响）。
+  // 域 Tab 计数 = 全部条目（含只读、含屏蔽占位、含注入，不去重；搜索不影响）。
   useEffect(() => {
     if (!loading && error === undefined) onCount?.(items.length);
   }, [items.length, loading, error, onCount]);
 
   const q = query.trim().toLowerCase();
   const matchesSkill = (item: ClientSkillSummary) =>
-    q.length === 0 || item.name.toLowerCase().includes(q) || item.description.toLowerCase().includes(q);
-  const globalVisible = useMemo(() => globalItems.filter(matchesSkill), [globalItems, q]);
+    q.length === 0 ||
+    item.name.toLowerCase().includes(q) ||
+    item.description.toLowerCase().includes(q) ||
+    // 注入行的渠道名（插件 / preset 名）也参与搜索。
+    (item.channel !== undefined && item.channel.toLowerCase().includes(q));
+  const diskGlobalVisible = useMemo(() => diskGlobalItems.filter(matchesSkill), [diskGlobalItems, q]);
+  const injectedVisible = useMemo(() => injectedItems.filter(matchesSkill), [injectedItems, q]);
+  const globalVisible = useMemo(() => [...diskGlobalVisible, ...injectedVisible], [diskGlobalVisible, injectedVisible]);
   const projectVisible = useMemo(() => projectItems.filter(matchesSkill), [projectItems, q]);
   const workspaceVisible = useMemo(
     () =>
@@ -551,6 +638,8 @@ function SkillsView({
    * 自动钉选当前工作区（若在已知项目列表里），等列表刷新后再选中目标行。
    */
   const jumpToRelated = (item: ClientSkillSummary) => {
+    // 注入行没有磁盘同名关系（磁盘优先已在宿主去重），不参与互跳。
+    if (item.injected === true) return;
     const isProject = isProjectSource(item.source);
     let target: ClientSkillSummary | undefined;
     if (isProject) {
@@ -585,7 +674,7 @@ function SkillsView({
     setPendingSelect(targetKey);
   };
 
-  /** 行内统一开关：按行类型分派到 setEnabled / enableInProject / disableInProject。 */
+  /** 行内统一开关：按行类型分派到 setEnabled / enableInProject / disableInProject / overrides.toggle。 */
   const toggleRow = async (item: ClientSkillSummary, next: boolean) => {
     const key = skillRowKey(item);
     if (busyRow !== undefined) return;
@@ -593,18 +682,30 @@ function SkillsView({
     setOpError(undefined);
     try {
       const isProject = isProjectSource(item.source);
-      const result = isProject
-        ? item.shadowStub === true
-          ? next
+      // 注入行没有磁盘文件：本项目默认启停只能走项目级声明
+      // （`.agents/capability-overrides.json` 的 skills 清单），宿主写盘后
+      // 对该项目的 live 会话增量 reconcile（注册/解除会话 shadow）。
+      if (item.injected === true) {
+        if (skillSwitchChecked(item) === next) return;
+        const result = await api.overrides.toggle("skills", item.name);
+        if (!result.ok) {
+          setOpError(result.errors.join("; "));
+          return;
+        }
+      } else {
+        const result = isProject
+          ? item.shadowStub === true
+            ? next
+              ? await skillsApi.enableInProject({ name: item.name })
+              : { ok: true as const }
+            : await skillsApi.setEnabled({ ...skillRefOf(item), enabled: next })
+          : next
             ? await skillsApi.enableInProject({ name: item.name })
-            : { ok: true as const }
-          : await skillsApi.setEnabled({ ...skillRefOf(item), enabled: next })
-        : next
-          ? await skillsApi.enableInProject({ name: item.name })
-          : await skillsApi.disableInProject({ name: item.name, fromRoot: item.root });
-      if (!result.ok) {
-        setOpError(result.errors.join("; "));
-        return;
+            : await skillsApi.disableInProject({ name: item.name, fromRoot: item.root });
+        if (!result.ok) {
+          setOpError(result.errors.join("; "));
+          return;
+        }
       }
       setContentVersion((value) => value + 1);
     } catch (failure) {
@@ -692,6 +793,43 @@ function SkillsView({
     );
   };
 
+  /** 一组技能行（列表容器 + 可访问性标签）。 */
+  const renderRows = (list: ClientSkillSummary[], label: string) => (
+    <ul className="skp-list" role="listbox" aria-label={label}>
+      {list.map((item) => (
+        <li key={skillRowKey(item)} role="presentation">
+          {renderRow(item)}
+        </li>
+      ))}
+    </ul>
+  );
+
+  /**
+   * 全局 scope 的技能列表：磁盘全局行 + 单独的「注入技能」分组
+   * （Figma v12：注入行带来源标签与「内容只读 · 可启停」说明）。
+   */
+  const renderGlobalList = () => {
+    const empty = diskGlobalVisible.length === 0 && injectedVisible.length === 0;
+    if (empty) {
+      return renderSkillList([], "global");
+    }
+    return (
+      <div className="skp-group-scroll">
+        {diskGlobalVisible.length > 0 && renderRows(diskGlobalVisible, "全局技能")}
+        {injectedVisible.length > 0 && (
+          <>
+            <div className="skp-list-group-head">
+              <span className="skp-list-group-title">注入技能</span>
+              <span className="skp-group-count">{injectedItems.length}</span>
+              <span className="skp-list-group-note">内容只读 · 可启停</span>
+            </div>
+            {renderRows(injectedVisible, "注入技能")}
+          </>
+        )}
+      </div>
+    );
+  };
+
   /**
    * ScopeNav「项目」行下方的工作区列表（仅 project scope 渲染，nav 内自身滚动）。
    * 未选工作区时跟随搜索词过滤名称/路径；已选中工作区时保持完整列表方便切换。
@@ -726,19 +864,27 @@ function SkillsView({
   const renderRow = (item: ClientSkillSummary) => {
     const key = skillRowKey(item);
     const isProject = isProjectSource(item.source);
+    const isInjected = item.injected === true;
     const state = invocationState(item);
-    const tags = skillTags(item, globalItems.some((global) => global.name === item.name));
+    const checked = skillSwitchChecked(item);
+    const tags = skillTags(item, diskGlobalItems.some((global) => global.name === item.name));
     const switcher = skillSwitchDisabled(item, pinned !== undefined);
-    const dotClass =
-      item.shadowStub === true || item.readOnly
+    const dotClass = isInjected
+      ? checked
+        ? "skp-dot skp-dot-enabled"
+        : "skp-dot skp-dot-hollow"
+      : item.shadowStub === true || item.readOnly
         ? "skp-dot skp-dot-hollow"
         : state === "full"
           ? "skp-dot skp-dot-enabled"
           : state === "partial"
             ? "skp-dot skp-dot-partial"
             : "skp-dot";
-    const dotText =
-      item.shadowStub === true
+    const dotText = isInjected
+      ? checked
+        ? "已启用"
+        : "本项目已禁用"
+      : item.shadowStub === true
         ? "屏蔽占位"
         : item.readOnly
           ? "只读"
@@ -761,8 +907,8 @@ function SkillsView({
         onKeyDown={(event) => onRowKeyDown(event, key)}
       >
         <div className="skp-row-name">
-          {/* 状态点（仅项目行）：绿=全启用 / 蓝=部分禁用 / 灰=全禁用 / 空心=只读或屏蔽占位。 */}
-          {isProject && (
+          {/* 状态点（项目行 / 注入行）：绿=启用 / 蓝=部分禁用 / 灰=禁用 / 空心=只读、屏蔽占位或本项目已禁用。 */}
+          {(isProject || isInjected) && (
             <>
               <span className={dotClass} aria-hidden="true" />
               <span className="skp-sr-only">{dotText}</span>
@@ -856,7 +1002,7 @@ function SkillsView({
               )}
             </div>
             {scope === "global" ? (
-              renderSkillList(globalVisible, "global")
+              renderGlobalList()
             ) : pinned === undefined ? (
               <div className="skp-empty">请选择左侧工作区</div>
             ) : (
@@ -946,6 +1092,8 @@ function SkillDetail({
   const [copied, setCopied] = useState(false);
 
   const isGlobal = isGlobalSkillSource(summary.source);
+  // 宿主 registry 注入行：正文/资源只读、无磁盘副本，但保留启停（本项目 / 本会话）。
+  const injected = summary.injected === true;
   const state = invocationState(summary);
 
   // 删除确认对话框：Esc = 取消（与 UX §7.9 一致）。
@@ -1116,18 +1264,34 @@ function SkillDetail({
 
   return (
     <div className="skp-detail-card">
-      {/* 标题行：名称 + 归属标签 + 只读/覆盖/遮蔽徽标 + 右侧「复制路径」。 */}
+      {/* 标题行：名称 + 归属/来源标签 + 只读/覆盖/遮蔽徽标 + 右侧「复制路径」。 */}
       <div className="skp-detail-head">
         <h3 title={summary.name}>{summary.name}</h3>
-        <span
-          className={isGlobal ? "skp-tag skp-tag-global" : "skp-tag skp-tag-project"}
-          title={isGlobal ? "全局技能（对所有项目生效）" : "本项目内的技能"}
-        >
-          {isGlobal ? "全局" : "项目"}
-        </span>
-        <span className="skp-tag skp-tag-flat">{summary.format === "directory" ? "目录" : ".md"}</span>
-        {summary.readOnly && <span className="skp-badge">只读</span>}
-        {summary.shadowStub === true && (
+        {injected ? (
+          <>
+            <span className={originTagClass(summary)} title="注入来源类别（内置 / 插件 / 预设渠道）">
+              {originLabel(summary)}
+            </span>
+            <span className="skp-tag skp-tag-flat">{summary.format === "directory" ? "目录" : ".md"}</span>
+            {summary.channel !== undefined && summary.channel.length > 0 && (
+              <span className="skp-tag skp-tag-channel" title="注入方 / 渠道名（只读来源，无磁盘副本）">
+                {summary.channel}
+              </span>
+            )}
+          </>
+        ) : (
+          <>
+            <span
+              className={isGlobal ? "skp-tag skp-tag-global" : "skp-tag skp-tag-project"}
+              title={isGlobal ? "全局技能（对所有项目生效）" : "本项目内的技能"}
+            >
+              {isGlobal ? "全局" : "项目"}
+            </span>
+            <span className="skp-tag skp-tag-flat">{summary.format === "directory" ? "目录" : ".md"}</span>
+            {summary.readOnly && <span className="skp-badge">只读</span>}
+          </>
+        )}
+        {!injected && summary.shadowStub === true && (
           <span className="skp-badge" title="屏蔽占位：使同名全局技能在本项目不可用；删除本条目即可恢复">
             屏蔽占位
           </span>
@@ -1150,7 +1314,16 @@ function SkillDetail({
         )}
       </div>
 
-      {!summary.readOnly && (
+      {injected && (
+        <div className="skp-detail-readonly">
+          <span className="skp-detail-readonly-icon" aria-hidden="true">
+            i
+          </span>
+          <span>{injectedReadonlyNote(summary)}</span>
+        </div>
+      )}
+
+      {!summary.readOnly && !injected && (
         <div className="skp-detail-actions">
           {!isGlobal && summary.shadowStub !== true && (
             <button
@@ -1244,13 +1417,18 @@ function SkillDetail({
       {/* 元信息条（单行，压缩自旧版 dl 字段；调用方式开关保留原语义）。 */}
       <div className="skp-detail-meta">
         <span className="skp-detail-meta-item">
-          来源 <span className="skp-detail-meta-strong">{summary.source}</span>
+          来源{" "}
+          <span className="skp-detail-meta-strong">
+            {injected ? (summary.channel !== undefined && summary.channel.length > 0 ? summary.channel : originLabel(summary)) : summary.source}
+          </span>
         </span>
-        <span className="skp-detail-meta-item">{summary.format === "directory" ? "目录格式" : "单文件"}</span>
-        {(summary.readOnly || !isGlobal) && (
+        <span className="skp-detail-meta-item">
+          {injected ? injectedOriginText(summary) : summary.format === "directory" ? "目录格式" : "单文件"}
+        </span>
+        {(injected || summary.readOnly || !isGlobal) && (
           <span className="skp-detail-meta-item">
             调用方式
-            {summary.readOnly || summary.shadowStub === true ? (
+            {injected || summary.readOnly || summary.shadowStub === true ? (
               <span className="skp-detail-meta-strong">
                 模型 {summary.modelInvocable ? "✓" : "✗"} · 用户 {summary.userInvocable ? "✓" : "✗"}
               </span>

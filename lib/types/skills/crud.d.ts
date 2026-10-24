@@ -106,6 +106,17 @@ export interface ReadResult {
     format?: SkillFormat;
     /** directory 布局下的资源文件列表。 */
     resources?: string[];
+    /**
+     * 仅注入行（registry fallback）：true = 详情来自宿主技能注册表，
+     * 内容只读、没有磁盘文件可写（见 skills/registry.ts）。
+     */
+    fromRegistry?: true;
+    /** 仅注入行：资源浏览的降级说明（url / opaque 基准不可浏览）。 */
+    resourceBaseNote?: string;
+    /** 详情实际来源的文件绝对路径（registry 命中磁盘条目时透传）。 */
+    path?: string;
+    /** 业务错误码（见 remote.ts / 架构契约 §7.3）。 */
+    code?: string;
 }
 /**
  * 读取 skill 详情：探测布局 → 解析文件 → （directory 布局）列出资源。

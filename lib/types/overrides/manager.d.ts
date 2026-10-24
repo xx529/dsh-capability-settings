@@ -6,6 +6,10 @@
  * 切换某一条的禁用状态（写 `.agents/capability-overrides.json`，读取兼容
  * 旧位置 `.dsh` / `.claude`，首次写入时并入并删除旧文件）。
  *
+ * `skills` 域只对**宿主 registry 注入的技能**生效（写入 `skills: string[]`；
+ * 非法/非 kebab-case 名字直接拒绝），由组合根在写盘成功后对同项目的 live
+ * 会话做增量 reconcile（见 `index.ts` / `skills/session.ts`）。
+ *
  * 无工作区（cwd 为 undefined）时不适用任何项目级禁用：`sets()` 返回全空
  * 快照，`toggle()` 直接报错。
  *

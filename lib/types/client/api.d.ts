@@ -14,6 +14,10 @@
 import type { SkillFormat, SkillSpec, WritableScope } from "../skills/types.js";
 import type { McpScope, McpServerEntry } from "../mcp/types.js";
 import type { CapabilityDomain } from "../overrides/types.js";
+/** 宿主 registry 注入条目的来源类别（仅 `injected` 行携带）。 */
+export type ClientSkillOrigin = "bundled" | "plugin" | "preset";
+/** registry 资源基准类别（决定能否浏览资源文件）。 */
+export type ClientSkillResourceBaseKind = "directory" | "url" | "opaque";
 /** 面板列表里的一行 skill 摘要（调用策略已拍平为两个布尔）。 */
 export interface ClientSkillSummary {
     name: string;
@@ -25,6 +29,28 @@ export interface ClientSkillSummary {
     format: SkillFormat;
     readOnly: boolean;
     path?: string;
+    /**
+     * true = 该行来自**宿主技能注册表注入**（DSH 内置 / 插件运行时注册 /
+     * Agent 预设渠道），不是面板受管的磁盘文件；正文与资源只读，但启停
+     * （本项目默认 / 本会话）与磁盘技能同逻辑。
+     *
+     * 旧宿主没有该字段 ⇒ 全部按磁盘行渲染（字段缺失即旧行为）。
+     */
+    injected?: boolean;
+    /** 注入来源类别（仅 injected 行）。 */
+    origin?: ClientSkillOrigin;
+    /** 展示用注入方名（「DSH 内置（Office）」/ `dsh-to-figma` / preset id）。 */
+    channel?: string;
+    /** registry provider id（诊断用；不参与路由）。 */
+    provider?: string;
+    /** registry 原始 source（bundled / custom / runtime / 插件自定义 source）。 */
+    registrySource?: string;
+    /** 资源基准类别；缺省 = 无资源基准（只给正文）。 */
+    resourceBaseKind?: ClientSkillResourceBaseKind;
+    /** true = 正文/资源只读（UI 隐藏编辑/删除等写操作，但保留启停）。 */
+    contentReadOnly?: boolean;
+    /** 仅 injected 行：本项目默认是否禁用（来自 capability-overrides.json 的 skills 清单）。 */
+    disabledInProject?: boolean;
     /** 可写条目所属的受管根目录（写回/导出/导入时按 root 精确寻址）。 */
     root?: string;
     /**
@@ -50,8 +76,30 @@ export interface ClientSkillSummary {
 export interface ClientSkillDetail extends ClientSkillSummary {
     spec: SkillSpec;
     body: string;
+    /**
+     * 资源条目（注入行 = registry `resourceBase.directory` 的一层条目名，
+     * 文件与目录都可能出现；磁盘行 = 技能目录下的文件清单）。
+     */
     resources: string[];
+    /** 仅注入行：true = 本详情来自 registry fallback（内容只读，无磁盘文件可写）。 */
+    fromRegistry?: boolean;
+    /** 仅注入行：资源基准不可浏览时的说明（url / opaque / 目录读不到）。 */
+    resourceBaseNote?: string;
 }
+/** 读取注入技能单个资源文件的失败码（业务失败，见宿主契约 §7.3）。 */
+export type SkillResourceErrorCode = "not-found" | "escape" | "not-text" | "too-large" | "unsupported-base" | "registry-unavailable" | "requires-session" | "read-only";
+/** 读取注入技能单个资源文件的结果。 */
+export type SkillResourceResult = {
+    ok: true;
+    path: string;
+    size: number;
+    content: string;
+    truncated: boolean;
+} | {
+    ok: false;
+    errors: string[];
+    code?: SkillResourceErrorCode;
+};
 /** 创建 skill 的入参（scope/target 决定落盘位置）。 */
 export interface CreateSkillInput {
     scope: WritableScope;
@@ -109,6 +157,11 @@ export type ExportFilesResult = {
     name: string;
     format: SkillFormat;
     files: SkillFilePayload[];
+    /**
+     * 注入技能的内容快照：只有正文，资源文件不打包（宿主 additive 字段；
+     * 旧宿主缺省 = 非降级导出）。
+     */
+    lossy?: boolean;
 } | {
     ok: false;
     errors: string[];
@@ -141,7 +194,16 @@ export interface SkillsApi {
         enabled: boolean;
     }): Promise<OpResult>;
     /** 读取单个 skill 详情；不存在返回 undefined。 */
-    read(name: string): Promise<ClientSkillDetail | undefined>;
+    read(name: string, ref?: SkillRef): Promise<ClientSkillDetail | undefined>;
+    /**
+     * 读取**注入技能**单个资源文件的文本内容（路径边界由宿主校验：`..` /
+     * 绝对路径 / 符号链接 / 超 256 KiB 都会被业务失败拒绝并带 `code`）。
+     * 只对 `resourceBase.kind === "directory"` 的注入行有意义。
+     */
+    readResource(input: {
+        name: string;
+        path: string;
+    }): Promise<SkillResourceResult>;
     create(input: CreateSkillInput): Promise<OpResult>;
     update(input: {
         scope: WritableScope;
@@ -429,9 +491,15 @@ export interface McpApi {
         enabled: boolean | undefined;
     }): Promise<void>;
 }
-/** 面板视角的完整禁用状态（各域的禁用清单 + 声明文件路径；skills 不走此机制）。 */
+/** 面板视角的完整禁用状态（各域的禁用清单 + 声明文件路径）。 */
 export interface ClientOverrides {
     mcp: string[];
+    /**
+     * 本项目默认禁用的**注入技能**名（宿主 registry 注入的内置 / 插件 /
+     * preset 条目；磁盘技能的项目级禁停仍走 frontmatter + shadow stub）。
+     * 旧宿主缺失该字段 ⇒ 视作空清单。
+     */
+    skills: string[];
     /** 声明文件绝对路径（无项目时缺省）。 */
     filePath?: string;
 }
@@ -443,6 +511,9 @@ export interface OverridesApi {
      * 切换某个**全局**能力在本项目的禁用状态：不在清单里 → 加入（禁用）；
      * 已在清单里 → 移除（恢复）。落盘 `<项目根>/.agents/capability-overrides.json`，
      * 读取兼容旧位置 `.dsh` / `.claude`。
+     *
+     * `domain` 取 `"skills"` 时只对注入技能生效（合法的 kebab-case 名）；
+     * 写盘成功后宿主会对同项目的 live 会话热应用（注册/解除会话 shadow）。
      */
     toggle(domain: CapabilityDomain, key: string): Promise<OpResult>;
 }
@@ -546,6 +617,19 @@ export interface JevRankItem {
     kind: "skill" | "mcp";
     name: string;
     description: string;
+    /**
+     * 能力作用域（additive）：项目 / 全局 / 注入（external）。旧宿主没有该
+     * 字段；注入行以 `origin` 为准，缺失时按 `source` 回落。
+     */
+    source?: "project" | "global" | "external";
+    /** 注入来源类别（additive；磁盘行缺省）。 */
+    origin?: ClientSkillOrigin;
+    /** 展示用注入方名（与面板 `channel` 同源）。 */
+    channel?: string;
+    /** registry provider id（诊断用）。 */
+    provider?: string;
+    /** true = 内容只读（启用/禁用仍可）。 */
+    contentReadOnly?: boolean;
     /** 0..1 的 noul 分数；无答案记 0。 */
     score: number;
     /** 能力本身可启用（与 session 活性无关）。 */

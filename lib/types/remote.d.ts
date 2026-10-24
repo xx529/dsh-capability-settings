@@ -58,6 +58,8 @@ export interface PanelRpcService {
          */
         setSessionEnabled(input: unknown): Promise<unknown>;
         read(input: unknown): Promise<unknown>;
+        /** 读取注入技能的资源文件（路径边界见 skills/registry.ts；业务失败在 value.code 里）。 */
+        readResource(input: unknown): Promise<unknown>;
         create(input: unknown): Promise<unknown>;
         update(input: unknown): Promise<unknown>;
         remove(input: unknown): Promise<unknown>;

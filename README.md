@@ -12,9 +12,12 @@
 
 > **界面版本提示**：顶部截图是 **v7 预览**（工作区列表在左导航）；文中「技能详情」
 > 「MCP 详情」两张仍是 **v6 预览（上一版）**——详情区在 v7 未改版式，仅中列/导航变化。
-> **这些截图都不含第三个域 Tab「Jev 模型」与首屏「✦ 能力决策」**（v10/v11 新增）；
-> 新界面见 `docs/figma/preview/v11-*.png`（5 帧）与下文「Jev 能力决策」。当前 IA 说明见
-> 「一个面板，管住三个能力域」与 [docs/ux/panel-upgrade.md](docs/ux/panel-upgrade.md)。
+> **这些截图都不含第三个域 Tab「Jev 模型」与首屏「✦ 能力决策」**（v10/v11 新增），
+> **也不含注入技能分组与来源标签**（v12 新增）；新界面见
+> `docs/figma/preview/v11-*.png`（能力决策 5 帧）与并入 v12 的
+> `docs/figma/preview/v8-01/02-*.png`、`v11-04-results.png`（v12 提案原图见 `v12-*.png`）。
+> 当前 IA 说明见「一个面板，管住三个能力域」「注入技能」与
+> [docs/ux/panel-upgrade.md](docs/ux/panel-upgrade.md)。
 
 > **外壳版本要求**：侧栏入口用的是 root 作用域的 `sidebar.panellist` 槽
 > （「全局面板」图标排）与同 id 的 `main` keyed 槽，**需要 dsh 外壳 ≥ 0.2.0-rc.2**
@@ -31,6 +34,10 @@
 > 上表是两个**条目域**（技能 / MCP）。面板另有第三个域 Tab **「Jev 模型」**：它不是条目管理，
 > 而是 TypeSafe Jev 的全局配置页（第三 Tab 无计数、无搜索、无左导航），并驱动首屏
 > **「✦ 能力决策」**。详见下文「Jev 能力决策」。
+>
+> 表中「编辑 / 删除 / 导入」等写操作只作用于本插件**受管磁盘目录**下的技能；由宿主
+> registry 注入的技能（DSH 内置 / 插件运行时 / Agent 预设渠道）**内容只读**，只能
+> 「本项目默认 / 当前会话」启停，详见下文「注入技能」。
 
 ## 配置文件位置
 
@@ -39,7 +46,7 @@
 
 | 配置 | 写入目标 | 读取兼容（旧位置） |
 |---|---|---|
-| 项目级「默认关闭」声明（MCP 面板的「默认」开关） | `<项目根>/.agents/capability-overrides.json` | `.dsh` → `.claude` |
+| 项目级「默认关闭」声明（MCP 面板的「默认」开关 + 注入技能的「本项目启用」开关） | `<项目根>/.agents/capability-overrides.json`（`mcp` / `skills` 两个列表） | `.dsh` → `.claude` |
 | 项目级「全局能力引用」声明（MCP 的「导入到本项目」） | `<项目根>/.agents/capability-imports.json` | — |
 | 全局 MCP 服务器 | `~/.agents/mcp.json` | `~/.dsh` → `~/.claude` |
 | Skills（项目/全局） | `.agents/skills`、`~/.agents/skills` | `.dsh/skills`（可写）、`.claude/skills`（只读展示） |
@@ -190,6 +197,54 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   停掉 agent 自动触发，用「在本项目禁用」（整体屏蔽），或先导入到本项目、
   再在项目副本的详情里关闭「模型调用」（保留 `/name` 手动触发的细粒度控制）。
 
+### 🧩 注入技能：来源展示、只读内容与本项目 / 本会话启停
+
+宿主技能注册表（`ctx.get("skills")`）里还有一类模型实际能看到、但不在本插件
+受管磁盘目录里的条目——由 DSH 随包、插件运行时或 Agent 预设渠道**注入**的技能。
+面板现在把它们**只读**合并进列表：技能的「全局」scope 下多出 **「注入技能」分组**
+（组头 `注入技能 · N · 内容只读 · 可启停`），按名称排序，同名时以磁盘条目为准。
+
+每行带三类标签：
+
+- **来源类别**：**内置**（DSH 随包，如 Office 技能）/ **插件**（插件运行时注册）/
+  **预设**（Agent 预设渠道）；
+- **格式**：目录 / `.md`；
+- **渠道名**：`DSH 内置（Office）`、`dsh-to-figma`、`dsh-remote`、
+  `插件运行时注入`，或 preset id（如 `cordis`；解析不出时显示「预设（未知）」）。
+
+启停与只读语义（与磁盘技能**同逻辑、同开关位置**）：
+
+- **面板行开关 = 本项目默认启停**：写 `<项目根>/.agents/capability-overrides.json`
+  的 `skills` 列表（与 `mcp` 列表并列、互不影响），新建对话按它决定该注入技能
+  是否默认可用；只影响本项目。注入技能没有磁盘文件，所以**不写 frontmatter**，
+  由插件在 `agent/created` 时按该名单在 agent 作用域注册同名 runtime shadow。
+- **会话能力区 / 首屏 hero = 当前对话启停**：注入行与磁盘技能同列，开关调
+  `skills.setSessionEnabled`，只作用于当前会话（内存态；优先级
+  **显式会话覆盖 > 项目默认**）；冷会话（没有 live agent）时开关置灰。
+- **内容只读**：注入技能没有可写的磁盘副本。详情页显示来源 / 渠道 + 只读原因条，
+  隐藏 编辑、删除、导入、调用方向、导出到宿主路径等写操作（宿主侧对注入行的写
+  RPC 同样返回 `read-only` 业务失败）；仍可查看正文、浏览
+  `resourceBase.directory` 下的资源文件（按需读取，单文件 256 KB 上限；`../`、
+  绝对路径、符号链接、非文本会返回明确错误）、导出为单文件 `.md` 正文快照
+  （资源文件不打包，导出结果带 `lossy` 标记）。
+- **冷会话看不到 preset 技能**：`预设` 渠道的技能由 preset 层 provider 提供，
+  只有绑定该预设且有 live agent 的会话才可见（无 agent 时宿主 registry 无法选中
+  preset 层）。冷会话因此只有 global 层注入（内置 / 插件）可见，Jev 评分集合也
+  不含 preset 技能；会话开始后可重新评分。
+- **降级路径**：宿主 registry 缺失 / 不可用 / 快照不完整时，面板**只显示磁盘
+  技能**并提示一次，不弹异常、不影响磁盘读写；注入条目随 `skills/change` 刷新，
+  插件卸载后不留死行。`resourceBase` 为 `url` / `opaque` 时详情只给正文并标注
+  「资源在远端 / 不可浏览」。
+
+> Figma 基线：v12 提案（注入技能来源）已**补丁式并入**面板终稿 v8 的技能·全局帧
+> （`42:3433`：注入分组 / 5 个注入行 / 只读详情；`42:3376` 仅同步全局计数）与能力决策
+> v11 的 04 结果帧（`56:7679`：决策行来源标签）；历史页面（v5/v6/v7/v9/v10 与 v12 提案页
+> `88:8519`）保留不动。`docs/figma/preview/v8-01-skills-project.png`（152633 B）、
+> `v8-02-skills-global.png`（165194 B）、`v11-04-results.png`（159880 B）已按新 UI 重导；
+> 可重导入 scene 已同步：`v8-01`（264 节点）、`v8-02`（278）、`v11-04`（170），
+> 重导方式见 `docs/figma/README.md` §3.1.3。
+> **v7 及更早截图不含注入技能分组与来源标签**，仅作历史对照。
+
 ### 🔌 MCP：改配置即热挂载，不重启、不改 preset
 
 - 配置文件与 **Claude Code 的 `.mcp.json` 格式兼容**：项目级
@@ -328,6 +383,12 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   步长 `0.05`、默认 `0.50`，分数 ≥ 阈值预勾选；可手改勾选；显示 `已选 n / N`
   （N = 全部参与评分的技能 + MCP，含不可切换项）；底栏「重新评分 / 取消 /
   应用所选（n）」。
+- **注入技能参与评分与应用**：会话 `skills.sessionList` 含内置 / 插件 / preset 注入
+  行后，Jev 枚举自动纳入它们（id 仍是 `skill:<name>`，应用写会话开关，逻辑与磁盘
+  技能一致）。结果行在能力名旁显示来源小标签（**内置** / **插件** / **预设渠道**，
+  取自宿主 additive 字段 `origin` / `channel`）；旧宿主没有这些字段时按原样不显示。
+  冷会话评分集合**不含** preset 技能（无 live agent 选不中 preset 层），会话开始后
+  可重新评分。
 - 评分请求**一次**发给 `POST {Base URL}/v1/systemone`：每个能力一条 `noul`，一个
   0–1 分；**不分片、不按能力拆请求**。单次最多 300 个能力（超出直接报错不请求）；
   超上下文返回「输入内容超出模型上下文上限」，不自动截断或分批。
@@ -392,6 +453,12 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 - **不重复注册 skills provider**：面板列表直接读受管根目录的磁盘（与官方
   filesystem provider 口径逐字节一致），启停只写 frontmatter 调用键，
   由宿主的文件 watcher 原生生效。
+- **注入技能走 registry 只读桥**：面板 `skills.list` / 会话 `skills.sessionList`
+  = 受管磁盘行 + `ctx.get("skills").snapshot()` 里**非受管根**的注入条目
+  （内置 / 插件运行时 / preset 层；同名磁盘优先、过滤自身 shadow），只传
+  `scope: agent` 读 preset 层；详情走 `ctx.skills.get` fallback、资源走新增
+  `skills.readResource`（基准目录只来自宿主，路径边界在宿主校验），导出为正文
+  快照。宿主 registry 不可用时自动退回「仅磁盘行」。
 - **技能详情的内容区不新增 RPC**：复用 `skills.export` 的一次性全量文件
   清单（相对路径 + base64），客户端组树、解码、缓存；Markdown 预览用自研
   轻量渲染器（React 元素树，零依赖、无 XSS 面）。
@@ -487,7 +554,8 @@ src/
   client.ts       客户端插件入口（侧栏 panellist 入口 + main 页面 + 会话内入口）
   remote.ts       host↔client RPC 接线（endpoint 按域前缀路由）
   shared/         项目根探测 / 文件写锁 / skill 根定位与来源分类（两端共用）
-  skills/         skills 域：磁盘读写、CRUD、安装/导出、URL 下载、shadow stub、校验
+  skills/         skills 域：磁盘读写、CRUD、安装/导出、URL 下载、shadow stub、校验、
+                  registry 桥（宿主注入技能合并 / 详情 fallback / 资源边界 / 导出快照）
   mcp/            MCP 域：.mcp.json 读写、全局单例 + 项目级每会话挂载、探测（测试连接）
   overrides/      项目级「默认关闭」声明：.agents/capability-overrides.json
   imports/        项目级「全局能力引用」：.agents/capability-imports.json（MCP）
@@ -501,12 +569,20 @@ src/
 ## 设计文档与截图
 
 - 能力面板（技能 / MCP）规格：[docs/ux/panel-upgrade.md](docs/ux/panel-upgrade.md)（v1.4 / v7 IA）
+- 注入技能来源与启停契约：[docs/architecture/skill-sources.md](docs/architecture/skill-sources.md)
 - Jev 能力决策：
   - 产品规格（v1.3.1，含实现裁决记录）：[docs/specs/jev-auto-select.md](docs/specs/jev-auto-select.md)
   - 交互与视觉规格（v1.5）：[docs/ux/jev-auto-select.md](docs/ux/jev-auto-select.md)
   - 架构与契约：[docs/architecture/jev-capability-decision.md](docs/architecture/jev-capability-decision.md)
-- 原型预览（v11，当前）：`docs/figma/preview/v11-01-entry.png` … `v11-05-config.png`；
-  Figma 页 **`Capability Panel · 能力决策 v11`**
+- 原型预览（当前基线）：
+  - 面板终稿 **v8**（技能列表/详情，已并入 v12 注入技能分组与来源标签）：
+    `docs/figma/preview/v8-01-skills-project.png` … `v8-04-mcp-global.png`，
+    Figma 页 **`Capability Panel · 终稿 v8`**（`42:3373`）
+  - 能力决策 **v11**（5 帧；04 结果帧已并入 v12 来源标签）：
+    `docs/figma/preview/v11-01-entry.png` … `v11-05-config.png`，
+    Figma 页 **`Capability Panel · 能力决策 v11`**（`56:7043`）
+  - v12 提案原图（保留作提案，不替代基线）：`docs/figma/preview/v12-01-skills-global.png` …
+    `v12-04-session-capability-tab.png`，Figma 页 `Capability Panel · Skill 来源 v12（提案）`
 - 建稿/坐标规格：`docs/figma/prototype/v11/spec-v11.md`；面板 v7 原型保留在
   `docs/figma/preview/v7-01-skills-project.png`、`v7-02-mcp-project.png`
 - 运行时验证报告（tester，task-17）：`notes/verify/jev-capability-decision/report.md`
@@ -514,8 +590,9 @@ src/
 
 > `docs/screenshots/` 下的图片是 1.1–1.2 旧版界面留档（包含已下线的快捷消息域与
 > 已移除的输入框能力工具组），仅作历史对照，不再在本文中引用。
-> **跨版本说明**：v7 及更早截图不含第三个域 Tab「Jev 模型」与首屏「✦ 能力决策」；
-> 当前界面以 v11 预览（`docs/figma/preview/v11-*.png`）为准，v6/v7 仅作历史对照。
+> **跨版本说明**：v7 及更早截图不含第三个域 Tab「Jev 模型」、首屏「✦ 能力决策」
+> 与注入技能分组/来源标签；当前界面以 v8（面板）与 v11（能力决策）预览为准，
+> v6/v7 仅作历史对照。
 > 尺寸与线框见 `docs/ux/jev-auto-select.md` 与 `docs/ux/panel-upgrade.md` 的 §4 / §9。
 
 ## License

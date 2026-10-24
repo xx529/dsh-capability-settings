@@ -30,6 +30,8 @@ import type {
   JevTestResult,
   McpTestResult,
   McpUpsertInput,
+  SkillResourceErrorCode,
+  SkillResourceResult,
   WorkspaceOption,
 } from "./api.js";
 
@@ -145,14 +147,68 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
         return result;
       },
 
-      /** 详情：宿主可能返回 undefined（不存在）。 */
-      async read(name) {
+      /** 详情：宿主可能返回 undefined（不存在）；注入行走 registry fallback。 */
+      async read(name, ref) {
         const cwd = deps.currentWorkspaceCwd();
-        const result = await rpc("skills.read", { name, cwd });
-        if (!result.ok) throw new Error(result.errors.join("; "));
-        const detail = result.value as Partial<ClientSkillDetail> | undefined;
-        if (detail === undefined) return undefined;
-        return detail as ClientSkillDetail;
+        // `ref` 带 root（磁盘行）/ scope（兜底）——旧实现只传 name，导致项目技能
+        // 详情恒 not found（架构契约 §8.5）；注入行则由宿主回落到 registry。
+        const result = unwrap(
+          await rpc("skills.read", {
+            name,
+            cwd,
+            ...(ref ?? {}),
+            ...(deps.sessionId !== undefined ? { sessionId: deps.sessionId } : {}),
+          }),
+        );
+        // 业务失败（磁盘 not found / registry 命中但 get 失败）按「无详情」处理，
+        // 内容区显示空态而不是把错误对象当详情渲染。
+        if (!result.ok) return undefined;
+        return toSkillDetail(result, name);
+      },
+
+      /**
+       * 注入技能的单个资源文件读取：业务失败（escape / not-text / too-large …）
+       * 原样返回 `{ok:false, errors, code}`，由内容区就地展示；传输层失败才抛。
+       */
+      async readResource(input) {
+        const cwd = deps.currentWorkspaceCwd();
+        const result = unwrap(
+          await rpc("skills.readResource", {
+            ...input,
+            cwd,
+            ...(deps.sessionId !== undefined ? { sessionId: deps.sessionId } : {}),
+          }),
+        );
+        if (!result.ok) {
+          const code = (result as unknown as Record<string, unknown>).code;
+          return {
+            ok: false as const,
+            errors: result.errors,
+            ...(typeof code === "string" && code.length > 0 ? { code: code as SkillResourceErrorCode } : {}),
+          };
+        }
+        // 关键：`unwrap` 已把 `{ok:true,value:{ok:true,path,…}}` 展平成业务对象
+        // `{ok:true,path,…}` 本身（见上方 unwrap 定义），这里不能再读
+        // `result.value`——那会恒为 undefined，把成功响应误判成「非法结果」
+        // （安全审计 task-6 发现 1）。仍兼容外层多包一层 `value` 的防御性形状。
+        const raw = result as unknown as Record<string, unknown>;
+        const value = (
+          typeof raw.path === "string"
+            ? raw
+            : raw.value !== null && typeof raw.value === "object"
+              ? (raw.value as Record<string, unknown>)
+              : raw
+        ) as Record<string, unknown>;
+        if (typeof value.path !== "string" || typeof value.content !== "string") {
+          return { ok: false as const, errors: ["资源读取返回了非法结果"] };
+        }
+        return {
+          ok: true as const,
+          path: value.path,
+          size: typeof value.size === "number" && Number.isFinite(value.size) ? value.size : value.content.length,
+          content: value.content,
+          truncated: value.truncated === true,
+        };
       },
 
       async create(input: CreateSkillInput) {
@@ -235,6 +291,7 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
           name: typeof self.name === "string" ? self.name : input.name,
           format: self.format === "directory" ? "directory" : "flat",
           files: self.files as { path: string; content: string }[],
+          ...(self.lossy === true ? { lossy: true } : {}),
         };
       },
 
@@ -386,7 +443,15 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
         const cwd = deps.currentWorkspaceCwd();
         const result = await rpc("overrides.get", { cwd });
         if (!result.ok) throw new Error(result.errors.join("; "));
-        return result.value as ClientOverrides;
+        const view = (result.value ?? {}) as Record<string, unknown>;
+        const listOf = (value: unknown): string[] =>
+          Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+        return {
+          mcp: listOf(view.mcp),
+          // skills 域是宿主 additive 字段：旧宿主缺失时按空清单（旧行为不变）。
+          skills: listOf(view.skills),
+          ...(typeof view.filePath === "string" ? { filePath: view.filePath } : {}),
+        } satisfies ClientOverrides;
       },
 
       /** 切换某个全局能力在本项目的禁用状态（写回后由面板重拉列表刷新标记）。 */
@@ -507,9 +572,18 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
  * 把宿主返回的行对象投影成客户端摘要：
  * 调用策略是嵌套的 `invocation` 对象 → 拍平成两个布尔；
  * 其它字段做了宽松的字符串归一，防御宿主侧数据漂移。
+ *
+ * 注入字段（`injected` / `origin` / `channel` / …）是 additive 的：宿主/旧
+ * 宿主缺失时整组字段不出现，UI 按磁盘行渲染（降级兼容）。
  */
 function toSummary(value: Record<string, unknown>): ClientSkillSummary {
   const inv = (value.invocation ?? {}) as Record<string, unknown>;
+  const origin = value.origin === "bundled" || value.origin === "plugin" || value.origin === "preset" ? value.origin : undefined;
+  const resourceBaseKind =
+    value.resourceBaseKind === "directory" || value.resourceBaseKind === "url" || value.resourceBaseKind === "opaque"
+      ? value.resourceBaseKind
+      : undefined;
+  const injected = value.injected === true;
   return {
     name: String(value.name),
     description: String(value.description ?? ""),
@@ -525,6 +599,53 @@ function toSummary(value: Record<string, unknown>): ClientSkillSummary {
     ...(value.projectShadow === "stub" || value.projectShadow === "skill" ? { projectShadow: value.projectShadow } : {}),
     ...(typeof value.enabledInSession === "boolean" ? { enabledInSession: value.enabledInSession } : {}),
     ...(typeof value.canToggleInSession === "boolean" ? { canToggleInSession: value.canToggleInSession } : {}),
+    ...(injected ? { injected: true } : {}),
+    ...(origin !== undefined ? { origin } : {}),
+    ...(typeof value.channel === "string" && value.channel.length > 0 ? { channel: value.channel } : {}),
+    ...(typeof value.provider === "string" && value.provider.length > 0 ? { provider: value.provider } : {}),
+    ...(typeof value.registrySource === "string" && value.registrySource.length > 0 ? { registrySource: value.registrySource } : {}),
+    ...(resourceBaseKind !== undefined ? { resourceBaseKind } : {}),
+    ...(value.contentReadOnly === true ? { contentReadOnly: true } : {}),
+    ...(typeof value.disabledInProject === "boolean" ? { disabledInProject: value.disabledInProject } : {}),
+  };
+}
+
+/**
+ * 把 `skills.read` 的业务结果投影成客户端详情。
+ *
+ * 宿主的 `ReadResult` 是 `{ ok: true, spec, body, format, resources,
+ * fromRegistry?, resourceBaseNote?, path? }`（不含拍平的摘要字段），这里补齐
+ * `ClientSkillSummary` 的形状；注入行补 `injected` 由调用方从列表行带下来，
+ * 本函数只透传宿主给的只读标记。
+ */
+function toSkillDetail(result: unknown, name: string): ClientSkillDetail | undefined {
+  const raw = (result ?? {}) as Record<string, unknown>;
+  // 兼容两种输入：未解信封的 `{ok, value}` 与已解开的业务结果。
+  const value = (raw.value !== null && typeof raw.value === "object" ? (raw.value as Record<string, unknown>) : raw) as Record<string, unknown>;
+  const spec = (value.spec ?? {}) as Record<string, unknown>;
+  const invocation = (spec.invocation ?? {}) as Record<string, unknown>;
+  const resources = Array.isArray(value.resources)
+    ? value.resources.filter((item): item is string => typeof item === "string")
+    : [];
+  if (typeof value.body !== "string") return undefined;
+  return {
+    name: typeof spec.name === "string" && spec.name.length > 0 ? spec.name : name,
+    description: typeof spec.description === "string" ? spec.description : "",
+    ...(typeof spec.whenToUse === "string" && spec.whenToUse.length > 0 ? { whenToUse: spec.whenToUse } : {}),
+    // frontmatter 形态 → 拍平布尔（缺省语义与宿主 invocationPolicy 一致）。
+    modelInvocable: invocation["disable-model-invocation"] !== true,
+    userInvocable: invocation["user-invocable"] !== false,
+    source: String(value.source ?? "unknown"),
+    format: value.format === "directory" ? "directory" : "flat",
+    readOnly: value.readOnly === true,
+    ...(typeof value.path === "string" ? { path: value.path } : {}),
+    spec: spec as unknown as ClientSkillDetail["spec"],
+    body: value.body,
+    resources,
+    ...(value.fromRegistry === true ? { fromRegistry: true } : {}),
+    ...(typeof value.resourceBaseNote === "string" && value.resourceBaseNote.length > 0
+      ? { resourceBaseNote: value.resourceBaseNote }
+      : {}),
   };
 }
 
