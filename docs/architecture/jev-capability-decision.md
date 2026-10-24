@@ -3,7 +3,7 @@
 | 项 | 值 |
 |---|---|
 | 文档 ID | `docs/architecture/jev-capability-decision.md`（本文件） |
-| 版本 | v1.1（rank 请求形状修订；RPC 契约不变） |
+| 版本 | v1.2（apply 批量/并发执行器 + 筛选语义；rank 契约见 v1.1） |
 | 日期 | 2026-10-24 |
 | 作者 | architect2（task-14） |
 | 上游依据 | `docs/specs/jev-auto-select.md` v1.3（WHAT/验收）、`docs/ux/jev-auto-select.md` v1.5（HOW-UI/文案）、`docs/research/jev-auto-select.md`（API 与仓库考古） |
@@ -44,17 +44,18 @@ A11Y 8 / NAR 6 / REG 5）。实现与验收**以仓库当前 spec 为准**；本
 | 2 | **密钥** | `getConfig` 只回 `hasApiKey/apiKeySource/apiKeyLast4`，无明文；key 解析优先级 **env（`apiKeyEnv`，默认 `TYPESAFE_API_KEY`）> 文件 `apiKey`**；`test`/`rank` 在**宿主进程** fetch；所有错误/日志经脱敏（隐去 Bearer/Authorization/key 原文）。 |
 | 3 | **RPC** | 在 `PanelRpcService.jev` 增加 `getConfig/setConfig/test/rank/apply`，`handleEndpoint` 加 5 个 `case "jev.*"`；传输信封恒 `{ok:true,value}`，业务失败一律 `value:{ok:false,...}`（见 §5）。 |
 | 4 | **rank** | 一次 `POST {baseURL}/v1/systemone`：`state={request,guidance}`（**能力不进 state**）；每能力一条 `noul` question，`instructions` 为**结构化对象**并内嵌 `capability{kind,name,description,whenToUse?,tools?}`（MCP 带工具清单，题目逐能力唯一）；共享判据只在 `state.guidance` 出现一次；`score=noul`；排序 desc → 技能先于 MCP → 名称；错误映射 9 码；429/529 最多重试 2 次（退避 500/1000ms），4xx 不重试；不发 long-context header；不分片（v1.1 请求形状变更，原因见 §6.0）。 |
-| 5 | **apply** | 宿主侧按 `id` 重解析计划（不信任客户端 name/target）→ 快照前态 → 串行写 `skills.setSessionEnabled` / `mcp.setSessionEnabled` → 失败按前态逆序回滚 → 返回 `applied/skipped/failed/pending`；冷会话走 pending 队列（见 §7、§8）。 |
+| 5 | **apply** | 宿主按 `id` 重解析 → **筛选语义**（plan = 已勾选集合：选中启用、未选关闭，只改会话开关）→ 只留状态不一致项 → **enable→disable 两阶段批量写**（skills 同一 tick 全部发起 + `allSettled`，宿主注册表 effect 合并刷新；MCP 并发 4）→ 任一失败逆序批量回滚 → 返回 `applied/enabled/disabled/skipped/pending`（成功支 additive `elapsedMs`）；冷会话入队完整目标集合并用同一执行器重放（见 §7、§8，v1.2）。 |
 
 ### 1.2 冷会话结论（最高风险项）
 
 **可行，且不需要新增平台钩子。** 复用 `src/skills/session.ts` 已验证的模式：
 
 - 判活：`ctx.get("agents").list()` 中存在 `agent.id === sessionId`（`agent.id === session.id`）；
-- 无 live agent ⇒ `jev.apply` 不写、把**已解析的计划**存入宿主内存
-  `Map<sessionId, PendingPlan>`，返回 `{ok:true, pending:true}`；
+- 无 live agent ⇒ `jev.apply` 不写、把**完整目标集合**（可应用能力的 `{id, desired}`，含关闭项）
+  存入宿主内存 `Map<sessionId, PendingPlan>`，返回 `{ok:true, pending:true}`；
 - `ctx.on("agent/created", ({agent}) => ...)` 命中 pending ⇒ **`setTimeout(0)` 延后**再应用
-  （让 `mcp/loader` 等同类监听先完成登记），失败重试 2 次（100ms/300ms）；
+  （让 `mcp/loader` 等同类监听先完成登记）；重放**复用同一批量执行器**（重新枚举 + 等 skills 就绪 +
+  两阶段批量写），失败短重试 2 次（100ms/300ms）；
 - 插件启动时 `agents.list()` 里的存活会话天然判活，无需补登记 pending；
 - `agent/disposed` 清理该 session 的 pending；插件 dispose 时移除监听并清空两张 Map。
 
@@ -517,7 +518,8 @@ export interface JevApplyPlanItem {
   kind: "skill" | "mcp";
   name: string;                    // 仅用于诊断/日志；宿主按 id 重解析，不信任
   target?: string;                 // 同上；MCP 项目条目=config key，服务/外部=serverName
-  enabled: true;                   // 本期只支持「启用」，不支持用本端点关闭（关闭走既有面板）
+  enabled: true;                   // 客户端只提交**勾选项**；宿主把 plan 当「选中集合」= 目标真值
+                                   // （v1.2 筛选语义：未勾选的可应用能力会被**关闭**，见 §7.2）
 }
 
 export interface JevApplySkipped { id: string; reason: JevApplySkipReason }
@@ -526,20 +528,23 @@ export interface JevApplyFailed { id: string; reason: string }
 export type JevApplyResult =
   | {
       ok: true;
-      applied: number;             // 回滚后仍生效的条数（全部成功=plan 有效条数；回滚=0）
+      applied: number;             // 实际写入条数 = enabled + disabled（回滚=0）
+      enabled: number;             // v1.2 additive：本次实际启用数（勾选且原关闭）
+      disabled: number;            // v1.2 additive：本次实际关闭数（可应用但未勾选、原开启）
       skipped: JevApplySkipped[];
-      pending: boolean;            // true = 冷会话排队，尚未写入
+      pending: boolean;            // true = 冷会话排队，尚未写入（此时 applied/enabled/disabled 均 0）
       failed?: JevApplyFailed[];
       errors?: string[];           // additive：回滚细节/诊断（脱敏）
+      elapsedMs?: number;          // v1.2 additive（task-47）：成功支 = 枚举+批量写入总耗时(ms)
       pendingOutcome?: JevPendingOutcome;
     }
   | { ok: false; code: JevApplyErrorCode; errors: string[] };
 
 export interface JevPendingOutcome {
-  applied: number;
+  applied: number;               // 激活后实际写入条数（筛选语义下 = 启用数 + 关闭数）
   failed: number;
   errors: string[];
-  at: number;                      // epoch ms
+  at: number;                    // epoch ms
 }
 
 /* 便于实现/前端引用的收窄别名 */
@@ -1010,6 +1015,11 @@ MCP 写回映射（`target` / `kind` 与既有 `mcp.setSessionEnabled` 一致，
 - **评分集合** = 上述合并结果全集（含 `applicable=false`），保证 UX 能展示「不可切换 + 原因」；
 - **应用集合** = 评分集合按 §7.3 过滤后的子集；
 - 两个集合的差异必须在 `rank.items[].applicable/reason` 中可解释（不做静默过滤）。
+- **筛选语义（task-42，v1.2）**：`jev.apply` 的 `plan` 是「已勾选集合」= **目标真值**。宿主对
+  **当前会话全部可应用能力**计算目标态：`selected → enabled`、**未 selected → disabled**；
+  只写「当前状态 ≠ 目标状态」的项；不可应用项一律不动。
+  因此它**不再是** v1.1 的「只启用、不关闭」语义——应用一次 = 把本会话能力集合对齐到勾选结果
+  （仍只写会话级内存开关，不动项目默认与配置文件）。
 
 ### 7.3 可应用判定（`applicable`）
 
@@ -1028,142 +1038,184 @@ MCP 写回映射（`target` / `kind` 与既有 `mcp.setSessionEnabled` 一致，
 > 与 Lead 的冷会话排队裁决直接冲突。故 `applicable` 只在**live 会话**下参考 `canToggleInSession`；
 > 冷会话按能力本身可开判定，写入延后到激活（§8.6 给冲突处理）。
 
-### 7.4 `jev.apply` 入参校验
+### 7.4 `jev.apply` 入参校验与目标态
 
 | 条件 | 结果 |
 |---|---|
 | `sessionId` 缺失/空 | `{ok:false, code:"bad-request"}` |
 | `plan` 非数组 / 长度 0 / >500 | `bad-request` |
-| item 非对象 / `id` 不匹配 `^cap_[0-9a-f]{36}$` | 逐条进 `skipped`（`unknown-id`）；全无效且 plan 非空 → 仍返回 `ok:true, applied:0`（`skipped` 已解释） |
-| `kind` 非 `skill`/`mcp` | `skipped: unknown-id`（id 校验已足够；kind 仅冗余） |
-| `enabled !== true` | `skipped: unknown-id`（本期只接受启用） |
+| item 非法（非对象 / `id` 不匹配 `^cap_[0-9a-f]{36}$` / `enabled !== true`） | 逐条进 `skipped`（`unknown-id`） |
+| id 不在当前枚举中 | `skipped: unknown-id` |
+| live 会话下能力 `applicable=false` | `skipped: <reason>`（`hard-disabled` / `not-restrictable` / `not-toggleable` / `shadowed`） |
+| 冷会话下的 `not-toggleable` | **不算跳过**（§7.3 冷会话例外：能否切换取决于激活后是否就绪） |
+| 状态已等于目标（选中且已启用 / 未选且已关闭） | `skipped: already-applied`（状态一致，不写） |
+| 未在 plan 中出现且 `applicable=false` 的能力 | **不动、也不进 `skipped`**（不是用户可操作项） |
 | 枚举失败（服务异常） | `{ok:false, code:"write-failed"}`（附脱敏 errors） |
 
 **不信任客户端**：`name`/`target` 只用于日志与错误文案；实际写入目标从**重新枚举**的
-`id → Capability.write` 映射取。计划里的条目若 id 不在当前枚举中 ⇒ `skipped: unknown-id`。
+`id → JevCapability.write` 映射取。计划里的条目若 id 不在当前枚举中 ⇒ `skipped: unknown-id`。
 
-### 7.5 事务伪代码
+目标态计算（`planTargetOps`）：遍历**全部可应用能力** → `desired = selectedIds.has(id)` →
+`desired === enabledInSession` 记为一致跳过，否则生成 `PlannedOp{cap, desired, prev}`；
+排序为**稳定全序**：先 `desired=true`（enable 阶段）后 `desired=false`（disable 阶段），
+组内按 `id` 升序（保证可重放、可测试）。
+
+### 7.5 事务伪代码（v1.2：两阶段批量/并发）
 
 ```ts
+/** 一个待写操作：目标态 desired（true=启用，false=关闭）+ 前态快照。 */
+interface PlannedOp { cap: JevCapability; desired: boolean; prev: JevPrevState }
+
+/** 目标态计算（§7.2 筛选语义）：只对可应用能力算，只留状态不一致项。 */
+function planTargetOps(caps: JevCapability[], selectedIds: Set<string>) {
+  const ops: PlannedOp[] = [], consistent: JevApplySkipped[] = [];
+  for (const cap of caps) {
+    if (!cap.applicable) continue;                        // 不可应用：不动、不 skip
+    const desired = selectedIds.has(cap.id);
+    if (cap.enabledInSession === desired) {               // 已一致（含「未选且已关闭」）
+      consistent.push({ id: cap.id, reason: "already-applied" });
+      continue;
+    }
+    ops.push({ cap, desired, prev: snapshotPrev(cap) });
+  }
+  // 稳定全序：先 enable 后 disable，组内按 id 升序（可重放/可测试）
+  ops.sort((a, b) => (a.desired !== b.desired ? (a.desired ? -1 : 1) : a.cap.id < b.cap.id ? -1 : 1));
+  return { ops, consistent };
+}
+
 async function apply(input: unknown): Promise<JevApplyResult> {
-  const { cwd, sessionId, plan } = parseApplyInput(input);
-  if (!sessionId) return { ok: false, code: "bad-request", errors: ["sessionId is required"] };
-  if (!Array.isArray(plan) || plan.length === 0 || plan.length > 500) {
-    return { ok: false, code: "bad-request", errors: ["plan must be a non-empty array (<=500)"] };
-  }
+  const { cwd, sessionId, plan } = parseApplyInput(input);            // §7.4
+  const startedAt = performance.now();                                // elapsedMs 覆盖「枚举+写入」
+  const live = isSessionLive(ctx, sessionId);                         // §8.1
+  const caps = await enumerate({ cwd, sessionId, live });             // §7.1
 
-  const live = isSessionLive(ctx, sessionId);                     // §8.1
-  const caps = await enumerateCapabilities({ cwd, sessionId });   // 冷会话也能枚举（视图可用）
-  const byId = new Map(caps.map((c) => [c.id, c]));
-
-  const accepted: Array<{ cap: Capability; prev: PrevState }> = [];
-  const skipped: JevApplySkipped[] = [];
+  // 1) 解析勾选集合（只信 id；非法/未知/不可应用 → skipped）
+  const selectedIds = new Set<string>(), invalidSkips: JevApplySkipped[] = [];
   for (const item of plan) {
-    const cap = typeof item?.id === "string" ? byId.get(item.id) : undefined;
-    if (!cap) { skipped.push({ id: String(item?.id ?? ""), reason: "unknown-id" }); continue; }
-    // 冷会话：不判 canToggleInSession（§7.3），只判能力本体的硬性不可应用
+    const cap = isCapabilityId(item?.id) ? caps.find((c) => c.id === item.id) : undefined;
+    if (cap === undefined || item.enabled !== true) { invalidSkips.push({ id: String(item?.id ?? ""), reason: "unknown-id" }); continue; }
     if (!cap.applicable && !(live === false && cap.reason === "not-toggleable")) {
-      skipped.push({ id: cap.id, reason: cap.reason as JevApplySkipReason }); continue;
+      invalidSkips.push({ id: cap.id, reason: cap.reason ?? "not-toggleable" }); continue;
     }
-    if (cap.enabledInSession === true) { skipped.push({ id: cap.id, reason: "already-applied" }); continue; }
-    accepted.push({ cap, prev: snapshotPrev(cap) });
+    selectedIds.add(cap.id);
   }
 
-  if (!live) {                                                    // 冷会话：排队，不写
-    queuePendingPlan({ sessionId, cwd, items: accepted, skipped, createdAt: Date.now() });
-    return { ok: true, applied: 0, skipped, pending: true, pendingOutcome: consumePendingOutcome(sessionId) };
+  // 2) 目标态（筛选语义）：选中→启用、未选→关闭，只留状态不一致项
+  const { ops, consistent } = planTargetOps(caps, selectedIds);
+  const skipped = [...invalidSkips, ...consistent];
+
+  // 3) 冷会话：入队「完整目标集合」（含 desired=false），激活后重放（§8.3）
+  if (!live) {
+    queuePendingPlan({ sessionId, cwd, createdAt: Date.now(),
+      ops: caps.filter((c) => c.applicable).map((c) => ({ id: c.id, desired: selectedIds.has(c.id) })),
+      skipped: invalidSkips });
+    return { ok: true, applied: 0, enabled: 0, disabled: 0, skipped, pending: true,
+             elapsedMs: Math.round(performance.now() - startedAt),
+             pendingOutcome: consumePendingOutcome(sessionId) };
   }
 
-  const applied: Array<{ cap: Capability; prev: PrevState }> = [];
-  for (const entry of accepted) {
-    const result = await writeOne(sessionId, cwd, entry.cap);     // §7.5
-    if (!result.ok) {
-      const rollbackErrors = await rollback(sessionId, cwd, applied); // 逆序恢复
-      return {
-        ok: true, applied: 0,
-        skipped, pending: false,
-        failed: [{ id: entry.cap.id, reason: `write-failed${rollbackErrors.length ? "（回滚部分失败）" : ""}` }],
-        errors: [...result.errors, ...rollbackErrors].map(redactSafe),
-        pendingOutcome: consumePendingOutcome(sessionId),
-      };
-    }
-    applied.push(entry);
+  // 4) live：两阶段批量写（enable 全部 → disable 全部），失败逆序批量回滚
+  const writeResult = await applyPlannedOps(sessionId, cwd, ops, writeOne);
+  if (!writeResult.ok) {
+    return { ok: true, applied: 0, enabled: 0, disabled: 0, skipped, pending: false,
+             failed: [{ id: writeResult.failedId,
+                        reason: writeResult.rollbackFailed ? "write-failed（回滚部分失败）" : "write-failed" }],
+             errors: writeResult.errors.map(redactSafe),
+             pendingOutcome: consumePendingOutcome(sessionId) };
   }
-  return { ok: true, applied: applied.length, skipped, pending: false,
+  const enabled = writeResult.written.filter((op) => op.desired).length;
+  return { ok: true, applied: writeResult.written.length, enabled,
+           disabled: writeResult.written.length - enabled, skipped, pending: false,
+           elapsedMs: Math.round(performance.now() - startedAt),
            pendingOutcome: consumePendingOutcome(sessionId) };
 }
 ```
 
-`writeOne`：
+**单阶段执行器 `runWritePhase`（enable 或 disable）**：
 
 ```ts
-async function writeOne(sessionId: string, cwd: string | undefined, cap: Capability) {
-  if (cap.write.type === "skills") {
-    const r = await service.skills.setSessionEnabled({ sessionId, name: cap.write.name, enabled: true });
-    return r?.ok === false ? { ok: false as const, errors: r.errors ?? [] } : { ok: true as const };
-  }
-  const r = await service.mcp.setSessionEnabled({
-    sessionId, ...(cwd !== undefined ? { cwd } : {}),
-    target: cap.write.target, kind: cap.write.targetKind, enabled: true,
-  });
-  return r?.ok === false ? { ok: false as const, errors: r.errors ?? [] } : { ok: true as const };
+async function runWritePhase(phaseOps: PlannedOp[], write): Promise<WriteResult[]> {
+  const results: WriteResult[] = new Array(phaseOps.length);
+  const skillIdx: number[] = [], mcpIdx: number[] = [];
+  phaseOps.forEach((op, i) => (op.cap.write.type === "skills" ? skillIdx : mcpIdx).push(i));
+
+  // skills：同一 tick 全部发起（不逐条 await），再 allSettled ⇒ 宿主注册表 effect 合并为一次刷新
+  const skillPromises = skillIdx.map((i) => write(phaseOps[i]!.cap, phaseOps[i]!.desired));
+  // MCP：并发限流 4（manager/loader 自身有串行队列，避免打爆子进程/连接）
+  const mcpPromise = runWithConcurrency(mcpIdx, MCP_WRITE_CONCURRENCY /* 4 */,
+    (i) => write(phaseOps[i]!.cap, phaseOps[i]!.desired));
+  const [skillSettled, mcpResults] = await Promise.all([Promise.allSettled(skillPromises), mcpPromise]);
+  // 结果按原 phaseOps 顺序落位；失败判定取原顺序第一个失败
+  // …（skillSettled[i] → results[skillIdx[i]]；mcpResults[i] → results[mcpIdx[i]]）
+  return results;
 }
 ```
 
-`PrevState` 与回滚：
+**两阶段 + 失败回滚 `applyPlannedOps`**：
 
 ```ts
-type PrevState = { type: "skills"; enabled: boolean } | { type: "mcp"; enabled: boolean | undefined };
-
-function snapshotPrev(cap: Capability): PrevState {
-  return cap.write.type === "skills"
-    ? { type: "skills", enabled: cap.enabledInSession }
-    : { type: "mcp", enabled: cap.mcpExplicitToggle };   // 枚举时记录「是否有显式覆盖」：有→boolean，无→undefined
-}
-
-async function rollback(
-  sessionId: string,
-  cwd: string | undefined,
-  applied: Array<{ cap: Capability; prev: PrevState }>,
-): Promise<string[]> {
-  const errors: string[] = [];
-  for (const { cap, prev } of [...applied].reverse()) {    // 逆序恢复
-    try {
-      if (cap.write.type === "skills") {
-        await service.skills.setSessionEnabled({
-          sessionId, name: cap.write.name,
-          enabled: prev.type === "skills" ? prev.enabled : true,   // skills 前态恒为 boolean
-        });
-      } else {
-        await service.mcp.setSessionEnabled({
-          sessionId, ...(cwd !== undefined ? { cwd } : {}),
-          target: cap.write.target, kind: cap.write.targetKind,
-          enabled: prev.type === "mcp" ? prev.enabled : undefined, // undefined = 清显式覆盖
-        });
-      }
-    } catch (error) { errors.push(`rollback ${cap.name}: ${errMessage(error)}`); }
+async function applyPlannedOps(sessionId, cwd, ops: PlannedOp[], write) {
+  const phases = [ops.filter((o) => o.desired), ops.filter((o) => !o.desired)];  // enable → disable
+  const written: PlannedOp[] = [];
+  const failures: Array<{ op: PlannedOp; errors: string[] }> = [];
+  for (const phaseOps of phases) {
+    if (phaseOps.length === 0) continue;
+    const results = await runWritePhase(phaseOps, write);
+    results.forEach((r, i) => (r.ok
+      ? written.push(phaseOps[i]!)
+      : failures.push({ op: phaseOps[i]!, errors: r.errors })));
+    if (failures.length > 0) break;                    // 阶段失败：不进入下一阶段，直接回滚
   }
-  return errors;
+  if (failures.length === 0) return { ok: true as const, written };
+  const rollbackErrors = await rollback(sessionId, cwd, written);     // 逆序 + 同样批量
+  return { ok: false as const, written, failedId: failures[0]!.op.cap.id,
+           errors: [...failures[0]!.errors, ...rollbackErrors],
+           rollbackFailed: rollbackErrors.length > 0 };
 }
 ```
 
-- 回滚按**写顺序的逆序**；`skills` 前态恒为 boolean；`mcp` 前态可能是 `undefined`（清显式覆盖、
-  回到跟随项目默认，`src/mcp/loader.ts:705-728`[源码] 支持 `enabled: undefined`）；
-- 全部写入串行（逐条 `await`）：既有 skills shadow 注册与 mcp 重挂都不是并发安全的，
-  串行换确定性；单会话量级（几十条）耗时 <1s；
-- 不做「先关后开」：本端点只启用；用户若要关闭走既有面板（避免竞态与误关）。
+**回滚 `rollback`（v1.2 同样批量）**：按已写列表**逆序**；skills 回滚调用同一 tick 全部发起 +
+`allSettled`（注册表 effect 再合并刷新一次），MCP 回滚并发 4；每条把前态写回（skills 恒 boolean；
+MCP 可为 `undefined` = 清显式覆盖，`src/mcp/loader.ts:705-728`[源码]）。
+
+- 写入与回滚都是「先算全量 → 批量发起 → 汇总结果」，**不再逐条 `await`**；语义不变：
+  先 enable 后 disable、阶段失败即停并回滚、单条写接口仍是既有的
+  `skills.setSessionEnabled` / `mcp.setSessionEnabled`（`writeOne`）；
+- **回滚只覆盖「已写成功」的项**；失败项本身未写入所以不回滚（`rollback(written)`），
+  批次内失败判定取**原顺序第一个**失败项（用于 `failed[0].id` 与 errors 主因）；
+- 辅助函数沿用 v1.1 定义：`writeOne(cap, desired)` 由闭包绑定 `sessionId/cwd` 后转调既有会话开关；
+  `snapshotPrev(cap)` 记录前态（skills=boolean，MCP=显式覆盖或 `undefined`）；
+  `restoreOne` 写回单条前态；`runWithConcurrency(items, 4, fn)` 是按输入顺序返回结果的固定并发度执行器；
+- skills 走「同一 tick 发起 Promise」：142 次调用落在同一宏任务 ⇒ 宿主 skills 注册表 effect
+  合并刷新——这是 142 条写入 284ms → 3ms 的来源（§7.7）。
 
 ### 7.6 返回语义
 
-| 场景 | `ok` | `applied` | `pending` | `failed` | 前端表现 |
+| 场景 | `ok` | `applied` / `enabled` / `disabled` | `pending` | `failed` | 前端表现 |
 |---|---|---|---|---|---|
-| 全部成功 | true | N | false | — | toast + chips 回显 + 收起 |
-| 部分 skipped（不可切换/已启用/未知） | true | 有效条数 | false | — | 显示「已应用 N 条，跳过 M 条」 |
-| 写入失败并回滚 | true | 0 | false | `[{id, reason}]` | 报错「应用失败，已回滚」 |
-| 冷会话排队 | true | 0 | true | — | chips 立即回显 + 「已加入本会话，发送首条消息后生效」 |
+| 全部成功 | true | applied = enabled+disabled | false | — | toast + chips 回显 + 收起 |
+| 部分 skipped（`already-applied` / 非法 id / 不可应用） | true | 实际写入数 | false | — | 「已应用 N 条（启用 a / 关闭 b），跳过 M 条」 |
+| 写入失败并回滚 | true | 0 / 0 / 0 | false | `[{id, reason}]` | 报错「应用失败，已回滚」 |
+| 冷会话排队 | true | 0 / 0 / 0 | true | — | chips 立即回显 + 「已加入本会话，发送首条消息后生效」 |
 | 入参非法/枚举失败 | false | — | — | — | 错误提示 |
 
-`failed`/`errors` 为诊断信息（脱敏），用户文案由前端按 code/原因映射。
+- `applied = enabled + disabled`（筛选语义下「关闭」也算实际应用）；
+- `elapsedMs` **additive**（task-47）：仅成功支返回（**冷会话成功支也有**），= 枚举 + 写入总耗时；
+  客户端可忽略，仅用于排查「应用中…」过长；
+- `skipped[].reason = "already-applied"` 现在覆盖两类状态一致项（选中且已启用 / 未选且已关闭），
+  前端统计「跳过」提示时应排除它（客户端已按此过滤）；
+- `failed` / `errors` 为诊断信息（脱敏），用户文案由前端按 code/原因映射。
+
+### 7.7 批量执行的收益、基准与风险（v1.2）
+
+| 项 | 结论 |
+|---|---|
+| 基准（task-48，fake 执行器，2ms/5ms 模型） | ① **142 skills 关闭**：`elapsedMs = 3ms`，skills 在途峰值 **142**（串行下界 **284ms**）；② **142 skills + 6 MCP**：`elapsedMs = 12ms`，MCP 在途峰值 **4**（串行下界 **314ms**） |
+| 收益来源 | ① skills：同一 tick 发起 + `allSettled` ⇒ 宿主注册表 effect 只刷新一次；② MCP：卸载/挂载不再逐个串行等待；③ 只写状态不一致项，减少无效写 |
+| **风险（关键）** | 真实收益取决于**宿主 `skills.register` 的实际成本**。fake harness 里 `register` 近乎零成本，若真实注册表每次 `register` 都触发独立 effect 刷新，284ms→3ms 的比例无法复现，只能拿到「减少 await 往返」的那部分收益 |
+| 降级/后续动作 | 若真机基准显示 skills 写入仍是瓶颈：给 `src/skills/session.ts` 增加**批量 shadow API**（`registerMany` / `setEnabledBatch`：一次注册多条 + 一次 effect 刷新），Jev 侧以**可选依赖**调用、不可用则回落到当前实现。**该 API 属 skills 域改动，需 backend + Lead 另立任务，不在 task-50 范围** |
+| MCP 并发为何是 4 | `mcp/loader` 的项目条目挂载/卸载自身有串行队列，并发过高会打爆子进程/连接；4 是本机基准下的保守上限（常量 `MCP_WRITE_CONCURRENCY`，`src/jev/apply.ts:139`） |
+| 可观测 | 成功支 `elapsedMs`；tester 用 fake service 记录**在途峰值**断言「skills 同 tick、MCP ≤4」 |
 
 ---
 
@@ -1183,104 +1235,75 @@ function isSessionLive(ctx: any, sessionId: string): boolean {
   （`src/skills/session.ts:101-118`[源码]），故无需额外的 registry 判活接口；
 - 判活**每次调用时现算**，不缓存（agent 生命周期由事件驱动，缓存会陈旧）。
 
-### 8.2 PendingPlan 结构
+### 8.2 PendingPlan 结构（v1.2：存完整目标集合）
 
 ```ts
 interface PendingPlan {
   sessionId: string;
   cwd?: string;
   createdAt: number;
-  /** 已通过入参校验与能力本体可应用判定的条目（含前态快照）。 */
-  items: Array<{ cap: Capability; prev: PrevState }>;
+  /** 入队时全部可应用能力的**目标态**（含 desired=false），激活后按 id 重放。 */
+  ops: Array<{ id: string; desired: boolean }>;
+  /** 入队阶段就已确定的跳过项（非法/未知 id；冷会话下仅这类，不可应用判定留到重放时）。 */
   skipped: JevApplySkipped[];
 }
 
-const pendingPlans = new Map<string, PendingPlan>();      // key = sessionId，同会话只保留最新一份
+const pendingPlans = new Map<string, PendingPlan>();          // 同会话只保留最新一份
 const pendingOutcomes = new Map<string, JevPendingOutcome>(); // 上次激活应用结果（≤32 条，读取即消费）
 ```
 
-- 同会话重复 apply ⇒ **后者替换前者**（最新计划覆盖；不累积），返回 `pending:true`；
-- `pendingPlans` 规模上界：session 数级；泄漏兜底见 §8.5（TTL + disposed 清理）。
+- 同会话重复 apply ⇒ **后者替换前者**（最新目标覆盖；不累积），返回 `pending:true`；
+- 存**目标态**而不是「已解析的写入项」：激活时状态可能已变，重放会重新枚举、重新快照前态（§8.3）；
+- `pendingPlans` 规模上界：session 数级；TTL 30 分钟 + `agent/disposed` 清理（§8.5）。
 
-### 8.3 `agent/created` 应用（伪代码）
+### 8.3 `agent/created` 重放（伪代码，复用同一批量执行器）
+
+> v1.2：重放与 live 路径共用 `planTargetOps` / `applyPlannedOps` / `runWritePhase` / `rollback`，
+> 只是多一层「等 skills 服务就绪」的重试；**不再有独立的逐条写入循环**。
 
 ```ts
-function createJevPendingQueue(ctx: any, applyPending: (plan: PendingPlan) => Promise<void>): JevPendingQueue {
-  const disposers: Array<() => void> = [];
-  let disposed = false;
-
-  function onAgentCreated({ agent }: any): void {
-    if (disposed) return;
-    const sessionId = agent?.id;
-    if (typeof sessionId !== "string") return;
-    const plan = pendingPlans.get(sessionId);
-    if (plan === undefined) return;
-    pendingPlans.delete(sessionId);                     // 先取走，避免重复应用
-    // 延后一个宏任务：让同一事件的其它监听（mcp/loader 的 mountAgent 等）先完成登记，
-    // 否则 mcp.setSessionEnabled 找不到 session record，toggle 写了但不会重挂。
-    setTimeout(() => {
-      if (disposed) return;
-      applyPending(plan).catch((error) => {
-        recordOutcome(plan.sessionId, { applied: 0, failed: plan.items.length,
-          errors: [redactSafe(errMessage(error))], at: Date.now() });
-      });
-    }, 0);
-  }
-
-  function onAgentDisposed({ agent }: any): void {
-    if (typeof agent?.id === "string") {
-      pendingPlans.delete(agent.id);
-      pendingOutcomes.delete(agent.id);                 // 会话都没了，结果无处展示
-    }
-  }
-
-  if (typeof ctx.on === "function") {
-    const offCreated = ctx.on("agent/created", onAgentCreated);
-    if (typeof offCreated === "function") disposers.push(offCreated);
-    const offDisposed = ctx.on("agent/disposed", onAgentDisposed);
-    if (typeof offDisposed === "function") disposers.push(offDisposed);
-  }
-  // 插件启动时已存活的 agent 不需要补登记：pending 只可能由「本次插件生命周期内」的 apply 产生；
-  // 若 apply 时 agent 已存活，isSessionLive 直接为 true，不入队（不会漏）。
-  return { dispose() { disposed = true; for (const off of disposers) off(); pendingPlans.clear(); pendingOutcomes.clear(); } };
+function onAgentCreated({ agent }: any): void {
+  if (disposed) return;
+  const sessionId = agent?.id;
+  if (typeof sessionId !== "string") return;
+  const plan = pendingPlans.get(sessionId);
+  if (plan === undefined) return;
+  pendingPlans.delete(sessionId);                     // 先取走，避免重复应用
+  // 延后一个宏任务：让同一事件的其它监听（mcp/loader 的 mountAgent 等）先完成登记，
+  // 否则 mcp.setSessionEnabled 找不到 session record。
+  setTimeout(() => { if (!disposed) void applyPending(plan); }, 0);
 }
-```
 
-**激活时应用（`applyPending`）必须重枚举，不复用入队时的快照**：
-
-```ts
+/** 激活后重放：重新枚举 + 就绪重试 → 重算目标态/前态 → 同一批量执行器 → 记 outcome。 */
 async function applyPending(plan: PendingPlan): Promise<void> {
-  const caps = await enumerateCapabilities({ cwd: plan.cwd, sessionId: plan.sessionId }); // now live
-  const byId = new Map(caps.map((c) => [c.id, c]));
-  const skipped: JevApplySkipped[] = [...plan.skipped];
-  const applicable = plan.items
-    .map(({ cap }) => ({ cap, live: byId.get(cap.id) }))
-    .filter(({ live }) => {
-      if (!live) { skipped.push({ id: "", reason: "unknown-id" }); return false; }
-      if (!live.applicable) { skipped.push({ id: live.id, reason: live.reason as JevApplySkipReason }); return false; }
-      if (live.enabledInSession === true) { skipped.push({ id: live.id, reason: "already-applied" }); return false; }
-      return true;
-    });
+  try {
+    // 1)+2) 重新枚举（live:true）+ 就绪重试 → 按 id 重算目标态/前态
+    //   实现 resolvePlanned(plan) 内部：
+    //     caps = enumerate(live:true)
+    //     while (任一 skill canToggleInSession === false) { await sleep(READY_RETRY_DELAYS_MS); 重枚举 }
+    //     ops = caps 仍存在 && applicable && enabledInSession !== desired 的项
+    //     skipped += unknown-id / 不可应用 reason / already-applied；排序：先 enable 后 disable
+    const { ops, skipped } = await resolvePlanned(plan);
 
-  // 应用集合在 activation 阶段重新算前态（状态可能已变），不沿用入队快照
-  const applied: Array<{ cap: Capability; prev: PrevState }> = [];
-  for (const { live } of applicable) {
-    const prev = snapshotPrev(live);
-    const result = await writeOne(plan.sessionId, plan.cwd, live);
-    if (!result.ok) {
-      const rb = await rollback(plan.sessionId, plan.cwd, applied);
-      recordOutcome(plan.sessionId, { applied: 0, failed: applicable.length, errors: [...result.errors, ...rb], at: Date.now() });
-      return;
-    }
-    applied.push({ cap: live, prev });
+    // 3) 同一批量执行器；写入对「服务未就绪」类错误还会短重试（100/300ms）
+    const result = await applyPlannedOps(plan.sessionId, plan.cwd, ops,
+      (cap, desired) => writeOneWithReadyRetry(plan.sessionId, plan.cwd, cap, desired));
+
+    recordOutcome(plan.sessionId, result.ok
+      ? { applied: result.written.length, failed: 0, errors: [], at: Date.now() }
+      : { applied: 0, failed: ops.length, errors: result.errors.map(redactSafe), at: Date.now() });
+  } catch (error) {
+    recordOutcome(plan.sessionId, { applied: 0, failed: plan.ops.length,
+      errors: [redactSafe(errMessage(error))], at: Date.now() });
   }
-  recordOutcome(plan.sessionId, { applied: applied.length, failed: 0, errors: [], at: Date.now() });
 }
 ```
 
-重试（`[未找到]` 宿主时序证据的降级）：`writeOne` 返回 `skills service unavailable` /
-MCP session record 未建立之类错误时，**短重试 2 次（100ms、300ms）** 后再判失败；
-重试只针对「服务未就绪」类错误，不针对「能力不可切换」类（后者是确定性跳过）。
+- `skipped` 包含入队时已知的跳过项 + 重放时新发现的（未知 id / 不可应用 / 已一致）；
+- 重放失败**不保留 pending**（避免无限重试）：丢弃计划，把 `JevPendingOutcome` 存起来，
+  下一次同会话 `rank`/`apply` 成功响应带 `pendingOutcome?`（§8.4）；
+- 重试只针对「服务未就绪」类（`unavailable|not found|not registered|session record|no agent`），
+  对确定性失败（不可切换/硬关闭）不重试；就绪判定用「任一技能 `canToggleInSession === false`」。
 
 ### 8.4 结果回报前端（`pendingOutcome`）
 
@@ -1296,7 +1319,7 @@ MCP session record 未建立之类错误时，**短重试 2 次（100ms、300ms�
 | 场景 | 行为 |
 |---|---|
 | 激活后应用失败 | 丢弃 pending；记录 `pendingOutcome`（`failed>0` + 脱敏 errors）；下一次 rank/apply 带回；同时 `logger.warn` |
-| 回滚也失败 | 记录 `rollback-failed` 明细；状态可能不一致，前端提示「请手动检查本会话能力开关」 |
+| 回滚也失败 | `rollback` 返回逐条错误，`failed[0].reason = "write-failed（回滚部分失败）"`；状态可能不一致，前端提示「请手动检查本会话能力开关」 |
 | 插件重载 / 宿主重启 | 内存 pending 丢失（已接受计划不会生效）；前端只看到「已加入本会话」提示 → 用户可重新评分/手动开启。`[架构决定]` 首版不落盘 pending（落盘会引入跨进程一致性与密钥无关的复杂度） |
 | 会话被删除（disposed） | 清 pending 与 outcome，无泄漏 |
 | pending 长期不激活（用户不发送消息） | 单会话只留 1 份且轻量；加 TTL 兜底：`createdAt` 超过 30 分钟在下次写入/读取时清理 |
@@ -1529,6 +1552,11 @@ type DecisionState =
 - 应用 `plan = checked.map(id => ({ id, kind, name, enabled: true }))`（`kind`/`name` 从 item 取，
   宿主仍按 id 重解析）；成功 ⇒ 收起面板 + 复用现有 `controller.refresh()` 刷新 chips；
   `pending === true` ⇒ chips 立即回显（乐观）+ 提示「已加入本会话，发送首条消息后生效」；
+- **筛选语义（v1.2 / task-42）**：`plan` 是全量勾选集合 = 目标真值，宿主会把**未勾选但当前已启用**
+  的可应用能力关闭（只影响本会话）；因此客户端必须提交全部勾选项（不能只提交「新勾选的增量」），
+  并在 toast 里用返回的 `enabled`/`disabled` 说明「启用 a / 关闭 b」；`already-applied` 属于状态一致，
+  不计入「不可切换跳过」；
+- `apply` 返回的 `elapsedMs`（成功支 additive）仅用于诊断，不展示给用户；
 - `pendingOutcome?` 存在时（下一次 rank/apply 返回）⇒ 一次性提示成功/失败，不重复弹。
 
 ### 9.6 a11y（按 UX v1.5 §5.12/§6.11）
@@ -1632,12 +1660,15 @@ Authorization 是否出现）供断言；建议同时记录 `body` 原始 JSON �
 | H11 | 排序 | mock 分数 `{b:0.9, a:0.9, mcpX:0.9, low:0.2}` ⇒ 顺序 `a, b`（skill 同分按名）→ `mcpX` → `low` |
 | H12 | 错误映射 | 401→`auth`；400+`max_tokens_exceeded`→`context-too-long`；422→`bad-request`；429→`rate-limit`（断言 3 次请求：1+2 重试）；529→`overloaded`（3 次）；500→`network`（1 次）；连接拒绝→`network`；`delayMs>timeoutMs`→`timeout` |
 | H13 | 无配置 | 无 key ⇒ `no-config`，且假服务 0 请求 |
-| H14 | apply 成功 | 3 条计划 ⇒ `applied 3`、`pending false`、`failed` 无；skills/mcp 写接口各被调用一次且参数正确 |
-| H15 | apply 回滚 | 第 2 条写失败 ⇒ `applied 0`、`failed[0].id`=第 2 条、回滚调用按逆序恢复（fake service 记录调用序列），最终状态=前态 |
+| H14 | apply 成功 + 筛选语义 | 能力 A 已启用、B 已启用、C 已关闭；plan 只勾 A、C ⇒ `applied 2`、`enabled 1`、`disabled 1`、`pending false`；A 进 `skipped: already-applied`；写入参数：A 不写、B `enabled:false`、C `enabled:true` |
+| H14b | 阶段顺序与并发 | 计划含 2 enable + 3 disable ⇒ 先发 enable 组、后发 disable 组；组内按 id 升序；fake service 记录 skills **同一 tick 发起**（在途峰值 = skills 数）、MCP 在途峰值 ≤4（`MCP_WRITE_CONCURRENCY`） |
+| H14c | `elapsedMs` additive | 成功支与冷会话成功支都有 `elapsedMs`（number ≥0）；失败回滚支无（客户端可忽略） |
+| H15 | apply 失败回滚（批量） | 第 2 个写入失败 ⇒ `applied 0 / enabled 0 / disabled 0`、`failed[0].id`=失败项、`pending false`；回滚按已写列表**逆序**、skills 回滚同一 tick、MCP 回滚并发 ≤4；最终状态=前态（fake service 状态快照对比） |
+| H15b | 失败即停 | enable 阶段失败 ⇒ **不进入 disable 阶段**（fake service 记录 disable 调用数 = 0） |
 | H16 | 不可应用跳过 | 硬关闭 MCP / 不可 restrict 外部实例 ⇒ `skipped[].reason` 对应，不写 |
 | H17 | 未知 id | 伪造 `cap_000…` ⇒ `skipped: unknown-id`，不写 |
-| H18 | 冷会话排队 | `agents.list()=[]` ⇒ `apply` 返回 `pending:true` 且**无写调用**；随后触发捕获到的 `agent/created` 监听（fake agent id=sessionId）并等待 ⇒ 写调用发生、pending 清空 |
-| H19 | 排队失败回报 | 激活应用失败 ⇒ 下一次 `rank` 响应带 `pendingOutcome.failed > 0`，再次 `rank` 不再带（读取即消费） |
+| H18 | 冷会话排队（v1.2 完整目标集合） | `agents.list()=[]` ⇒ `apply` 返回 `pending:true`、`applied/enabled/disabled 0`、`elapsedMs` 存在，且**无写调用**；pending 存的是全部可应用能力的 `{id,desired}`（含 `desired=false`）；随后触发捕获到的 `agent/created` 监听（fake agent id=sessionId）并等待 ⇒ 用**同一批量执行器**写入（先 enable 后 disable）、pending 清空 |
+| H19 | 排队失败回报 | 激活应用失败 ⇒ 下一次 `rank`/`apply` 成功响应带 `pendingOutcome.failed > 0`，再次调用不再带（读取即消费）；激活重放失败**不保留 pending** |
 | H20 | dispose | 调 `jev.dispose()` ⇒ 监听移除、pending 清空、后续 `apply` 返回 `write-failed` |
 
 ### 10.3 客户端（jsdom + 假时钟）
@@ -1748,7 +1779,7 @@ task-14（本文）
 | `rank` 请求构造（`src/jev/rank.ts`） | **REQ**（10）全组 | 一次请求、不分片、questions 数=能力数、model/state 字段 |
 | 排序/结果投影（`rank.ts` + 结果面板） | **RES**（10）全组 | desc、同分规则、usage/model/耗时、单基数计数 |
 | 阈值与勾选（`composer-capability.tsx` 结果面板） | **THR**（11）全组 | 默认 0.50/步长 0.05、只改预勾选、不重发、手改优先、重评/重开语义 |
-| `apply` 事务/回滚/冷会话（`src/jev/apply.ts`、`manager.ts` 生命周期） | **APP**（13）全组 | 只写会话、失败回滚、不可切换跳过、冷会话排队、chips 回显 |
+| `apply` 事务/回滚/冷会话（`src/jev/apply.ts`、`manager.ts` 生命周期） | **APP**（13）全组 | 筛选语义（选中启用 / 未选关闭）、只写状态不一致项、两阶段批量写、失败逆序回滚、不可切换跳过、冷会话排队与重放、chips 回显、`enabled`/`disabled` 统计 |
 | 状态机/错误分类/防抖（前端调度 + `rank` 错误映射 + 配置表单） | **ERR**（18）全组 | 未配置/空草稿/评分中/无匹配/各类错误/并发与取消 |
 | 面板 a11y（`composer-capability.tsx`、`jev-panel.tsx`） | **A11Y**（8）全组 | role/焦点/Esc/aria-live/键盘顺序 |
 | 窄容器与暗色（`styles.ts`） | **NAR**（6）全组 | <720/<560 降级、暗色 token |
@@ -1774,6 +1805,8 @@ task-14（本文）
 | U8 | 既有 `mcp.list` 视图把 `entry`（含 headers/env）下发浏览器 | 既有事实（F9） | 本期不扩大该行为；Jev 配置走独立文件 + 掩码视图，**不复用** mcp 通道 |
 | U9 | `pendingOutcome` / `issues` / `errors?` 等 additive 字段是否会破坏旧客户端 | 低风险 | 全部 optional；旧客户端解构时忽略；tester 断言 JSON 形状 |
 | U10 | spec 条目数与任务书不一致（144 vs 136） | 已核对 | 以仓库 spec 为准；§12 按分组映射 |
+| U11 | **skills 批量写入的真实收益**（v1.2） | 风险（task-48 只在 fake 执行器上验证） | fake 基准 142 skills 284ms→3ms 依赖「注册表 effect 合并刷新」；真实 `skills.register` 成本未知。降级：先按当前实现上线并记录 `elapsedMs`；若真机仍是瓶颈 ⇒ 给 `src/skills/session.ts` 加批量 shadow API（`registerMany`/`setEnabledBatch`，可选依赖、不可用回落），需 Lead 另立 skills 域任务 |
+| U12 | `JevApplyResult` 新增 `enabled`/`disabled`/`elapsedMs` 的跨版本兼容 | 已处理 | 全部 additive optional（`elapsedMs`）或语义不冲突（旧客户端忽略未知字段）；`applied` 语义明确为 `enabled+disabled`（筛选语义），旧客户端只展示总数仍成立 |
 
 ---
 
@@ -1789,6 +1822,10 @@ task-14（本文）
 | `Config.dshHome` 覆盖 | `src/index.ts:47-58`（实读） | §3.1 |
 | rank 请求构造（v1.1：`state={request,guidance}`、结构化 `instructions.capability`、tools 截断、探针） | `src/jev/rank.ts:1-130,199-249`（实读） | §5.3、§6.0、§6.2、§6.3、§6.5 |
 | 能力枚举与描述截断、MCP 工具来源 | `src/jev/apply.ts:220-320`（实读） | §6.3、§7.1 |
+| apply 写入/回滚批量执行器（skills 同 tick + `allSettled`、MCP 并发 4、失败逆序） | `src/jev/apply.ts:335-480`（实读） | §7.5、§7.7 |
+| apply 计划/两阶段调度/激活重放（`planTargetOps`、`runWritePhase`、`applyPlannedOps`） | `src/jev/apply.ts:490-790`（实读） | §7.4、§7.5、§8.2、§8.3 |
+| `jev.apply` 入口（筛选语义、`enabled`/`disabled`/`elapsedMs`、冷会话入队） | `src/jev/apply.ts:790-951`（实读） | §5.2、§7.2、§7.6 |
+| `JevApplyResult` / `JevApplyPlanItem` / `JevPendingOutcome` 类型（v1.2 字段） | `src/jev/types.ts:200-270`（实读） | §5.2、§7.6 |
 | `JevCapability` / `JevRankItem` / `JevRankResult` 类型 | `src/jev/types.ts:161-190,269-300`（实读） | §5.2、§7.1 |
 | rank 结果聚合（`requestCount:1`、`elapsedMs`、`pendingOutcome`） | `src/jev/manager.ts:240-280`（实读） | §5.2、§6.8、§8.4 |
 | `atomicWriteText` 现状（无 mode） | `src/shared/atomic-write.ts:25-30`（全文实读） | §3.3 |
@@ -1817,4 +1854,5 @@ task-14（本文）
 |---|---|---|
 | v1.0 | 2026-10-24 | 首版：配置/密钥/RPC/rank/枚举与事务/冷会话/客户端调度/测试/拆分/验收映射/未决清单 |
 | v1.1 | 2026-10-24 | **rank 请求形状变更**（backend 实测修复）：`state` 改为 `{request,guidance}`，能力定义进每题的 `instructions.capability`（MCP 带 `tools`），共享判据只在 `guidance` 出现一次；根因是旧形状下 155 道题共用同一字符串 instructions（question id 不进模型输入）且题目不含能力，分数塌缩到 0.40–0.41（见 §6.0）。同步更新 §1.1、§2.2(F11)、§5.1、§5.3、§5.7、§6.0/§6.2/§6.3/§6.5、§7.1、§10.1/§10.2、§11.1、§14；**RPC 类型与客户端契约不变**（rank/apply 返回形状未变） |
+| v1.2 | 2026-10-24 | **apply 执行器改批量/并发 + 筛选语义**（task-42/47/48，backend 已验证）：① `plan` = 已勾选集合 = 目标真值，选中启用 / 未选关闭（只改会话开关）；② 只写状态不一致项；③ **enable→disable 两阶段**，阶段内 skills 同一 tick 全部发起 + `allSettled`（注册表 effect 合并刷新）、MCP 并发 4；④ 阶段失败即停、按前态**逆序批量回滚**（同样批量）；⑤ 冷会话入队完整目标集合、激活后**复用同一执行器**重放（含就绪重试 100/300ms）；⑥ 成功支 **additive** `elapsedMs`，返回新增 `enabled`/`disabled`（`applied = enabled+disabled`）。fake 基准（2ms/5ms 模型）：142 skills 关闭 284ms→`elapsedMs 3ms`（skills 峰值 142）、142 skills+6 MCP 314ms→`elapsedMs 12ms`（MCP 峰值 4）。风险见 §7.7/U11（真实收益取决于 `skills.register` 成本与 effect 合并，必要时加 skills 批量 shadow API）。同步更新 §1.1、§1.2、§5.2、§7.2/§7.4/§7.5/§7.6（新增 §7.7）、§8.2/§8.3/§8.5、§9.5、§10.2、§13、§14；rank 契约不变 |
 

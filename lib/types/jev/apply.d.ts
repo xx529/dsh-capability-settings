@@ -1,18 +1,26 @@
 /**
- * 能力枚举、应用事务与冷会话排队（架构 §7 / §8）。
+ * 能力枚举、应用事务与冷会话排队（架构 §7 / §8；写入执行器见 task-47）。
  *
- * 四条不变量：
+ * 六条不变量：
  *
  *   1. **枚举是唯一入口**：`rank` 与 `apply` 都走 `enumerateCapabilities`，
  *      客户端传来的 `name` / `target` 一律不信任 —— 应用时按 `id` 重新枚举解析；
- *   2. **筛选语义**（task-42）：plan 只是「已勾选」集合；当前会话里**所有可应用**
- *      能力中，选中 → 目标启用、未选 → 目标关闭（只改会话开关，不动项目默认）；
- *      不可应用项（hard-disabled / not-restrictable / live 下 not-toggleable）不动；
- *   3. **只写状态不一致的 + 串行 + 失败逆序回滚**：skills 的 shadow 注册与 MCP
- *      重挂都不是并发安全的；部分失败时按前态快照逆序恢复（启用/关闭都可还原）；
- *   4. **冷会话只排队不写**：无 live agent 时把「可应用能力的完整目标集合」
+ *   2. **筛选语义**（task-42）：plan 是「已勾选」集合，也就是目标真值；当前会话里
+ *      **所有可应用**能力中，选中 → 目标启用、未选 → 目标关闭（只改会话开关，
+ *      不动项目默认）；只写「当前状态 ≠ 目标状态」的项；不可应用项
+ *      （hard-disabled / not-restrictable / live 下 not-toggleable）一律不动；
+ *   3. **两阶段批量/并发写入**（task-47）：先 enable 阶段、再 disable 阶段；
+ *      阶段内 skills **同一 tick 全部发起**（先收集 Promise 再 `Promise.allSettled`），
+ *      让 `skills.register` 引发的注册表 effect 合并刷新一次；MCP 按
+ *      {@link MCP_WRITE_CONCURRENCY}（4）并发限流，避免逐条串行等卸载/挂载；
+ *   4. **失败按前态逆序批量回滚**：批次完成后按原顺序取第一个失败；已成功写入的
+ *      项按**相反顺序**恢复前态（skills 批量发起、MCP 同样限流），启用/关闭都能还原；
+ *   5. **冷会话只排队不写**：无 live agent 时把「可应用能力的完整目标集合」
  *      （含关闭）存进内存 `Map<sessionId, PendingPlan>`，`ctx.on("agent/created")`
- *      命中后 `setTimeout(0)` 延后重放（让 mcp/loader 等监听先完成登记），失败短重试。
+ *      命中后 `setTimeout(0)` 延后重放（让 mcp/loader 等监听先完成登记），
+ *      并复用同一批量执行器（失败短重试）；
+ *   6. **结果 additive 字段**：成功支返回 `enabled` / `disabled` / `elapsedMs`
+ *      （`applied = enabled + disabled`；耗时覆盖枚举 + 批量写入）。
  *
  * @module @chengdb/capability-panel/jev/apply
  */

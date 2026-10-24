@@ -253,6 +253,12 @@ export type JevApplyResult =
       failed?: JevApplyFailed[];
       /** additive：回滚细节/诊断（脱敏）。 */
       errors?: string[];
+      /**
+       * additive（task-47）：宿主测得的 apply 总耗时（枚举 + 批量写入，毫秒）。
+       *
+       * 仅成功支返回；客户端可忽略（用于排查「应用中…」过长）。
+       */
+      elapsedMs?: number;
       pendingOutcome?: JevPendingOutcome;
     }
   | { ok: false; code: JevApplyErrorCode; errors: string[] };

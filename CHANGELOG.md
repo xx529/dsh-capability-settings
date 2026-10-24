@@ -3,6 +3,19 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.4.2] - 2026-10-24
+
+### 修复
+
+- **能力决策 apply 写入性能**（用户反馈：应用 8/154 项时「应用中…」卡很久）：
+  旧实现逐条串行 `await` 写入，最多 146 次写入会让技能注册表的 effect 逐次刷新。
+  现在 skills 写入在同一 tick 批量发起后 `Promise.allSettled` 合并等待（N 次 shadow
+  注册只触发一次刷新），MCP 按并发上限 **4** 限流写入，失败仍批量逆序回滚；成功 /
+  冷会话排队支新增 additive `elapsedMs`（覆盖枚举 + 批量写入总耗时，便于排查）。
+  fake 基准 142 skills 的串行下界 ~284ms 降至 **3ms**（结构性收益，真机仍待测）。
+  验证：task-47 / task-48（tester **610 PASS / 0 FAIL**，host-apply 105；并发峰值
+  skills = 阶段技能数、MCP ≤4；既有回归全绿）。
+
 ## [1.4.1] - 2026-10-24
 
 ### 修复
@@ -566,6 +579,7 @@
   输出总量上限（对接入的压缩包上限之下再拦一层"膨胀内存"），并修复
   数据区越界被静默截断、短归档负面偏移读越界的问题（zip bomb 防护）。
 
+[1.4.2]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.3.4...v1.4.0
 [1.3.4]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.3.3...v1.3.4
