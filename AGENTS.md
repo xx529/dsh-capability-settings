@@ -100,7 +100,9 @@ danger-full-access 审批重试同一条命令即可。手动兜底通道仍是 
 | `src/remote.ts` | 宿主 ⇄ 浏览器 RPC：在 `webServer` 挂 `CHANNEL` 前缀路由；endpoint 为 `skills.* / mcp.* / quick.* / overrides.*`（见文件头注释与路由表） |
 | `src/client.ts` | 客户端插件入口：注入样式/语言包，注册 `sidebar.panellist` + `main`（面板）与 `conversation.input.*`（composer），构造面板 api 与**每会话** composer api |
 | `src/client/*.tsx` | UI：`panel.tsx`（skills/quick 共用列表/详情）、`mcp-panel.tsx`、`quick-messages-panel.tsx`、`composer-*.tsx`、`composer-capability.tsx`（会话能力：hero 内联面板 + 顶部「能力」Tab 整页；Tab 打开时隐藏输入框）、`select.tsx`（自绘下拉）、`panel-entry.tsx`（主区域页面 + 侧栏图标）、`styles.ts` |
-| `src/{skills,mcp,quick-messages,overrides,imports}/` | 各域宿主实现（配置读写、CRUD、挂载、探测、声明文件）；`skills/session.ts` = 会话级 Skills 开关（agent 作用域同名 runtime shadow，内存态） |
+| `src/{skills,mcp,quick-messages,overrides,imports}/` | 各域宿主实现（配置读写、CRUD、挂载、探测、声明文件）；`skills/session.ts` = 会话级 Skills 开关（agent 作用域同名 runtime shadow，按会话落盘 + 项目默认投影） |
+| `src/session-state.ts` | 会话级开关持久化（`<dshHome>/dsh-capability-settings/session-capabilities.json`：原子写 + 文件锁 + 懒加载 + 两阶段对账；Skills / MCP 两个域共用一个实例） |
+| `src/session-state-reconcile.ts` | 孤儿记录对账调度（启动后 / 每 24h 存在性校验；`session/disposed` 只标记不删；持久化服务缺失/抛错一律保留） |
 | `src/shared/` | 通用：原子写、文件锁、项目根探测、agents home、JSON 配置、skill 定位/来源 |
 
 RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒为 `{ ok: true, value }`；
@@ -122,6 +124,11 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
 - **配置文件**：全局 `~/.agents/mcp.json`、项目 `<项目根>/.mcp.json`；skills 目录；
   `quick-messages.json`；项目级声明 `capability-overrides.json`（MCP 的「默认关闭」
   列表也存这里）、`capability-imports.json`（导入/引用）。
+- **会话级开关持久化**：`<dshHome>/dsh-capability-settings/session-capabilities.json`
+  （`src/session-state.ts`；按 sessionId 记录 Skills/MCP 的显式覆盖，目录 0700 /
+  文件 0600）。与 `jev.json` 同目录。宿主重启 / resume 后恢复；孤儿记录由
+  `src/session-state-reconcile.ts` 两阶段清理。**不要删**：它是「当前对话」开关
+  跨重启保持的唯一来源。
 - 写入必须走 `src/shared/atomic-write.ts` + `src/shared/file-lock.ts` 的既有封装，
   不要直接 `fs.writeFile`（并发写与半写文件会破坏配置）。
 
@@ -142,9 +149,13 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
    `status().settling` + 面板静默轮询收敛。
 4. **「默认关闭」= 项目级 overrides**：面板每行的「默认」开关写
    `.agents/capability-overrides.json` 的 mcp 列表；新建对话按它来。
-   **「当前对话」开关 = 内存态**（`loader.sessionToggles`，键 `project:<key>` /
-   `server:<serverName>`），不落盘、agent 销毁即失效；优先级：显式会话开关 >
-   项目默认 > 配置里的 `disabled` 硬关闭。
+   **「当前对话」开关按会话落盘**：内存镜像 `loader.sessionToggles`（键
+   `project:<key>` / `server:<serverName>`），磁盘在
+   `session-capabilities.json`（`src/session-state.ts`），agent 重建时在
+   `remount` 前 hydrate → 重启 / resume 后恢复；优先级：显式会话开关 > 项目默认 >
+   配置里的 `disabled` 硬关闭。**不要把 `agent/disposed` / `session/disposed` 当
+   删除信号**：关机时会对所有 live 会话成批发 disposed；记录删除只由
+   `session-state-reconcile.ts` 的「存在性校验 + 24h 宽限期」决定。
 5. **全局实例无法按项目卸载**，所以「关掉」一律用 `tools.restrict({ deny })` 按
    agent 作用域屏蔽 `mcp__<serverName>__*`。契约：空名单 / 未知名字 / scope-local
    名字会**失败** ⇒ 必须先用 `ctx.root.get("tools").schemas()` 取确切工具名，

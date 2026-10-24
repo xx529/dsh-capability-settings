@@ -39,6 +39,8 @@ import { createOverridesManager } from "./overrides/manager.js";
 import type { OverrideToggleInput } from "./overrides/manager.js";
 import { createImportsManager } from "./imports/manager.js";
 import { createJevManager } from "./jev/manager.js";
+import { createSessionState } from "./session-state.js";
+import { createSessionStateReconciler } from "./session-state-reconcile.js";
 import { findProjectRoot } from "./shared/project-root.js";
 import { mountRpcChannel } from "./remote.js";
 
@@ -61,7 +63,7 @@ export interface Config {
 }
 
 /**
- * skills 域服务 = 磁盘 CRUD 管理器 + 会话级开关（内存 shadow）。
+ * skills 域服务 = 磁盘 CRUD 管理器 + 会话级开关（按会话落盘的 runtime shadow）。
  *
  * 会话级开关是纯增量：`list` 等原有方法不变，客户端改用 `sessionList`
  * （多带 enabledInSession / canToggleInSession 两列）。
@@ -69,7 +71,7 @@ export interface Config {
 export type SkillsService = ReturnType<typeof createService> & {
   /** 磁盘列表 + 本会话启用态（见 skills/session.ts）。 */
   sessionList: (cwd?: string, sessionId?: string) => Promise<SessionSkillView[]>;
-  /** 设置本会话开关（内存态，不落盘）。 */
+  /** 设置本会话开关（按会话落盘；重启/resume 后恢复）。 */
   setSessionEnabled: SkillSessionRegistry["setEnabled"];
 };
 
@@ -109,6 +111,11 @@ export function apply(ctx: any, config: Config = {}) {
   // 组合根处包一层：loader 拿原身（只读），对外暴露的 service.overrides 是
   // 带 reload 侧效应的包装。
   const overridesRaw = createOverridesManager({ dshHome: config.dshHome });
+  // 会话级开关的持久化存储：MCP loader 与 Skills 会话注册表**共用同一实例**
+  // （见 session-state.ts）。两个域各自读-改-写同一文件会互相覆盖，所以必须
+  // 在组合根建一次、注入下去；无 dshHome 的 headless 环境仍可工作（落盘到
+  // 默认 dsh home，写入失败只 warn）。
+  const sessionState = createSessionState({ dshHome: config.dshHome, logger: ctx.logger });
   // 项目级「全局能力引用」存储：MCP 管理器与 MCP loader 共用同一实例
   // （「导入到本项目」= 登记引用，启停是引用上的项目级标记）。
   // skills 域不走引用——skill 的启停由宿主原生读 frontmatter，引用存储
@@ -120,6 +127,7 @@ export function apply(ctx: any, config: Config = {}) {
     enabled: config.mountMcp !== false,
     overrides: overridesRaw,
     imports,
+    state: sessionState,
   });
   /**
    * skills 域的项目默认热应用钩子：写盘成功后对同项目的 live 会话增量
@@ -171,6 +179,7 @@ export function apply(ctx: any, config: Config = {}) {
   const skillSessions = createSkillSessionRegistry(ctx, {
     logger: ctx.logger,
     registry: skillsRegistry,
+    state: sessionState,
     projectDisabled: async (cwd?: string) => (await overridesRaw.sets(cwd)).skills,
   });
   skillSessionsRef.current = skillSessions;
@@ -259,11 +268,24 @@ export function apply(ctx: any, config: Config = {}) {
   // 回填给 jev 的延迟访问器：此后 apply/rank 才能枚举能力。
   serviceRef.current = service;
   ctx.provide("capabilityPanel", () => service);
+  // 会话级开关记录的孤儿对账（见 session-state-reconcile.ts）：宿主没有"会话
+  // 删除"事件，靠"存在性校验 + 24h 两阶段"清理；disposed 只触发"标记"核对
+  // （关机时会对所有 live 会话成批发 disposed，不能当删除信号）。
+  const reconciler = createSessionStateReconciler(ctx, sessionState, { logger: ctx.logger });
+  reconciler.start();
+  const offSessionDisposed =
+    typeof ctx.on === "function" ? ctx.on("session/disposed", () => reconciler.noteDisposed()) : undefined;
+  const offAgentDisposed =
+    typeof ctx.on === "function" ? ctx.on("agent/disposed", () => reconciler.noteDisposed()) : undefined;
   const disposers: Array<() => void> = [
     disposeUsageGuard,
     () => skillsRegistry.dispose(),
     () => skillSessions.dispose(),
     () => jev.dispose(),
+    () => reconciler.dispose(),
+    () => sessionState.dispose(),
+    ...(typeof offSessionDisposed === "function" ? [offSessionDisposed] : []),
+    ...(typeof offAgentDisposed === "function" ? [offAgentDisposed] : []),
   ];
   if (config.mountRpc !== false) {
     const dispose = mountRpcChannel(ctx, service);
@@ -304,6 +326,21 @@ export type {
 } from "./skills/registry.js";
 export { createMcpLoader } from "./mcp/loader.js";
 export { createMcpManager } from "./mcp/manager.js";
+export {
+  createSessionState,
+  sessionStateDir,
+  sessionStateFile,
+  SESSION_STATE_FILE_NAME,
+  SESSION_STATE_GRACE_MS,
+} from "./session-state.js";
+export { createSessionStateReconciler } from "./session-state-reconcile.js";
+export type {
+  SessionStateEntry,
+  SessionStateReconcileInput,
+  SessionStateReconcileResult,
+  SessionStateStore,
+} from "./session-state.js";
+export type { SessionStateReconciler, SessionStateReconcilerDeps } from "./session-state-reconcile.js";
 export { createOverridesManager } from "./overrides/manager.js";
 export { createJevManager } from "./jev/manager.js";
 export type { JevManager, JevManagerDeps } from "./jev/manager.js";

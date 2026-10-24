@@ -30,7 +30,9 @@
  *   - **只可关闭，不能强制开启**：文件级已禁用（frontmatter 双 false）或项目
  *     内 shadow stub 的条目，本模块只把它们从可切换列表里过滤掉，不会去
  *     「反向开启」；
- *   - **纯内存**：不落盘，agent 销毁 / 宿主重启即回到默认；项目默认才落
+ *   - **按会话落盘**：显式会话开关写在插件数据目录
+ *     （`<dshHome>/dsh-capability-settings/session-capabilities.json`，见
+ *     `session-state.ts`），agent 重建 / 宿主重启后恢复；项目默认仍落
  *     `.agents/capability-overrides.json`；
  *   - 找不到 live agent（冷会话）时开关失败并返回业务错误，不做状态暂存。
  *
@@ -38,6 +40,7 @@
  */
 
 import { findProjectRoot } from "../shared/project-root.js";
+import type { SessionStateStore } from "../session-state.js";
 import { SHADOW_DESCRIPTION, SHADOW_METADATA_KEY } from "./registry.js";
 import type { ClassifiedInjectedRow, SkillRegistryBridge } from "./registry.js";
 import type { SkillSummaryView } from "./types.js";
@@ -48,6 +51,11 @@ export interface SkillSessionDeps {
   projectDisabled?: (cwd?: string) => Promise<readonly string[]>;
   /** 宿主 registry 桥（读注入技能 + read-before/after-shadow 校验）；缺省退化为纯磁盘行为。 */
   registry?: SkillRegistryBridge;
+  /**
+   * 会话级开关的持久化存储（可选）：提供时显式开关按 sessionId 落盘，
+   * agent 重建 / 宿主重启后恢复；省略时保持旧的纯内存行为。
+   */
+  state?: SessionStateStore;
   /** 宿主日志（结构子集）。 */
   logger?: { warn?: (message: string) => void };
 }
@@ -74,7 +82,7 @@ export interface SkillSessionRegistry {
    */
   list(baseList: (cwd?: string) => Promise<SkillSummaryView[]>, cwd?: string, sessionId?: string): Promise<SessionSkillView[]>;
   /**
-   * 设置本会话开关（内存态，不落盘）。
+   * 设置本会话开关（按会话落盘；无 `state` 依赖时仅内存）。
    *
    * `enabled=false` 注册 shadow；`true` 解除；`undefined` 清除显式覆盖、
    * 回到项目默认（与 MCP 的 `setSessionEnabled` 语义对齐）。
@@ -105,6 +113,8 @@ interface SessionRecord {
   projectShadows: Map<string, () => void>;
   /** 会话显式开关（缺省 = 跟随项目默认）。true = 显式开启。 */
   explicit: Map<string, boolean>;
+  /** 是否已从磁盘恢复过显式开关（每个会话一次；保持内存里刚改的值优先）。 */
+  explicitHydrated: boolean;
   /** 本项目默认禁用名单（最近一次读取的快照）。 */
   projectDefaults: Set<string>;
   /** 已尝试但尚未生效的名字（registry 未就绪/时序问题；下次读取重试）。 */
@@ -169,6 +179,7 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
       shadows: new Map(),
       projectShadows: new Map(),
       explicit: new Map(),
+      explicitHydrated: false,
       projectDefaults: new Set(),
       projectPending: new Set(),
       projectAttempts: new Map(),
@@ -218,6 +229,35 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
     const explicit = record.explicit.get(name);
     if (explicit !== undefined) return explicit;
     return !record.projectDefaults.has(name);
+  }
+
+  /** 会话记录 → 落盘元数据（cwd 仅诊断、headerCreatedAt 防 id 复用）。 */
+  function metaOf(record: SessionRecord): { cwd?: string; headerCreatedAt?: number } {
+    const meta: { cwd?: string; headerCreatedAt?: number } = {};
+    if (record.cwd !== undefined) meta.cwd = record.cwd;
+    const createdAt = record.agent?.session?.header?.createdAt;
+    if (typeof createdAt === "number" && Number.isFinite(createdAt)) meta.headerCreatedAt = createdAt;
+    return meta;
+  }
+
+  /**
+   * 从持久化存储恢复本会话的显式开关（幂等；每个会话一次）。
+   *
+   * 内存里已有的键优先：同一运行内用户刚改过的开关不被磁盘旧值覆盖。
+   * sessionId 复用（header 创建时间不一致）时旧记录作废（见 `verifySession`）。
+   */
+  async function hydrateExplicit(record: SessionRecord): Promise<void> {
+    const state = deps.state;
+    if (state === undefined || record.explicitHydrated) return;
+    await state.ready();
+    record.explicitHydrated = true;
+    const sessionId = typeof record.agent?.id === "string" ? record.agent.id : undefined;
+    if (sessionId === undefined) return;
+    if (!state.verifySession(sessionId, metaOf(record))) return;
+    const stored = state.skills(sessionId);
+    for (const [name, enabled] of Object.entries(stored)) {
+      if (!record.explicit.has(name)) record.explicit.set(name, enabled);
+    }
   }
 
   /** 每 session 的串行队列（写操作互斥；读路径不排队，避免死锁）。 */
@@ -434,12 +474,20 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
     attempt = 0,
     preloadedDisabled?: readonly string[],
   ): Promise<SessionSkillOpResult> {
+    // 先恢复落盘的显式会话开关：desiredEnabled 依赖它（否则重启后会被项目默认盖掉）。
+    await hydrateExplicit(record);
     const registry = deps.registry;
     if (registry === undefined) return { ok: true };
     const disabled = preloadedDisabled ?? (await projectDisabledOf(record.cwd));
     record.projectDefaults = new Set(disabled);
-    // 常见路径：本项目没有任何默认禁用、也没有待处理项 ⇒ 不必读 registry。
-    if (disabled.length === 0 && record.projectShadows.size === 0 && record.projectPending.size === 0) {
+    // 常见路径：本项目没有任何默认禁用、也没有待处理项、也没有显式会话开关
+    // ⇒ 不必读 registry（显式开关也要走下面的恢复逻辑，不能提前返回）。
+    if (
+      disabled.length === 0 &&
+      record.projectShadows.size === 0 &&
+      record.projectPending.size === 0 &&
+      record.explicit.size === 0
+    ) {
       return { ok: true };
     }
     const sessionId = typeof record.agent?.id === "string" ? record.agent.id : undefined;
@@ -512,6 +560,33 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
     return withQueue(record, () => applyProjectDefaults(record, attempt, preloadedDisabled));
   }
 
+  /**
+   * 恢复显式会话开关（list 路径，能同时看到磁盘 + 注入技能名）。
+   *
+   * `applyProjectDefaults` 只处理**注入技能**（项目默认禁用的口径），而会话
+   * 显式开关也可能落在磁盘技能上（自定义技能 = 磁盘条目）。这里按"当前仍
+   * 可见的名字"恢复：可见 ⇒ 按状态注册/解除 shadow；已删除 ⇒ 清掉显式覆盖
+   * 并落盘（避免重启后给已删技能造出幽灵 shadow）。
+   */
+  async function restoreExplicit(record: SessionRecord, visibleNames: ReadonlySet<string>): Promise<void> {
+    if (record.explicit.size === 0) return;
+    await withQueue(record, async () => {
+      const sessionId = typeof record.agent?.id === "string" ? record.agent.id : undefined;
+      for (const [name, enabled] of [...record.explicit.entries()]) {
+        if (!visibleNames.has(name)) {
+          record.explicit.delete(name);
+          if (sessionId !== undefined && deps.state !== undefined) {
+            await deps.state.setSkill(sessionId, name, undefined, metaOf(record));
+          }
+          continue;
+        }
+        const result = enabled ? await releaseShadow(record, name) : await ensureShadow(record, name, false);
+        // 失败保留意图（下次读取重试），不清显式记录。
+        if (result.ok) rebucketShadow(record, name);
+      }
+    });
+  }
+
   /** 生命周期回调：登记 + 延后应用项目默认（等 preset 层 provider 就绪）。 */
   function onAgentCreated(agent: any): void {
     const record = track(agent);
@@ -566,18 +641,19 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
       }
 
       const rows = [...diskRows, ...injectedRows].sort((a, b) => a.name.localeCompare(b.name));
-      return (
-        rows
-          // 硬关闭的条目（文件级双向 false、项目内 shadow stub）不可在会话层切换：
-          // shadow 只能「再藏一层」，无法把文件级禁用反向开启，过滤掉避免误导。
-          .filter((row) => row.shadowStub !== true && (row.invocation.modelInvocable || row.invocation.userInvocable))
-          .map((row) => ({
-            ...row,
-            // 以实际注册状态为准（项目默认 + 会话显式共同决定）。
-            enabledInSession: record !== undefined ? !shadowed(record, row.name) : row.injected !== true || !projectDisabled.has(row.name),
-            canToggleInSession: record !== undefined,
-          }))
+      // 硬关闭的条目（文件级双向 false、项目内 shadow stub）不可在会话层切换：
+      // shadow 只能「再藏一层」，无法把文件级禁用反向开启，过滤掉避免误导。
+      const toggleable = rows.filter(
+        (row) => row.shadowStub !== true && (row.invocation.modelInvocable || row.invocation.userInvocable),
       );
+      // 恢复显式会话开关（磁盘 + 注入都覆盖；已删除技能顺便清理覆盖记录）。
+      if (record !== undefined) await restoreExplicit(record, new Set(toggleable.map((row) => row.name)));
+      return toggleable.map((row) => ({
+        ...row,
+        // 以实际注册状态为准（项目默认 + 会话显式共同决定）。
+        enabledInSession: record !== undefined ? !shadowed(record, row.name) : row.injected !== true || !projectDisabled.has(row.name),
+        canToggleInSession: record !== undefined,
+      }));
     },
 
     async setEnabled(input): Promise<SessionSkillOpResult> {
@@ -596,6 +672,7 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
       if (deps.registry === undefined) {
         // 无 registry 桥（旧装配）：保持旧的显式开关行为。
         return withQueue(record, async () => {
+          await hydrateExplicit(record);
           if (input.enabled === undefined) {
             record.explicit.delete(name);
             const projectDisabled = await projectDisabledOf(record.cwd);
@@ -605,12 +682,17 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
           }
           const desired = desiredEnabled(record, name);
           const result = desired ? await releaseShadow(record, name) : await ensureShadow(record, name, record.explicit.get(name) !== false);
-          if (result.ok) rebucketShadow(record, name);
+          if (result.ok) {
+            rebucketShadow(record, name);
+            // 落盘：失败只 warn（本次运行内仍生效），不影响开关结果。
+            if (deps.state !== undefined) await deps.state.setSkill(sessionId, name, input.enabled, metaOf(record));
+          }
           return result;
         });
       }
 
       return withQueue(record, async () => {
+        await hydrateExplicit(record);
         // 刷新项目默认快照（显式开关的 fallback 依赖它）。
         const projectDisabled = await projectDisabledOf(record.cwd);
         record.projectDefaults = new Set(projectDisabled);
@@ -624,6 +706,8 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
         if (input.enabled === undefined) record.explicit.delete(name);
         else record.explicit.set(name, input.enabled === true);
         rebucketShadow(record, name);
+        // 落盘：失败只 warn（本次运行内仍生效），不向 RPC 报错误导 UI。
+        if (deps.state !== undefined) await deps.state.setSkill(sessionId, name, input.enabled, metaOf(record));
         return { ok: true };
       });
     },

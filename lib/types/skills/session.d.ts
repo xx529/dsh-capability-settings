@@ -30,12 +30,15 @@
  *   - **只可关闭，不能强制开启**：文件级已禁用（frontmatter 双 false）或项目
  *     内 shadow stub 的条目，本模块只把它们从可切换列表里过滤掉，不会去
  *     「反向开启」；
- *   - **纯内存**：不落盘，agent 销毁 / 宿主重启即回到默认；项目默认才落
+ *   - **按会话落盘**：显式会话开关写在插件数据目录
+ *     （`<dshHome>/dsh-capability-settings/session-capabilities.json`，见
+ *     `session-state.ts`），agent 重建 / 宿主重启后恢复；项目默认仍落
  *     `.agents/capability-overrides.json`；
  *   - 找不到 live agent（冷会话）时开关失败并返回业务错误，不做状态暂存。
  *
  * @module dsh-capability-settings/skills/session
  */
+import type { SessionStateStore } from "../session-state.js";
 import type { SkillRegistryBridge } from "./registry.js";
 import type { SkillSummaryView } from "./types.js";
 /** 会话级 Skills 开关 / 项目默认投影的依赖。 */
@@ -44,6 +47,11 @@ export interface SkillSessionDeps {
     projectDisabled?: (cwd?: string) => Promise<readonly string[]>;
     /** 宿主 registry 桥（读注入技能 + read-before/after-shadow 校验）；缺省退化为纯磁盘行为。 */
     registry?: SkillRegistryBridge;
+    /**
+     * 会话级开关的持久化存储（可选）：提供时显式开关按 sessionId 落盘，
+     * agent 重建 / 宿主重启后恢复；省略时保持旧的纯内存行为。
+     */
+    state?: SessionStateStore;
     /** 宿主日志（结构子集）。 */
     logger?: {
         warn?: (message: string) => void;
@@ -74,7 +82,7 @@ export interface SkillSessionRegistry {
      */
     list(baseList: (cwd?: string) => Promise<SkillSummaryView[]>, cwd?: string, sessionId?: string): Promise<SessionSkillView[]>;
     /**
-     * 设置本会话开关（内存态，不落盘）。
+     * 设置本会话开关（按会话落盘；无 `state` 依赖时仅内存）。
      *
      * `enabled=false` 注册 shadow；`true` 解除；`undefined` 清除显式覆盖、
      * 回到项目默认（与 MCP 的 `setSessionEnabled` 语义对齐）。

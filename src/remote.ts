@@ -51,14 +51,15 @@ export interface PanelRpcService {
   skills: {
     list(cwd?: string): Promise<unknown>;
     /**
-     * 磁盘列表 + **本会话**启用态（内存 shadow）：`enabledInSession` /
+     * 磁盘列表 + **本会话**启用态（按会话落盘的 runtime shadow）：`enabledInSession` /
      * `canToggleInSession` 两列，供面板/输入框下方开关消费。
      */
     sessionList(cwd?: string, sessionId?: string): Promise<unknown>;
     /**
-     * 设置某个 session 的 skill 开关（**内存内、不落盘**）：关闭 = 在 agent
-     * 作用域注册同名 runtime shadow（`invocation` 双向 false）；开启 = 解除。
-     * 业务失败（会话无 live agent / skills 服务缺失）走 `value.ok=false` 信封。
+     * 设置某个 session 的 skill 开关（**按会话落盘**，重启/resume 后恢复）：
+     * 关闭 = 在 agent 作用域注册同名 runtime shadow（`invocation` 双向 false）；
+     * 开启 = 解除。业务失败（会话无 live agent / skills 服务缺失）走
+     * `value.ok=false` 信封。
      */
     setSessionEnabled(input: unknown): Promise<unknown>;
     read(input: unknown): Promise<unknown>;
@@ -98,9 +99,9 @@ export interface PanelRpcService {
      */
     runtime(input: unknown): Promise<unknown>;
     /**
-     * 设置某个 session 的能力开关（**内存内、不落盘**）：项目条目按需挂载/卸载，
-     * 全局/外部实例用 `tools.restrict` 屏蔽/恢复工具。`enabled: undefined` 清掉
-     * 显式覆盖、重新跟随项目默认。
+     * 设置某个 session 的能力开关（**按会话落盘**，重启/resume 后恢复）：
+     * 项目条目按需挂载/卸载，全局/外部实例用 `tools.restrict` 屏蔽/恢复工具。
+     * `enabled: undefined` 清掉显式覆盖、重新跟随项目默认。
      */
     setSessionEnabled(input: unknown): Promise<unknown>;
   };

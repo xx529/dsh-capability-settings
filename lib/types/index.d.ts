@@ -42,7 +42,7 @@ export interface Config {
     mountMcp?: boolean;
 }
 /**
- * skills 域服务 = 磁盘 CRUD 管理器 + 会话级开关（内存 shadow）。
+ * skills 域服务 = 磁盘 CRUD 管理器 + 会话级开关（按会话落盘的 runtime shadow）。
  *
  * 会话级开关是纯增量：`list` 等原有方法不变，客户端改用 `sessionList`
  * （多带 enabledInSession / canToggleInSession 两列）。
@@ -50,7 +50,7 @@ export interface Config {
 export type SkillsService = ReturnType<typeof createService> & {
     /** 磁盘列表 + 本会话启用态（见 skills/session.ts）。 */
     sessionList: (cwd?: string, sessionId?: string) => Promise<SessionSkillView[]>;
-    /** 设置本会话开关（内存态，不落盘）。 */
+    /** 设置本会话开关（按会话落盘；重启/resume 后恢复）。 */
     setSessionEnabled: SkillSessionRegistry["setEnabled"];
 };
 /** 暴露给宿主调用方的传输无关服务：skills / mcp 两个域的合体 + 项目级禁用声明 + Jev。 */
@@ -91,6 +91,10 @@ export { createSkillRegistryBridge, isOwnShadow, SHADOW_DESCRIPTION, SHADOW_META
 export type { ClassifiedInjectedRow, HostSkillCatalogSnapshot, HostSkillDefinition, HostSkillSummary, HostSkillsService, InjectedMergeInput, RegistryNameVerdict, RegistryReadResult, SkillRegistryBridge, SkillRegistryBridgeDeps, SkillResourceResult, } from "./skills/registry.js";
 export { createMcpLoader } from "./mcp/loader.js";
 export { createMcpManager } from "./mcp/manager.js";
+export { createSessionState, sessionStateDir, sessionStateFile, SESSION_STATE_FILE_NAME, SESSION_STATE_GRACE_MS, } from "./session-state.js";
+export { createSessionStateReconciler } from "./session-state-reconcile.js";
+export type { SessionStateEntry, SessionStateReconcileInput, SessionStateReconcileResult, SessionStateStore, } from "./session-state.js";
+export type { SessionStateReconciler, SessionStateReconcilerDeps } from "./session-state-reconcile.js";
 export { createOverridesManager } from "./overrides/manager.js";
 export { createJevManager } from "./jev/manager.js";
 export type { JevManager, JevManagerDeps } from "./jev/manager.js";

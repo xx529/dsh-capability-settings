@@ -59,6 +59,7 @@
  */
 import type { OverridesManager } from "../overrides/manager.js";
 import type { ImportsManager } from "../imports/manager.js";
+import type { SessionStateStore } from "../session-state.js";
 import type { McpStatusView } from "./types.js";
 /**
  * 全局层在状态视图里的哨兵 sessionId（不是真实 session）。`*` 不在任何
@@ -79,6 +80,14 @@ export interface McpLoaderDeps {
     overrides?: OverridesManager;
     /** 项目级「全局能力引用」管理器：启用态引用参与项目层挂载判定。 */
     imports?: ImportsManager;
+    /**
+     * 会话级开关的持久化存储（可选）。
+     *
+     * 提供时：`setSessionEnabled` 会把显式开关按 sessionId 落盘，并在 agent
+     * 重建 / 宿主重启后由 {@link remount} 恢复（见 `session-state.ts`）；
+     * 省略时保持旧的纯内存行为（headless / 旧装配）。
+     */
+    state?: SessionStateStore;
 }
 /** 挂载器对外接口：读状态 + 触发重挂。 */
 export interface McpLoader {
@@ -87,7 +96,7 @@ export interface McpLoader {
     /** 重新读配置并重挂匹配的 session（省略 projectRoot 时全局层 + 全部 session）。 */
     reload(projectRoot?: string): Promise<void>;
     /**
-     * 设置某个 session 的手动开关（**内存内、不落盘**）。
+     * 设置某个 session 的手动开关（**按会话落盘**；无 `state` 依赖时仅内存）。
      *
      * - `kind: "project"` + `target: configKey`：项目 `.mcp.json` 条目 → 按需挂载/卸载；
      * - `kind: "server"` + `target: serverName`：全局配置条目或外部注入实例 → 用

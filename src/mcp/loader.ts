@@ -65,6 +65,7 @@ import { readMcpFile, sanitizeServerName, toClientConfig } from "./config-file.j
 import { GLOBAL_MCP_FILE_NAME, globalMcpDirs, projectMcpFile } from "./paths.js";
 import type { OverridesManager } from "../overrides/manager.js";
 import type { ImportsManager } from "../imports/manager.js";
+import type { SessionStateStore } from "../session-state.js";
 import type { McpRestrictionView, McpServerEntry, McpStatusView } from "./types.js";
 
 /**
@@ -87,6 +88,14 @@ export interface McpLoaderDeps {
   overrides?: OverridesManager;
   /** 项目级「全局能力引用」管理器：启用态引用参与项目层挂载判定。 */
   imports?: ImportsManager;
+  /**
+   * 会话级开关的持久化存储（可选）。
+   *
+   * 提供时：`setSessionEnabled` 会把显式开关按 sessionId 落盘，并在 agent
+   * 重建 / 宿主重启后由 {@link remount} 恢复（见 `session-state.ts`）；
+   * 省略时保持旧的纯内存行为（headless / 旧装配）。
+   */
+  state?: SessionStateStore;
 }
 
 /** 一条 server 在一个 session（或全局层）内的挂载记录。 */
@@ -140,7 +149,7 @@ export interface McpLoader {
   /** 重新读配置并重挂匹配的 session（省略 projectRoot 时全局层 + 全部 session）。 */
   reload(projectRoot?: string): Promise<void>;
   /**
-   * 设置某个 session 的手动开关（**内存内、不落盘**）。
+   * 设置某个 session 的手动开关（**按会话落盘**；无 `state` 依赖时仅内存）。
    *
    * - `kind: "project"` + `target: configKey`：项目 `.mcp.json` 条目 → 按需挂载/卸载；
    * - `kind: "server"` + `target: serverName`：全局配置条目或外部注入实例 → 用
@@ -254,6 +263,59 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
   function sessionToggle(sessionId: string | undefined, toggleKey: string): boolean | undefined {
     if (sessionId === undefined) return undefined;
     return sessionToggles.get(sessionId)?.get(toggleKey);
+  }
+
+  /**
+   * 已从磁盘恢复过开关的 session（每个 session 只 hydrate 一次）。
+   *
+   * agent 销毁时清标记：重开的会话重新按磁盘恢复——磁盘是权威，内存里的
+   * 改动在 `setSessionEnabled` 里已即时落盘。**不清磁盘记录**（宿主重启后
+   * 还要靠它恢复）。
+   */
+  const hydratedSessions = new Set<string>();
+
+  /** 会话 header 的创建时间（防 sessionId 复用；取不到就不带）。 */
+  function headerCreatedAtOf(agent: any): number | undefined {
+    const value = agent?.session?.header?.createdAt;
+    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  }
+
+  /** 会话记录 → 落盘元数据（cwd 仅诊断、headerCreatedAt 防 id 复用）。 */
+  function metaOf(record: SessionRecord | undefined): { cwd?: string; headerCreatedAt?: number } {
+    const meta: { cwd?: string; headerCreatedAt?: number } = {};
+    if (record?.cwd !== undefined) meta.cwd = record.cwd;
+    const createdAt = headerCreatedAtOf(record?.agent);
+    if (createdAt !== undefined) meta.headerCreatedAt = createdAt;
+    return meta;
+  }
+
+  /**
+   * 从持久化存储恢复某 session 的显式开关（幂等；每个 session 一次）。
+   *
+   * 内存里已有的键优先：同一运行内用户刚改过的开关不被磁盘旧值覆盖。
+   * 读取前先 `await state.ready()`，失败降级为空（跟随项目默认，不阻断挂载）。
+   */
+  async function hydrateToggles(
+    sessionId: string | undefined,
+    meta: { cwd?: string; headerCreatedAt?: number } = {},
+  ): Promise<void> {
+    const state = deps.state;
+    if (state === undefined || sessionId === undefined || hydratedSessions.has(sessionId)) return;
+    await state.ready();
+    hydratedSessions.add(sessionId);
+    // sessionId 复用（header 创建时间不一致）⇒ 旧记录已作废。
+    if (!state.verifySession(sessionId, meta)) return;
+    const stored = state.mcp(sessionId);
+    const keys = Object.keys(stored);
+    if (keys.length === 0) return;
+    let toggles = sessionToggles.get(sessionId);
+    if (toggles === undefined) {
+      toggles = new Map<string, boolean>();
+      sessionToggles.set(sessionId, toggles);
+    }
+    for (const key of keys) {
+      if (!toggles.has(key)) toggles.set(key, stored[key]);
+    }
   }
   const enabled = deps.enabled !== false;
 
@@ -608,6 +670,9 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
     // "该项目所有 server 都掉了"的假象。
     const nextMounts: MountState[] = [];
     try {
+      // 先恢复落盘的会话级开关（resolveSessionPlan 要读 sessionToggles）；
+      // 幂等，失败降级为"无显式覆盖"（跟随项目默认），不阻断挂载。
+      await hydrateToggles(typeof record.agent?.id === "string" ? record.agent.id : undefined, metaOf(record));
       disposeRestrictions(record);
       const previous = record.fibers;
       record.fibers = [];
@@ -676,8 +741,10 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
     ctx.on("agent/created", ({ agent }: any) => mountAgent(agent));
     ctx.on("agent/disposed", ({ agent }: any) => {
       if (agent?.id !== undefined) {
+        // 只清内存：磁盘记录要留给宿主重启后恢复（见 session-state.ts）。
         sessions.delete(agent.id);
         sessionToggles.delete(agent.id);
+        hydratedSessions.delete(agent.id);
       }
     });
     // 工具集变化（MCP server 连接后注册工具 / 断线注销 / 别的插件改动）时
@@ -709,6 +776,12 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
     kind: "project" | "server";
     enabled: boolean | undefined;
   }): Promise<void> {
+    // 找到这个 session 的记录（冷会话可能是 undefined：仍允许先落盘，等 agent 创建时恢复）。
+    const record = [...sessions.values()].find((item) => item.agent?.id === input.sessionId);
+    const meta = metaOf(record);
+    if (input.cwd !== undefined && meta.cwd === undefined) meta.cwd = input.cwd;
+    // 先把磁盘上的其它键恢复进内存，避免本次写盘覆盖掉它们。
+    await hydrateToggles(input.sessionId, meta);
     let toggles = sessionToggles.get(input.sessionId);
     if (toggles === undefined) {
       toggles = new Map<string, boolean>();
@@ -717,8 +790,10 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
     const toggleKey = input.kind === "project" ? projectToggleKey(input.target) : serverToggleKey(input.target);
     if (input.enabled === undefined) toggles.delete(toggleKey);
     else toggles.set(toggleKey, input.enabled);
-    // 找到这个 session 的记录并只重挂它（项目条目挂载 / restrict 都要重算）。
-    const record = [...sessions.values()].find((item) => item.agent?.id === input.sessionId);
+    // 落盘：失败只 warn（本次运行内仍生效，等价于旧行为），不向 RPC 抛。
+    const state = deps.state;
+    if (state !== undefined) await state.setMcp(input.sessionId, toggleKey, input.enabled, meta);
+    // 只重挂这个 session（项目条目挂载 / restrict 都要重算）。
     if (record !== undefined) await scheduleRemount(record);
   }
 

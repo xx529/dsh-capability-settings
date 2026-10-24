@@ -3,6 +3,46 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 修复
+
+- **「当前对话」能力开关重启后不保持**：Skills / MCP 的会话级开关原先只有内存态
+  （`loader.sessionToggles` / `skills/session.ts` 的 `explicit`），宿主重启 / agent
+  重建后回到项目默认，用户看到的行为与重启前不一致（`README` 原文也写着
+  「重启后会话覆盖即失效」）。现在按 sessionId 落盘：
+  - MCP：`remount` 前 hydrate `sessionToggles`，项目条目挂载 / `tools.restrict`
+    名单与重启前一致；
+  - Skills：`applyProjectDefaults` 与 `sessionList` 前 hydrate `explicit`，重新注册
+    同名 runtime shadow（磁盘技能 + 注入技能都覆盖；已删除技能的覆盖会被清理，
+    不造幽灵 shadow）。
+- 写入失败（磁盘只读 / 权限）只记 warning，本次运行内仍生效，不向 RPC 报错误导 UI。
+
+### 新增
+
+- **会话级开关持久化**（`src/session-state.ts`）：`<dshHome>/dsh-capability-settings/
+  session-capabilities.json`，按 sessionId 记录 Skills / MCP 显式覆盖；目录 0700 /
+  文件 0600；原子写 + 文件锁 + 懒加载；损坏 / 未知版本降级为空表（跟随项目默认）。
+  记录带 `headerCreatedAt` 防 sessionId 复用（不一致 ⇒ 旧记录作废；fork 是新 id，
+  不继承父会话开关）。
+- **孤儿记录对账**（`src/session-state-reconcile.ts`）：宿主没有「会话删除」事件
+  （cordis 只有 `session/created|disposed|event|flush`），且关机时 `session/disposed`
+  会对所有 live 会话成批发出——因此事件只触发「只标记」核对，删除由启动后 + 每 24h
+  的存在性校验（`sessionPersistence.stat`）决定：确认缺失先记 `missingSince`，
+  累计 ≥24h 才删除；服务缺失 / 探测抛错一律保留。
+
+### 内部
+
+- `skills/session.ts`：`applyProjectDefaults` 早退条件纳入显式开关；新增
+  `restoreExplicit`（list 路径覆盖磁盘 + 注入技能，并清理已删除技能的覆盖记录）。
+- `mcp/loader.ts`：`setSessionEnabled` 先 hydrate 再改内存并落盘；`remount` 前
+  hydrate；`agent/disposed` 只清内存、不删磁盘。
+- `index.ts`：组合根创建单一 `sessionState` 注入两个域，并接线对账调度
+  （`session/disposed` / `agent/disposed` → debounce 只标记核对）。
+- 回归：`notes/verify/session-state.test.mjs`（8 例：重启读回 / 清除 / 防 id 复用 /
+  两阶段对账 / 跨实例合并 / 权限 / 损坏降级 / 未知版本）与
+  `notes/verify/session-restore.test.mjs`（2 例：Skills 与 MCP 的重启恢复接线）。
+
 ## [1.5.0] - 2026-10-25
 
 ### 新增

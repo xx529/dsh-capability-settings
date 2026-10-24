@@ -73,7 +73,7 @@ export interface ClientSkillSummary {
    */
   projectShadow?: "stub" | "skill";
   /**
-   * 本会话是否生效（composer 的 sessionList 投影）：内存态、不落盘。
+   * 本会话是否生效（composer 的 sessionList 投影）：按会话落盘、重启后恢复。
    * 缺省 true；本会话关闭后为 false。
    */
   enabledInSession?: boolean;
@@ -192,7 +192,7 @@ export interface SkillsApi {
    */
   sessionList(): Promise<ClientSkillSummary[]>;
   /**
-   * 关闭 / 恢复某个 skill 在**当前会话**的可见性（内存态、不落盘）：
+   * 关闭 / 恢复某个 skill 在**当前会话**的可见性（按会话落盘，重启/resume 后恢复）：
    * 关闭通过 agent 作用域注册同名 runtime shadow 实现（从模型目录、
    * `skill` 工具与 `/name` 注入三条链路消失）；恢复即解除 shadow。
    * 只能「关闭 / 恢复」，不能强制开启文件级已禁用项。
@@ -285,7 +285,7 @@ export interface ClientMcpServer {
   disabledInProject?: boolean;
   /**
    * 本会话的生效开关（composer 的 api 带了 sessionId 时由宿主投影）：显式会话
-   * 开关优先，否则跟随项目默认。内存内、不落盘。
+   * 开关优先，否则跟随项目默认。按会话落盘、重启后恢复。
    */
   enabledInSession?: boolean;
 }
@@ -445,9 +445,9 @@ export interface McpApi {
    */
   runtime(input?: { cwd?: string }): Promise<ClientMcpRuntimeView>;
   /**
-   * 设置**当前 session** 的能力开关（内存内、不落盘）：项目条目按需挂载/卸载，
-   * 全局与外部注入实例用 `tools.restrict` 屏蔽/恢复其工具（不卸载实例）。
-   * `enabled: undefined` = 清掉显式覆盖、重新跟随项目默认。
+   * 设置**当前 session** 的能力开关（按会话落盘，重启/resume 后恢复）：项目条目
+   * 按需挂载/卸载，全局与外部注入实例用 `tools.restrict` 屏蔽/恢复其工具
+   * （不卸载实例）。`enabled: undefined` = 清掉显式覆盖、重新跟随项目默认。
    */
   setSessionEnabled(input: { target: string; kind: "project" | "server"; enabled: boolean | undefined }): Promise<void>;
 }
