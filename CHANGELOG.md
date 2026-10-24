@@ -3,7 +3,18 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [1.4.3] - 2026-10-24
+
+### 修复
+
+- **能力决策 0 选择应用**（用户 bug：阈值筛出 0 个能力时无法应用）：旧实现 n=0
+  时禁用主按钮，用户无法表达「本会话全部不需要」。现在
+  `jev.apply` 允许空 plan `[]`：目标集合为空 = 关闭当前会话全部**可应用**能力
+  （不可应用项不动；非数组 / 超量仍返回 `bad-request`）；前端 n=0 时主按钮改为
+  「应用（关闭全部）」且可用，`noMatch` 提示可直接应用；toast 拆为只关闭
+  （`已应用：关闭 {Y} 项（当前会话未启用任何能力）`）/ 只启用 / 都变化三组合，
+  冷会话 pending 同样排队全部关闭 ops。实现 / 验证：task-52、task-53、task-54
+  （tester 610+ 断言 0 失败；既有回归全绿）。
 
 ### 变更
 
@@ -613,6 +624,7 @@
   输出总量上限（对接入的压缩包上限之下再拦一层"膨胀内存"），并修复
   数据区越界被静默截断、短归档负面偏移读越界的问题（zip bomb 防护）。
 
+[1.4.3]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.3.4...v1.4.0

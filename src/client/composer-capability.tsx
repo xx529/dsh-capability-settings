@@ -662,10 +662,19 @@ function applyToastText(result: JevApplySuccess, skipped: number, planned?: Appl
     counts = { enabled: hostEnabled ?? result.applied, disabled: hostDisabled ?? 0 };
   }
   const skippedSuffix = skipped > 0 ? `；${skipped} 项不可切换已跳过` : "";
+  const { enabled, disabled } = counts;
   if (result.pending) {
-    return `已加入本会话，发送首条消息后生效（启用 ${counts.enabled} · 关闭 ${counts.disabled}）${skippedSuffix}`;
+    const detail =
+      enabled === 0 && disabled > 0
+        ? `关闭 ${disabled} 项，当前会话未启用任何能力`
+        : disabled === 0 && enabled > 0
+          ? `启用 ${enabled} 项`
+          : `启用 ${enabled} · 关闭 ${disabled}`;
+    return `已加入本会话，发送首条消息后生效（${detail}）${skippedSuffix}`;
   }
-  return `已应用：启用 ${counts.enabled} 项、关闭 ${counts.disabled} 项（仅当前会话）${skippedSuffix}`;
+  if (enabled === 0 && disabled > 0) return `已应用：关闭 ${disabled} 项（当前会话未启用任何能力）${skippedSuffix}`;
+  if (disabled === 0 && enabled > 0) return `已应用：启用 ${enabled} 项（仅当前会话）${skippedSuffix}`;
+  return `已应用：启用 ${enabled} 项、关闭 ${disabled} 项（仅当前会话）${skippedSuffix}`;
 }
 
 /** 排队结果回执（pendingOutcome）的一次性提示文案。 */
@@ -968,7 +977,7 @@ function useDecision(options: UseDecisionOptions): DecisionController {
     const current = stateRef.current;
     if (current === undefined || current.phase !== "results" || current.data === undefined) return;
     const selected = checkedItems(current);
-    if (selected.length === 0) return;
+    // 0 选中是合法筛选结果（= 关闭全部可应用能力）：提交空 plan，由宿主筛选语义处理。
     const plan: JevApplyPlanItem[] = selected.map((item) => ({ id: item.id, kind: item.kind, name: item.name, enabled: true }));
     setState({ ...current, phase: "applying", applyError: undefined });
     void (async () => {
@@ -1201,7 +1210,9 @@ function DecisionPanel(props: DecisionPanelProps) {
             {!loading && <span className="skp-decision-count">已选 {selectedCount} / {total}</span>}
           </div>
           {noMatch && selectedCount === 0 && (
-            <p className="skp-decision-nomatch">没有达到阈值 {state.threshold.toFixed(2)} 的能力，可调低阈值或手动勾选</p>
+            <p className="skp-decision-nomatch">
+              没有达到阈值 {state.threshold.toFixed(2)} 的能力；可直接应用，当前会话将不启用任何能力（可调低阈值或手动勾选）
+            </p>
           )}
         </>
       )}
@@ -1316,14 +1327,8 @@ function DecisionPanel(props: DecisionPanelProps) {
             <button type="button" className="skp-decision-btn" disabled={applying} onClick={() => props.onClose(true)}>
               取消
             </button>
-            <button
-              type="button"
-              className="skp-decision-btn skp-decision-btn-primary"
-              disabled={applying || selectedCount === 0}
-              title={selectedCount === 0 ? "至少勾选一项" : undefined}
-              onClick={props.onApply}
-            >
-              {applying ? "应用中…" : `应用所选（${selectedCount}）`}
+            <button type="button" className="skp-decision-btn skp-decision-btn-primary" disabled={applying} onClick={props.onApply}>
+              {applying ? "应用中…" : selectedCount === 0 ? "应用（关闭全部）" : `应用所选（${selectedCount}）`}
             </button>
           </>
         )}

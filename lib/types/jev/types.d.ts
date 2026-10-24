@@ -145,6 +145,13 @@ export type JevRankResult = {
 export interface JevApplyInput {
     cwd?: string;
     sessionId: string;
+    /**
+     * 已勾选能力（只传勾选项）。
+     *
+     * **允许空数组 `[]`**（task-52）：表示目标集合为空 —— 关闭当前会话全部
+     * **可应用**能力（不可应用项不动）；响应 `enabled=0`、`disabled=实际关闭数`。
+     * 非数组或超过 500 条仍返回 `bad-request`。
+     */
     plan: JevApplyPlanItem[];
 }
 /**
@@ -152,6 +159,7 @@ export interface JevApplyInput {
  *
  * 筛选语义（task-42）：宿主把 plan 当「选中集合」——选中项目标 enable，
  * 当前会话里其余**可应用**能力目标 disable（未勾选 = 关闭），只改会话开关。
+ * plan 为空数组时表示「一个都不勾选」，即关闭全部可应用能力（task-52）。
  */
 export interface JevApplyPlanItem {
     id: string;

@@ -3,7 +3,7 @@
 | 项 | 值 |
 |---|---|
 | 文档 ID | `docs/architecture/jev-capability-decision.md`（本文件） |
-| 版本 | v1.2（apply 批量/并发执行器 + 筛选语义；rank 契约见 v1.1） |
+| 版本 | v1.3（空 plan = 关闭全部可应用能力；apply 批量/并发见 v1.2） |
 | 日期 | 2026-10-24 |
 | 作者 | architect2（task-14） |
 | 上游依据 | `docs/specs/jev-auto-select.md` v1.3（WHAT/验收）、`docs/ux/jev-auto-select.md` v1.5（HOW-UI/文案）、`docs/research/jev-auto-select.md`（API 与仓库考古） |
@@ -44,7 +44,7 @@ A11Y 8 / NAR 6 / REG 5）。实现与验收**以仓库当前 spec 为准**；本
 | 2 | **密钥** | `getConfig` 只回 `hasApiKey/apiKeySource/apiKeyLast4`，无明文；key 解析优先级 **env（`apiKeyEnv`，默认 `TYPESAFE_API_KEY`）> 文件 `apiKey`**；`test`/`rank` 在**宿主进程** fetch；所有错误/日志经脱敏（隐去 Bearer/Authorization/key 原文）。 |
 | 3 | **RPC** | 在 `PanelRpcService.jev` 增加 `getConfig/setConfig/test/rank/apply`，`handleEndpoint` 加 5 个 `case "jev.*"`；传输信封恒 `{ok:true,value}`，业务失败一律 `value:{ok:false,...}`（见 §5）。 |
 | 4 | **rank** | 一次 `POST {baseURL}/v1/systemone`：`state={request,guidance}`（**能力不进 state**）；每能力一条 `noul` question，`instructions` 为**结构化对象**并内嵌 `capability{kind,name,description,whenToUse?,tools?}`（MCP 带工具清单，题目逐能力唯一）；共享判据只在 `state.guidance` 出现一次；`score=noul`；排序 desc → 技能先于 MCP → 名称；错误映射 9 码；429/529 最多重试 2 次（退避 500/1000ms），4xx 不重试；不发 long-context header；不分片（v1.1 请求形状变更，原因见 §6.0）。 |
-| 5 | **apply** | 宿主按 `id` 重解析 → **筛选语义**（plan = 已勾选集合：选中启用、未选关闭，只改会话开关）→ 只留状态不一致项 → **enable→disable 两阶段批量写**（skills 同一 tick 全部发起 + `allSettled`，宿主注册表 effect 合并刷新；MCP 并发 4）→ 任一失败逆序批量回滚 → 返回 `applied/enabled/disabled/skipped/pending`（成功支 additive `elapsedMs`）；冷会话入队完整目标集合并用同一执行器重放（见 §7、§8，v1.2）。 |
+| 5 | **apply** | 宿主按 `id` 重解析 → **筛选语义**（plan = 已勾选集合：选中启用、未选关闭，只改会话开关；**空 plan 合法 = 关闭本会话全部可应用能力**）→ 只留状态不一致项 → **enable→disable 两阶段批量写**（skills 同一 tick 全部发起 + `allSettled`，宿主注册表 effect 合并刷新；MCP 并发 4）→ 任一失败逆序批量回滚 → 返回 `applied/enabled/disabled/skipped/pending`（成功支 additive `elapsedMs`）；冷会话入队完整目标集合并用同一执行器重放（见 §7、§8，v1.2/v1.3）。 |
 
 ### 1.2 冷会话结论（最高风险项）
 
@@ -520,6 +520,7 @@ export interface JevApplyPlanItem {
   target?: string;                 // 同上；MCP 项目条目=config key，服务/外部=serverName
   enabled: true;                   // 客户端只提交**勾选项**；宿主把 plan 当「选中集合」= 目标真值
                                    // （v1.2 筛选语义：未勾选的可应用能力会被**关闭**，见 §7.2）
+                                   // 空数组 [] 合法（v1.3）：目标集合为空 = 关闭全部可应用能力
 }
 
 export interface JevApplySkipped { id: string; reason: JevApplySkipReason }
@@ -1019,7 +1020,8 @@ MCP 写回映射（`target` / `kind` 与既有 `mcp.setSessionEnabled` 一致，
   **当前会话全部可应用能力**计算目标态：`selected → enabled`、**未 selected → disabled**；
   只写「当前状态 ≠ 目标状态」的项；不可应用项一律不动。
   因此它**不再是** v1.1 的「只启用、不关闭」语义——应用一次 = 把本会话能力集合对齐到勾选结果
-  （仍只写会话级内存开关，不动项目默认与配置文件）。
+  （仍只写会话级内存开关，不动项目默认与配置文件）；**`plan=[]`（v1.3）即目标集合为空，
+  等价于关闭本会话全部可应用能力**（见 §7.4/§7.6）。
 
 ### 7.3 可应用判定（`applicable`）
 
@@ -1043,7 +1045,8 @@ MCP 写回映射（`target` / `kind` 与既有 `mcp.setSessionEnabled` 一致，
 | 条件 | 结果 |
 |---|---|
 | `sessionId` 缺失/空 | `{ok:false, code:"bad-request"}` |
-| `plan` 非数组 / 长度 0 / >500 | `bad-request` |
+| `plan` 非数组 / 长度 >500 | `bad-request`；**空数组 `[]` 合法**（v1.3，见下行） |
+| `plan = []`（0 选中） | **合法**：目标集合为空 ⇒ 当前会话**全部可应用能力** desired=false（关闭）；不可应用项不动；成功支 `enabled=0, disabled=实际关闭数`；冷会话入队 `ops` 全部 `desired=false` |
 | item 非法（非对象 / `id` 不匹配 `^cap_[0-9a-f]{36}$` / `enabled !== true`） | 逐条进 `skipped`（`unknown-id`） |
 | id 不在当前枚举中 | `skipped: unknown-id` |
 | live 会话下能力 `applicable=false` | `skipped: <reason>`（`hard-disabled` / `not-restrictable` / `not-toggleable` / `shadowed`） |
@@ -1057,6 +1060,8 @@ MCP 写回映射（`target` / `kind` 与既有 `mcp.setSessionEnabled` 一致，
 
 目标态计算（`planTargetOps`）：遍历**全部可应用能力** → `desired = selectedIds.has(id)` →
 `desired === enabledInSession` 记为一致跳过，否则生成 `PlannedOp{cap, desired, prev}`；
+**`selectedIds` 为空时**，每个 `enabledInSession === true` 的可应用能力都会得到
+`desired=false` 的关闭 op（= 关闭全部），本来已关闭的记 `already-applied`；
 排序为**稳定全序**：先 `desired=true`（enable 阶段）后 `desired=false`（disable 阶段），
 组内按 `id` 升序（保证可重放、可测试）。
 
@@ -1194,12 +1199,14 @@ MCP 可为 `undefined` = 清显式覆盖，`src/mcp/loader.ts:705-728`[源码]�
 | 场景 | `ok` | `applied` / `enabled` / `disabled` | `pending` | `failed` | 前端表现 |
 |---|---|---|---|---|---|
 | 全部成功 | true | applied = enabled+disabled | false | — | toast + chips 回显 + 收起 |
+| **空 plan（关闭全部可应用能力）** | true | 0 / 0 / N（N=实际关闭数） | false | — | toast「已应用：关闭 N 项（当前会话未启用任何能力）」 |
 | 部分 skipped（`already-applied` / 非法 id / 不可应用） | true | 实际写入数 | false | — | 「已应用 N 条（启用 a / 关闭 b），跳过 M 条」 |
 | 写入失败并回滚 | true | 0 / 0 / 0 | false | `[{id, reason}]` | 报错「应用失败，已回滚」 |
 | 冷会话排队 | true | 0 / 0 / 0 | true | — | chips 立即回显 + 「已加入本会话，发送首条消息后生效」 |
 | 入参非法/枚举失败 | false | — | — | — | 错误提示 |
 
-- `applied = enabled + disabled`（筛选语义下「关闭」也算实际应用）；
+- `applied = enabled + disabled`（筛选语义下「关闭」也算实际应用）；空 plan ⇒ `enabled=0`，
+  `applied === disabled`（本来已关闭的项进 `already-applied`，不计入 applied）；
 - `elapsedMs` **additive**（task-47）：仅成功支返回（**冷会话成功支也有**），= 枚举 + 写入总耗时；
   客户端可忽略，仅用于排查「应用中…」过长；
 - `skipped[].reason = "already-applied"` 现在覆盖两类状态一致项（选中且已启用 / 未选且已关闭），
@@ -1253,6 +1260,7 @@ const pendingOutcomes = new Map<string, JevPendingOutcome>(); // 上次激活应
 ```
 
 - 同会话重复 apply ⇒ **后者替换前者**（最新目标覆盖；不累积），返回 `pending:true`；
+- **空 plan（v1.3）**：入队 `ops` = 全部可应用能力、`desired` 全为 `false`（关闭全部）；不可应用项不入 ops；
 - 存**目标态**而不是「已解析的写入项」：激活时状态可能已变，重放会重新枚举、重新快照前态（§8.3）；
 - `pendingPlans` 规模上界：session 数级；TTL 30 分钟 + `agent/disposed` 清理（§8.5）。
 
@@ -1548,14 +1556,19 @@ type DecisionState =
 - 行展示：勾选框 + 类型徽标 + 名称 + 描述 + 分数条 + 数值；`applicable === false` ⇒ 置灰不可勾选 +
   `reason` 文案（`hard-disabled`/`not-restrictable`/`not-toggleable`/`shadowed`）；
 - 计数：单基数「已选 n / N」，`N = items.length`（含不可切换项）；
-- 底部：重新评分 / 取消 / 应用所选（N）；
+- 底部：重新评分 / 取消 / 「应用所选（N）」；**0 选中时按钮文案为「应用（关闭全部）」且可点**（v1.3）。
 - 应用 `plan = checked.map(id => ({ id, kind, name, enabled: true }))`（`kind`/`name` 从 item 取，
   宿主仍按 id 重解析）；成功 ⇒ 收起面板 + 复用现有 `controller.refresh()` 刷新 chips；
   `pending === true` ⇒ chips 立即回显（乐观）+ 提示「已加入本会话，发送首条消息后生效」；
 - **筛选语义（v1.2 / task-42）**：`plan` 是全量勾选集合 = 目标真值，宿主会把**未勾选但当前已启用**
-  的可应用能力关闭（只影响本会话）；因此客户端必须提交全部勾选项（不能只提交「新勾选的增量」），
+  的可应用能力关闭（只影响本会话）；因此客户端必须提交全部勾选项（0 个时提交 `[]`，不能只提交增量），
   并在 toast 里用返回的 `enabled`/`disabled` 说明「启用 a / 关闭 b」；`already-applied` 属于状态一致，
   不计入「不可切换跳过」；
+- **0 选中是合法结果（v1.3 / task-52）**：`plan = []` ⇒ 宿主关闭本会话**全部可应用能力**并返回
+  `enabled 0 / disabled N`；**不要因为 0 选中而跳过请求**。toast 由客户端 `applyToastText` 按
+  `enabled`/`disabled` 分三类：只关闭「已应用：关闭 N 项（当前会话未启用任何能力）」、只启用
+  「已应用：启用 N 项（仅当前会话）」、都变化「已应用：启用 N 项、关闭 M 项（仅当前会话）」；
+  冷会话对应「已加入本会话，发送首条消息后生效（关闭 N 项，当前会话未启用任何能力）」；
 - `apply` 返回的 `elapsedMs`（成功支 additive）仅用于诊断，不展示给用户；
 - `pendingOutcome?` 存在时（下一次 rank/apply 返回）⇒ 一次性提示成功/失败，不重复弹。
 
@@ -1663,11 +1676,14 @@ Authorization 是否出现）供断言；建议同时记录 `body` 原始 JSON �
 | H14 | apply 成功 + 筛选语义 | 能力 A 已启用、B 已启用、C 已关闭；plan 只勾 A、C ⇒ `applied 2`、`enabled 1`、`disabled 1`、`pending false`；A 进 `skipped: already-applied`；写入参数：A 不写、B `enabled:false`、C `enabled:true` |
 | H14b | 阶段顺序与并发 | 计划含 2 enable + 3 disable ⇒ 先发 enable 组、后发 disable 组；组内按 id 升序；fake service 记录 skills **同一 tick 发起**（在途峰值 = skills 数）、MCP 在途峰值 ≤4（`MCP_WRITE_CONCURRENCY`） |
 | H14c | `elapsedMs` additive | 成功支与冷会话成功支都有 `elapsedMs`（number ≥0）；失败回滚支无（客户端可忽略） |
+| H14d | **空 plan = 关闭全部可应用能力**（v1.3） | 会话内 A/B 已启用、C 已关闭、D 硬关闭不可应用；`plan=[]` ⇒ `ok:true`、`applied 2`、`enabled 0`、`disabled 2`、`pending false`；写入：A/B `enabled:false`；C 进 `already-applied`；D 不动也不 skip；enable 阶段为空（只执行 disable 阶段）；`elapsedMs` 存在 |
+| H14e | 空 plan 入参边界 | `plan` 缺省 / null / 非数组 ⇒ `{ok:false, code:"bad-request"}`；`plan: []` 合法（与 `<=500` 上限无关）；`plan` 长 501 ⇒ `bad-request` |
 | H15 | apply 失败回滚（批量） | 第 2 个写入失败 ⇒ `applied 0 / enabled 0 / disabled 0`、`failed[0].id`=失败项、`pending false`；回滚按已写列表**逆序**、skills 回滚同一 tick、MCP 回滚并发 ≤4；最终状态=前态（fake service 状态快照对比） |
 | H15b | 失败即停 | enable 阶段失败 ⇒ **不进入 disable 阶段**（fake service 记录 disable 调用数 = 0） |
 | H16 | 不可应用跳过 | 硬关闭 MCP / 不可 restrict 外部实例 ⇒ `skipped[].reason` 对应，不写 |
 | H17 | 未知 id | 伪造 `cap_000…` ⇒ `skipped: unknown-id`，不写 |
 | H18 | 冷会话排队（v1.2 完整目标集合） | `agents.list()=[]` ⇒ `apply` 返回 `pending:true`、`applied/enabled/disabled 0`、`elapsedMs` 存在，且**无写调用**；pending 存的是全部可应用能力的 `{id,desired}`（含 `desired=false`）；随后触发捕获到的 `agent/created` 监听（fake agent id=sessionId）并等待 ⇒ 用**同一批量执行器**写入（先 enable 后 disable）、pending 清空 |
+| H18b | 冷会话空 plan（v1.3） | `agents.list()=[]` 且 `plan=[]` ⇒ `pending:true`、`applied/enabled/disabled 0`、无写调用；pending `ops` = 全部可应用能力且 `desired` **全为 false**；激活后全部关闭（disable 阶段生效） |
 | H19 | 排队失败回报 | 激活应用失败 ⇒ 下一次 `rank`/`apply` 成功响应带 `pendingOutcome.failed > 0`，再次调用不再带（读取即消费）；激活重放失败**不保留 pending** |
 | H20 | dispose | 调 `jev.dispose()` ⇒ 监听移除、pending 清空、后续 `apply` 返回 `write-failed` |
 
@@ -1855,4 +1871,5 @@ task-14（本文）
 | v1.0 | 2026-10-24 | 首版：配置/密钥/RPC/rank/枚举与事务/冷会话/客户端调度/测试/拆分/验收映射/未决清单 |
 | v1.1 | 2026-10-24 | **rank 请求形状变更**（backend 实测修复）：`state` 改为 `{request,guidance}`，能力定义进每题的 `instructions.capability`（MCP 带 `tools`），共享判据只在 `guidance` 出现一次；根因是旧形状下 155 道题共用同一字符串 instructions（question id 不进模型输入）且题目不含能力，分数塌缩到 0.40–0.41（见 §6.0）。同步更新 §1.1、§2.2(F11)、§5.1、§5.3、§5.7、§6.0/§6.2/§6.3/§6.5、§7.1、§10.1/§10.2、§11.1、§14；**RPC 类型与客户端契约不变**（rank/apply 返回形状未变） |
 | v1.2 | 2026-10-24 | **apply 执行器改批量/并发 + 筛选语义**（task-42/47/48，backend 已验证）：① `plan` = 已勾选集合 = 目标真值，选中启用 / 未选关闭（只改会话开关）；② 只写状态不一致项；③ **enable→disable 两阶段**，阶段内 skills 同一 tick 全部发起 + `allSettled`（注册表 effect 合并刷新）、MCP 并发 4；④ 阶段失败即停、按前态**逆序批量回滚**（同样批量）；⑤ 冷会话入队完整目标集合、激活后**复用同一执行器**重放（含就绪重试 100/300ms）；⑥ 成功支 **additive** `elapsedMs`，返回新增 `enabled`/`disabled`（`applied = enabled+disabled`）。fake 基准（2ms/5ms 模型）：142 skills 关闭 284ms→`elapsedMs 3ms`（skills 峰值 142）、142 skills+6 MCP 314ms→`elapsedMs 12ms`（MCP 峰值 4）。风险见 §7.7/U11（真实收益取决于 `skills.register` 成本与 effect 合并，必要时加 skills 批量 shadow API）。同步更新 §1.1、§1.2、§5.2、§7.2/§7.4/§7.5/§7.6（新增 §7.7）、§8.2/§8.3/§8.5、§9.5、§10.2、§13、§14；rank 契约不变 |
+| v1.3 | 2026-10-24 | **空 plan = 关闭全部可应用能力**（task-52）：`jev.apply` 的 `plan` 允许空数组 `[]`（仅拒绝非数组 / >500）；空 plan = 目标集合为空 ⇒ 当前会话全部**可应用**能力 `desired=false`（关闭），不可应用不动；返回 `enabled=0 / disabled=N / applied=N`；冷会话入队 `ops` 全 `desired=false`；前端 0 选中时按钮为「应用（关闭全部）」且可点，toast 分「只关闭 / 只启用 / 都变化」三类。同步更新 §1.1、§5.2、§7.4、§7.6、§8.2、§9.5、§10.2（H14d/H14e/H18b）；两阶段批量/回滚/rank 契约不变 |
 
