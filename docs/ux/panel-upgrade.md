@@ -11,7 +11,7 @@
 | 项 | 内容 |
 |---|---|
 | 产品 | DSH Web GUI 侧栏「能力面板」（占据主区域的整页，不是浮层） |
-| 插件 | `@chengdb/capability-panel` 派生版 `xx529/dsh-capability-settings` |
+| 插件 | `dsh-capability-settings`（上游 `@chengdb/capability-panel` 的 fork：`xx529/dsh-capability-settings`） |
 | 涉及域 | 技能（Skills）、MCP、**Jev 模型（配置域，v1.8）**；**移除**快捷消息（Quick Messages） |
 | 画框基准 | 1440×900（含外壳侧栏 256 宽，主区 1184×900） |
 | 确认原型 | **当前（v7）**：Figma 页 `Capability Panel · 交互原型 v7` 的 2 帧——`01 技能 · 项目`、`02 MCP · 项目`；预览 `docs/figma/preview/v7-01-skills-project.png`、`v7-02-mcp-project.png`；建稿规格 `docs/figma/prototype/v7/spec-v7.md`。**上一版**：`Capability Panel · 升级原型 v6` 4 帧 + `docs/figma/preview/v6-01..04-*.png`（同屏双组，留档） |

@@ -8,4 +8,4 @@
 
 - insert:
     - id: capability-panel
-      name: '@chengdb/capability-panel'
+      name: 'dsh-capability-settings'

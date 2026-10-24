@@ -7,7 +7,7 @@
  * import。宿主内部使用的 `JevCapability` 等类型也放在这里，避免
  * `rank.ts` / `apply.ts` 之间循环依赖。
  *
- * @module @chengdb/capability-panel/jev/types
+ * @module dsh-capability-settings/jev/types
  */
 
 // ---------------------------------------------------------------------------

@@ -3,7 +3,9 @@ import { defineConfig } from "tsdown";
 // DeepSeek Harness 把这个文件构建成浏览器端的 lazy-CJS 模块：加载器不执行
 // ESM 导出，只接受通过 window.__ModuleLoader__.load() 注册的工厂。
 // 因此 tsdown 必须把入口 `src/client.ts` 打包成一个按上述协议包裹的 CJS 文件。
-const pluginId = "@chengdb/capability-panel";
+// 客户端模块 id 必须等于包名（加载器按 package.json 的 name 校验注册 id），
+// 改 package.json 的 name 时这里必须同步，否则报 loaded without registering。
+const pluginId = "dsh-capability-settings";
 
 export default defineConfig({
   name: `${pluginId}/client`,

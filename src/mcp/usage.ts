@@ -15,7 +15,7 @@
  * 会话事件派生）。所以这里只记 `sessionId`，面板用自己的会话快照解析成标题，
  * 拿不到时退化为会话 id。
  *
- * @module @chengdb/capability-panel/mcp/usage
+ * @module dsh-capability-settings/mcp/usage
  */
 
 import { MCP_USAGE_CAPACITY, MCP_USAGE_VIEW_LIMIT, type McpUsageEntry, type McpUsageView } from "./types.js";

@@ -19,7 +19,7 @@
  * 标记键（{@link SHADOW_STUB_METADATA_KEY}）识别，与用户手写的同名项目
  * 技能区分开——后者是"项目副本遮蔽全局"，前者是"项目内禁用全局"。
  *
- * @module @chengdb/capability-panel/skills/shadow
+ * @module dsh-capability-settings/skills/shadow
  */
 
 import { deleteSkill, detectFormat, readSkill, writeSkill } from "./disk.js";

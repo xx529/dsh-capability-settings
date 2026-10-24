@@ -14,7 +14,7 @@
  * 窄容器降级（按内容区实测宽度，见 UX §4.5）：≥732 文件树 220；632–731
  * 文件树 200；<632 折叠为「文件 (N)」下拉，阅读器占满。
  *
- * @module @chengdb/capability-panel/client/skill-content
+ * @module dsh-capability-settings/client/skill-content
  */
 import type { ClientSkillSummary, SkillRef, SkillsApi } from "./api.js";
 /** 组装一行的寻址入参：优先用宿主给的受管根；root 缺失时按 source 退化。 */

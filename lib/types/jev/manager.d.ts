@@ -12,7 +12,7 @@
  *
  * 所有网络请求都在宿主进程发出（客户端拿不到 key，也读不到 env）。
  *
- * @module @chengdb/capability-panel/jev/manager
+ * @module dsh-capability-settings/jev/manager
  */
 import type { JevCapabilityService } from "./apply.js";
 import type { JevLogger } from "./types.js";

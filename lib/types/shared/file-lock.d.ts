@@ -12,7 +12,7 @@
  * 链在当前操作 settle 且没有新的排队者时移除该文件的条目，避免长驻宿主
  * 进程访问过大量项目路径后 Map 无界增长。
  *
- * @module @chengdb/capability-panel/shared/file-lock
+ * @module dsh-capability-settings/shared/file-lock
  */
 /**
  * 在 `file` 的写链尾部追加一次互斥执行。

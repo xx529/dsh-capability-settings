@@ -17,7 +17,7 @@
  * 组件完全自绘：样式在 styles.ts 的 `skp-dock-*` 类（只用宿主 `--dsw-*` token，
  * 因为 composer 子树拿不到 `.skp-panel` 的 `--skp-*`）。
  *
- * @module @chengdb/capability-panel/client/composer-capability
+ * @module dsh-capability-settings/client/composer-capability
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";

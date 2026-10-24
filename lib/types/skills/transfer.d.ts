@@ -10,7 +10,7 @@
  * `<root>/<spec.name>`），目录/文件本身叫什么不重要；frontmatter 解析失败
  * 或名称非法即拒绝安装。
  *
- * @module @chengdb/capability-panel/skills/transfer
+ * @module dsh-capability-settings/skills/transfer
  */
 import type { SkillFormat } from "./types.js";
 /** 上传/下载通道里的一个文件：相对路径 + base64 内容（二进制安全）。 */

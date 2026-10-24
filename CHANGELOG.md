@@ -3,6 +3,18 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 变更
+
+- **包名改为 `dsh-capability-settings`（fork 独立身份）**：`package.json` 的 `name`、
+  `cordis.patch.yml` 的 insert `name`、`tsdown.config.ts` 的 `pluginId` 同步为新名
+  （客户端 bundle 注册 id 必须等于包名，DSH 加载器契约）。`cordis.patch.yml` 的
+  `id: capability-panel`、RPC 通道 `/capability-panel`、数据目录
+  `<dshHome>/capability-panel` 保持不变。**升级需重装**：profile 里旧依赖键
+  `@chengdb/capability-panel` 与 `dsh.profile.bundles` 条目不会自动迁移，先卸载旧
+  条目再装 `github:xx529/dsh-capability-settings#master`；已有配置数据不受影响。
+
 ## [1.4.2] - 2026-10-24
 
 ### 修复

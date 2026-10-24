@@ -19,7 +19,7 @@
  * 项目/全局根目录，所以技能读取复用 `ctx.skills` 与直接磁盘列举，
  * 而不是注册第二个 provider。
  *
- * @module @chengdb/capability-panel
+ * @module dsh-capability-settings
  */
 
 import type {} from "@deepseek-ai/cordis";
@@ -265,6 +265,6 @@ export type { OverridesManager } from "./overrides/manager.js";
 /**
  * Cordis 以 `module.default || module` 解析插件包。这里提供默认导出
  * （{ name, inject, apply }），让 profile patch 能按包名挂载
- * （`@chengdb/capability-panel`，见 cordis.patch.yml）。
+ * （`dsh-capability-settings`，见 cordis.patch.yml）。
  */
 export default { name, inject, apply };

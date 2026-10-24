@@ -14,7 +14,7 @@
  * 关闭时机：点击组件外部（capture 阶段判定）、Esc、窗口缩放。**列表内部的
  * 滚动不关闭**（否则工作区一多就无法滚动选择），但页面/面板容器的滚动会关闭。
  *
- * @module @chengdb/capability-panel/client/select
+ * @module dsh-capability-settings/client/select
  */
 /** 下拉选项：value 为提交值，label 为展示文案，hint 为右侧弱化补充。 */
 export interface SkpSelectOption {

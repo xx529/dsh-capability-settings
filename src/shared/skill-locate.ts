@@ -11,7 +11,7 @@
  *   - 没有 SKILL.md 时，包根恰有一个 `.md` 文件 ⇒ 视为 flat skill；
  *   - 否则报错。
  *
- * @module @chengdb/capability-panel/shared/skill-locate
+ * @module dsh-capability-settings/shared/skill-locate
  */
 
 /** 定位结果：skill 根目录前缀 + 布局。 */

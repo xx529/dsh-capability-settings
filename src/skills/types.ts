@@ -12,7 +12,7 @@
  * 扁平键的**投影**；写入 frontmatter 时不会写嵌套的 `invocation` 对象
  * （见 disk.ts 的序列化逻辑）。
  *
- * @module @chengdb/capability-panel/skills/types
+ * @module dsh-capability-settings/skills/types
  */
 
 /** 本版本支持的两个可写作用域（custom / bundled 保持只读）。 */

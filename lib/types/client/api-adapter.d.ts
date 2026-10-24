@@ -6,7 +6,7 @@
  * 这里负责：包上信封 → 调用通道 → 解信封（失败抛错）→ 把宿主返回的
  * 普通对象投影成客户端类型（见 toSummary）。
  *
- * @module @chengdb/capability-panel/client/api-adapter
+ * @module dsh-capability-settings/client/api-adapter
  */
 import type { CapabilityPanelApi, WorkspaceOption } from "./api.js";
 /** 适配器的构造依赖（把"如何取当前工作区/订阅工作区"等外壳交互注入进来）。 */

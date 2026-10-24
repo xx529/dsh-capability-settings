@@ -5,7 +5,7 @@
  * 见 config-file.ts）与浏览器端（「添加 MCP 服务器」弹窗的 JSON 预览校验）
  * 使用，独立成模块避免两侧口径漂移。
  *
- * @module @chengdb/capability-panel/mcp/entry-util
+ * @module dsh-capability-settings/mcp/entry-util
  */
 import type { McpServerEntry } from "./types.js";
 /**

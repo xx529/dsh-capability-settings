@@ -12,7 +12,7 @@
  * 项目根探测（findProjectRoot）在 shared/project-root.ts，由 skills 与 mcp
  * 两个域共用，这里刻意不重复实现。
  *
- * @module @chengdb/capability-panel/skills/roots
+ * @module dsh-capability-settings/skills/roots
  */
 
 import { homedir } from "node:os";

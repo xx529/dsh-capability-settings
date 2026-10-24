@@ -55,7 +55,7 @@
  * 避免面板把"本项目禁用"的全局 server 显示成"已挂载"；不传 cwd 时看到完整
  * 全局层。
  *
- * @module @chengdb/capability-panel/mcp/loader
+ * @module dsh-capability-settings/mcp/loader
  */
 import type { OverridesManager } from "../overrides/manager.js";
 import type { ImportsManager } from "../imports/manager.js";

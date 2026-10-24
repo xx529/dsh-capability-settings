@@ -8,7 +8,7 @@
  *   - 全局系：user-dsh / user-agents / user-claude；
  *   - `bundled` 两侧都不归（只读内置条目，不进面板的磁盘视图）。
  *
- * @module @chengdb/capability-panel/shared/skill-sources
+ * @module dsh-capability-settings/shared/skill-sources
  */
 
 /** source 是否属于"项目系"（决定面板「项目」区归属，composer 弹层的分组口径与此一致）。 */

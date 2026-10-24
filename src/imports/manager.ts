@@ -12,7 +12,7 @@
  * 写路径直接报错。读失败（如手改坏了 JSON）时 `entries()` 返回空表——
  * 列表读取不能被一个坏文件拖垮，写路径才会显式报错暴露问题。
  *
- * @module @chengdb/capability-panel/imports/manager
+ * @module dsh-capability-settings/imports/manager
  */
 
 import { findProjectRoot } from "../shared/project-root.js";

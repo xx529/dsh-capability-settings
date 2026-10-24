@@ -13,7 +13,7 @@
  * `hasApiKey / apiKeySource / apiKeyLast4`，任何面向 RPC/日志的文本都经
  * `redact()` 处理。
  *
- * @module @chengdb/capability-panel/jev/config-file
+ * @module dsh-capability-settings/jev/config-file
  */
 import type { JevConfig, JevConfigValidation, JevConfigView, JevKeySource, JevLogger, JevSetConfigResult } from "./types.js";
 /** 默认的密钥环境变量名。 */

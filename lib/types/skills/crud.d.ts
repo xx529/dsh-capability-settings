@@ -3,7 +3,7 @@
  * 根目录（由 `roots.ts` 解析）并返回纯结果对象，因此同一套函数既可以支撑
  * CLI、宿主 RPC 方法，也可以支撑未来的其它入口。
  *
- * @module @chengdb/capability-panel/skills/crud
+ * @module dsh-capability-settings/skills/crud
  */
 import type { SkillFormat, SkillSpec } from "./types.js";
 /** 创建 skill 的入参。 */

@@ -11,7 +11,7 @@
  *
  * 不做 `git clone`（避免依赖宿主 git 与凭证）；私有仓库因此不可用。
  *
- * @module @chengdb/capability-panel/skills/download
+ * @module dsh-capability-settings/skills/download
  */
 
 import { locateSkillRoot, rerootEntries, stripCommonTopFolder } from "../shared/skill-locate.js";

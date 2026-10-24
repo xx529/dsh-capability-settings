@@ -6,7 +6,7 @@
  * 依赖不划算；store-only ZIP（method 0，只归档不压缩）结构简单——
  * 本地文件头 + 数据 + 中央目录 + EOCD，任何解压工具都能读。
  *
- * @module @chengdb/capability-panel/client/zip
+ * @module dsh-capability-settings/client/zip
  */
 
 /** 一个待打包条目：zip 内路径（posix 风格）+ 字节内容。 */

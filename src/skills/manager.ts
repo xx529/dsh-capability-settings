@@ -11,7 +11,7 @@
  * 链路都原生读这两个键（文件 watcher 使改动下一步即生效），本插件不维护
  * 任何平行的禁用状态。
  *
- * @module @chengdb/capability-panel/skills/manager
+ * @module dsh-capability-settings/skills/manager
  */
 
 import { findProjectRoot } from "../shared/project-root.js";

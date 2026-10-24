@@ -1,4 +1,4 @@
-# @chengdb/capability-panel
+# dsh-capability-settings
 
 一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）插件：
 在 Web GUI 里**可视化管理项目的全部能力**——Skills 与 MCP 服务器，覆盖
@@ -418,8 +418,9 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 ## 安装
 
 > 本仓库是 [chengdb/dsh-plugin-capability-panel](https://github.com/chengdb/dsh-plugin-capability-panel)
-> 的 fork（包名仍是 `@chengdb/capability-panel`，保持 profile patch id 与
-> `tsdown` 的 pluginId 不变）。下面的安装地址指向本 fork。
+> 的 fork，**已启用独立包名 `dsh-capability-settings`**（与上游 `@chengdb/capability-panel`
+> 互斥，同一 profile 不能同时安装两者）。`cordis.patch.yml` 的 patch id 仍为
+> `capability-panel`，客户端 `pluginId` 已与包名同步。下面的安装地址指向本 fork。
 
 跟随 `master` 最新代码（推荐）：
 
@@ -440,7 +441,7 @@ dsh plugin --profile web add "github:chengdb/dsh-plugin-capability-panel#v1.1.0"
 ## 卸载
 
 ```powershell
-dsh plugin --profile web remove @chengdb/capability-panel
+dsh plugin --profile web remove dsh-capability-settings
 ```
 
 移除后重新运行 `dsh web` 即可，侧栏入口与会话内入口随之消失。卸载**不会**触碰

@@ -21,7 +21,7 @@
  * }
  * ```
  *
- * @module @chengdb/capability-panel/overrides/types
+ * @module dsh-capability-settings/overrides/types
  */
 /** 可被项目级禁用的能力域（skills 不在其列——走 frontmatter 原生链路）。 */
 export type CapabilityDomain = "mcp";

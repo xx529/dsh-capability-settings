@@ -7,7 +7,7 @@
  *     （conflict > failed > mounted）。
  * 这里收敛成一份，两处加载逻辑共用同一口径，避免将来改语义时漏改一处。
  *
- * @module @chengdb/capability-panel/client/mcp-common
+ * @module dsh-capability-settings/client/mcp-common
  */
 
 import type { ClientMcpStatus } from "./api.js";

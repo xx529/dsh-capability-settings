@@ -13,7 +13,7 @@
  * 因此没有 XSS 面。渲染器自身抛错时由调用方回落到 `<pre>` 原文
  * （见 skill-content.tsx 的 MarkdownPreview）。
  *
- * @module @chengdb/capability-panel/client/markdown
+ * @module dsh-capability-settings/client/markdown
  */
 
 import type { ReactNode } from "react";

@@ -7,7 +7,7 @@
  * 提供文件名与基目录（项目根 / agents-home / dsh-home），管理器用
  * `locateConfigFile` 拿到 `{ writeFile, readFile, legacyFiles }` 三元组。
  *
- * @module @chengdb/capability-panel/shared/config-location
+ * @module dsh-capability-settings/shared/config-location
  */
 /** 项目级候选子目录：第一个为写入目标（.agents），其余为旧位置（读取兼容，写入后清理）。 */
 export declare const PROJECT_CONFIG_DIRS: readonly [".agents", ".dsh", ".claude"];

@@ -5,7 +5,7 @@
  * 每次成功写入都会触发一次针对性的 loader reload，让改动无需重启即可在
  * 存活 session 中生效（项目写入只重挂该项目根的 session；全局写入重挂全部）。
  *
- * @module @chengdb/capability-panel/mcp/manager
+ * @module dsh-capability-settings/mcp/manager
  */
 import { type McpRuntimeView, type McpUsageView } from "./types.js";
 import { type McpUsageLog } from "./usage.js";

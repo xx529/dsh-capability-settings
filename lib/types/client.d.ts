@@ -17,7 +17,7 @@
  * 带项目钉选的 `api` 只给面板用；composer（输入框工具行）用只跟随当前会话
  * 工作区的 `composerApi`。
  *
- * @module @chengdb/capability-panel/client
+ * @module dsh-capability-settings/client
  */
 /** 客户端强依赖的服务。 */
 export declare const inject: string[];

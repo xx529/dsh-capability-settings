@@ -19,7 +19,7 @@
  * 面板 API 有两份（钉选 / 不钉选），区别与防回归说明见 panel.tsx 顶部注释
  * 与 client.ts 的 `composerApi` 定义。
  *
- * @module @chengdb/capability-panel/client/panel-entry
+ * @module dsh-capability-settings/client/panel-entry
  */
 import type { CapabilityPanelApi } from "./api.js";
 /**

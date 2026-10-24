@@ -8,7 +8,7 @@
  * `dshHome` 的解析（显式 override → `DSH_HOME` → `~/.dsh`）交给宿主的
  * `@deepseek-ai/dsh-home-paths`，本模块不重复实现 env 解析（架构 §3.1）。
  *
- * @module @chengdb/capability-panel/jev/paths
+ * @module dsh-capability-settings/jev/paths
  */
 /** 插件在 dsh home 下的目录名（将来同域其它文件也放这里）。 */
 export declare const JEV_DIR_NAME = "capability-panel";

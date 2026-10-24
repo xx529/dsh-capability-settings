@@ -14,7 +14,7 @@
  * 改版删除：作用域现在由同一列表列里的两个分组表达，两个域各自渲染
  * `skp-group*` 结构（样式见 styles.ts）。
  *
- * @module @chengdb/capability-panel/client/panel-common
+ * @module dsh-capability-settings/client/panel-common
  */
 import { isProjectSkillSource } from "../shared/skill-sources.js";
 /** 面板是否附着在一个可写工作区上（workspaceLabel 无工作区时返回占位字符串）。 */

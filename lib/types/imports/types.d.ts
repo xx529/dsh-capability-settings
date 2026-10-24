@@ -16,7 +16,7 @@
  * 引用存储对宿主注入链不可见）；旧文件里遗留的 `skills` 键读取时忽略、
  * 下次写盘时自动清除。
  *
- * @module @chengdb/capability-panel/imports/types
+ * @module dsh-capability-settings/imports/types
  */
 /** 引用适用的能力域（与 overrides 的域键一致；目前只有 MCP）。 */
 export type ImportDomain = "mcp";

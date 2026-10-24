@@ -14,7 +14,7 @@
  * 模板字符串内部不要写注释；需要说明某段样式时，加在本文件 JS 层
  * （字符串外）即可。
  *
- * @module @chengdb/capability-panel/client/styles
+ * @module dsh-capability-settings/client/styles
  */
 
 // 设计令牌：颜色 / 圆角 / 缓动，全部可在 .skp-panel 一层覆盖。
@@ -713,7 +713,7 @@ export function installStyles(): () => void {
   const id = "dsh-capability-panel-css";
   if (typeof document !== "undefined" && document.querySelector(`style[data-plugin-css="${id}"]`) === null) {
     const tag = document.createElement("style");
-    tag.dataset.plugin = "@chengdb/capability-panel";
+    tag.dataset.plugin = "dsh-capability-settings";
     tag.dataset.pluginCss = id;
     tag.textContent = SKP_CSS;
     document.head.appendChild(tag);

@@ -6,7 +6,7 @@
  * 抛错。这里收敛成 `readJsonDocument`，各域继续保留自己的容器键提取与逐条
  * 校验（判别逻辑不同，不值得强行参数化）。
  *
- * @module @chengdb/capability-panel/shared/json-config
+ * @module dsh-capability-settings/shared/json-config
  */
 
 import { readFile } from "node:fs/promises";

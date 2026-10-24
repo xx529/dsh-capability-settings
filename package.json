@@ -1,5 +1,5 @@
 {
-  "name": "@chengdb/capability-panel",
+  "name": "dsh-capability-settings",
   "description": "dsh plugin: browse and manage project-level and global capabilities (skills, MCP servers, …) from the web GUI",
   "version": "1.4.2",
   "type": "module",

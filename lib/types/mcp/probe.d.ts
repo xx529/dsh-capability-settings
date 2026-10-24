@@ -22,7 +22,7 @@
  * {cacheMode:'refresh'})`），配置形状取自本仓库的 `toClientConfig`（`${VAR}`
  * 插值沿用同一函数，不另写一套）。
  *
- * @module @chengdb/capability-panel/mcp/probe
+ * @module dsh-capability-settings/mcp/probe
  */
 import type { McpServerEntry } from "./types.js";
 /** 探测默认超时（毫秒）。 */

@@ -19,7 +19,7 @@
  *   - `"importedFromGlobal": true` —— 「从全局导入」标记（只出现在项目
  *     副本上，见 manager.ts 的 importToProject）。
  *
- * @module @chengdb/capability-panel/mcp/types
+ * @module dsh-capability-settings/mcp/types
  */
 
 /** 一条 MCP server 条目所在的作用域。 */

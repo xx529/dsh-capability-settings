@@ -9,7 +9,7 @@
  * 读入时会做规范化：每个域的清单 trim、去重、按语言排序——避免手改配置文件
  * 留下重复项。写出的 JSON 保持最小化：空数组不落盘。
  *
- * @module @chengdb/capability-panel/overrides/config-file
+ * @module dsh-capability-settings/overrides/config-file
  */
 
 import { atomicWriteText } from "../shared/atomic-write.js";

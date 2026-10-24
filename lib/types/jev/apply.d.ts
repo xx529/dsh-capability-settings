@@ -22,7 +22,7 @@
  *   6. **结果 additive 字段**：成功支返回 `enabled` / `disabled` / `elapsedMs`
  *      （`applied = enabled + disabled`；耗时覆盖枚举 + 批量写入）。
  *
- * @module @chengdb/capability-panel/jev/apply
+ * @module dsh-capability-settings/jev/apply
  */
 import type { McpOpResult } from "../mcp/manager.js";
 import type { McpListResult, McpRuntimeView } from "../mcp/types.js";

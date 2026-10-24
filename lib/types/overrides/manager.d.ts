@@ -9,7 +9,7 @@
  * 无工作区（cwd 为 undefined）时不适用任何项目级禁用：`sets()` 返回全空
  * 快照，`toggle()` 直接报错。
  *
- * @module @chengdb/capability-panel/overrides/manager
+ * @module dsh-capability-settings/overrides/manager
  */
 import type { CapabilityDomain, OverridesSet, OverridesView } from "./types.js";
 /** 管理服务的构造依赖。 */

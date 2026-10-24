@@ -36,7 +36,7 @@
  * 布局刻意保持朴素（自带 CSS 类，见 styles.ts），对未经确认的 UI 原语
  * 组件零硬依赖。
  *
- * @module @chengdb/capability-panel/client/panel
+ * @module dsh-capability-settings/client/panel
  */
 import type { CapabilityPanelApi } from "./api.js";
 /**

@@ -17,7 +17,7 @@
  * 两条路都是**只读**的：不修改任何注册表、不挂载/卸载任何东西。任何一步失败都
  * 静默降级（识别不到就少一条信息），绝不影响面板其它功能。
  *
- * @module @chengdb/capability-panel/mcp/runtime
+ * @module dsh-capability-settings/mcp/runtime
  */
 
 /** 桥接层包名（loader 条目 name / fiber runtime name 都按它匹配）。 */

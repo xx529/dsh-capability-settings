@@ -23,7 +23,7 @@
  * （.agents/capability-overrides.json，兼容旧位置 `.dsh`，其他项目不受影响），不翻全局配置。
  * 宿主在写操作后自动重挂受影响 session 的连接——不是会话内的临时开关。
  *
- * @module @chengdb/capability-panel/client/composer-mcp
+ * @module dsh-capability-settings/client/composer-mcp
  */
 
 import { useEffect, useRef, useState } from "react";

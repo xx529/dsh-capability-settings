@@ -36,7 +36,7 @@
  * 按钮的"草稿含 skill 口令"状态随数据修订号（打开弹层）与 owner props 的
  * input 快照（草稿每次编辑都会重渲染工具行）更新。
  *
- * @module @chengdb/capability-panel/client/composer-skills
+ * @module dsh-capability-settings/client/composer-skills
  */
 import type { CapabilityPanelApi } from "./api.js";
 /** 切换（或显式设置）弹层开合；打开时 bump token 触发弹层重拉。 */

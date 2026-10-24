@@ -7,7 +7,7 @@
  * import。宿主内部使用的 `JevCapability` 等类型也放在这里，避免
  * `rank.ts` / `apply.ts` 之间循环依赖。
  *
- * @module @chengdb/capability-panel/jev/types
+ * @module dsh-capability-settings/jev/types
  */
 /** 自动触发的门槛（全部由前端调度器消费；宿主只负责存取与校验）。 */
 export interface JevAutoTrigger {

@@ -1,13 +1,16 @@
 # AGENTS.md
 
-本仓库是 **DeepSeek Harness（DSH）插件** `@chengdb/capability-panel` 的 fork：
-上游 `chengdb/dsh-plugin-capability-panel`，本仓库 origin 为
-`xx529/dsh-capability-settings`。作用是在 DSH 的 Web GUI 里浏览/管理项目级与全局
-能力（Skills、MCP 服务器、快捷消息），并在输入框提供快捷弹层。
+本仓库是 **DeepSeek Harness（DSH）插件** `dsh-capability-settings`（上游
+`@chengdb/capability-panel` 的 fork）：上游 `chengdb/dsh-plugin-capability-panel`，本仓库
+origin 为 `xx529/dsh-capability-settings`。作用是在 DSH 的 Web GUI 里浏览/管理项目级与
+全局能力（Skills、MCP 服务器、快捷消息），并在输入框提供快捷弹层。
 
-**不要改包名与插件 id**：`package.json` 的 `name`、`tsdown.config.ts` 的 `pluginId`、
-`cordis.patch.yml` 的 `id: capability-panel` 是 profile patch 与客户端模块加载器
-依赖的标识，改名会直接导致装不上/加载失败。
+**包名与插件 id 必须成套一致**：`package.json` 的 `name`、`tsdown.config.ts` 的
+`pluginId`（客户端 bundle 注册 id，DSH 加载器要求它等于解析后的包名，否则运行时报
+`loaded without registering`）、`cordis.patch.yml` 的 `insert[].name` 三者必须相同。
+`cordis.patch.yml` 的 `id: capability-panel`（profile patch 覆盖键）、RPC 通道
+`/capability-panel`、数据目录 `<dshHome>/capability-panel` 与包名无关，保持不动。
+改包名还必须同步 profile `dependencies` 键与 `dsh.profile.bundles` 条目并重装。
 
 ---
 
@@ -179,7 +182,9 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
   与降级路径）。跨版本旧截图不覆盖新 UI 时，在 README 里注明。
 - **提交前**：`pnpm typecheck` + `pnpm build` 必须过；有条件再跑
   `bash notes/verify/run-all.sh`。验证脚本放 `notes/`（已 gitignore），不要污染 `src/`。
-- **不要重命名**包名/插件 id/槽位 id（见文首）。
+- **包名 / 插件 id / 槽位 id 已成套固定**（见文首）：`package.json` `name`、
+  `tsdown.config.ts` `pluginId`、`cordis.patch.yml` `insert[].name` 必须一致，改名要
+  同步 profile 依赖键与 bundles 并重装；槽位 id（`capability-panel`）与数据目录不要动。
 - **不要动用户正在使用的 `~/.dsh` profile**（安装/卸载/改配置需用户明确同意）。
   需要真机验收时用独立环境：独立 `DSH_HOME`（如 `.verify-home/`）+ 独立端口 +
   与桌面应用同版本的外壳（本地 `npm i @deepseek-ai/dsh@0.2.0-rc.2`），

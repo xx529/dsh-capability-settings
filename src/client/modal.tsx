@@ -4,7 +4,7 @@
  * 供 Skills 安装（panel.tsx）与 MCP 添加（mcp-panel.tsx）等弹窗场景共用；
  * 样式见 styles.ts 的 `skp-modal-overlay` / `skp-modal`。
  *
- * @module @chengdb/capability-panel/client/modal
+ * @module dsh-capability-settings/client/modal
  */
 
 import type { ReactNode } from "react";

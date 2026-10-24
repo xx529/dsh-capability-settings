@@ -23,7 +23,7 @@
  *   - **纯内存**：不落盘，agent 销毁 / 宿主重启即回到默认（本期语义）；
  *   - 找不到 live agent（冷会话）时开关失败并返回业务错误，不做状态暂存。
  *
- * @module @chengdb/capability-panel/skills/session
+ * @module dsh-capability-settings/skills/session
  */
 import type { SkillSummaryView } from "./types.js";
 /** 面板「本会话」列表的一行：磁盘视图 + 本会话启用态。 */

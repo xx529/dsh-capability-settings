@@ -20,7 +20,7 @@
  * 的重复 RPC：弹层打开时拉取并写回数据槽，按钮直接读这份数据（数据修订
  * 号 + 工作区都命中时才算新鲜），只有弹层关闭且数据过期时才自行兜底拉取。
  *
- * @module @chengdb/capability-panel/client/composer-common
+ * @module dsh-capability-settings/client/composer-common
  */
 import type { CSSProperties } from "react";
 import type { CapabilityPanelApi } from "./api.js";

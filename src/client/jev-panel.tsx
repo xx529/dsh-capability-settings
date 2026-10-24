@@ -19,7 +19,7 @@
  *   - 测试连接按 RPC 契约使用**已保存配置**（`jev.test` payload 被忽略，
  *     架构 §5.3）；表单有未保存修改时结果行会注明。
  *
- * @module @chengdb/capability-panel/client/jev-panel
+ * @module dsh-capability-settings/client/jev-panel
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";

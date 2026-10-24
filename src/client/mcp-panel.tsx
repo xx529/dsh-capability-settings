@@ -21,7 +21,7 @@
  * `properties` + `required`）；配置条目由「查看工具与参数」真连一次探测
  * （零副作用，见 `mcp/probe.ts`），外部注入实例直接取运行时注册表里的工具。
  *
- * @module @chengdb/capability-panel/client/mcp-panel
+ * @module dsh-capability-settings/client/mcp-panel
  */
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";

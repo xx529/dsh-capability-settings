@@ -16,7 +16,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 产品 | DSH Web GUI 侧栏「能力面板」插件 `@chengdb/capability-panel`（本仓库 fork） |
+| 产品 | DSH Web GUI 侧栏「能力面板」插件 `dsh-capability-settings`（上游 `@chengdb/capability-panel` 的 fork，本仓库） |
 | 涉及面 | ①能力面板新增「Jev 模型」配置 Tab（含「能力决策」区）；②对话开始首屏（hero）「本会话能力」区的「✦ 能力决策」入口、输入停顿自动触发与结果面板 |
 | 画框基准 | 沿用现有原型：1440×900（外壳侧栏 256，主区 1184）；hero 面板宽度 = 输入卡宽度 |
 | 关联文档 | `README.md`（现有行为）、`docs/ux/panel-upgrade.md`（既有 IA/交互/文案基线）、`docs/research/jev-auto-select.md`（调研，2026-10-23 已落盘；§8 引用其结论，本规格只定义产品语义、不预判最终裁决）、`docs/ux/jev-auto-select.md`（v1.5 交互与视觉规格，UI 文案准绳）、Figma 页 `Capability Panel · 能力决策 v11`（5 帧；v9/v10 为历史原型） |

@@ -6,7 +6,7 @@
  * 候选目录迁移不同）。`.agents` 在"项目根"判定标准的标记目录里
  * （shared/project-root.ts），天然随项目根一起被识别。
  *
- * @module @chengdb/capability-panel/imports/paths
+ * @module dsh-capability-settings/imports/paths
  */
 /** 声明文件的固定文件名。 */
 export declare const IMPORTS_FILE_NAME: "capability-imports.json";

@@ -13,7 +13,7 @@
  *     最多 2 次），任何 4xx 不重试；
  *   - 所有错误文本在这里就完成脱敏，绝不把请求头/完整 URL 带进错误信息。
  *
- * @module @chengdb/capability-panel/jev/rank
+ * @module dsh-capability-settings/jev/rank
  */
 
 import { createHash } from "node:crypto";

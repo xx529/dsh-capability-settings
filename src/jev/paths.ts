@@ -8,7 +8,7 @@
  * `dshHome` 的解析（显式 override → `DSH_HOME` → `~/.dsh`）交给宿主的
  * `@deepseek-ai/dsh-home-paths`，本模块不重复实现 env 解析（架构 §3.1）。
  *
- * @module @chengdb/capability-panel/jev/paths
+ * @module dsh-capability-settings/jev/paths
  */
 
 import { join } from "node:path";

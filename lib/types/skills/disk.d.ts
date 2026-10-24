@@ -10,7 +10,7 @@
  * "启用"，只在取值偏离默认时才输出对应的键，保证落盘文件最小化、
  * 并且读回再写回（round-trip）后内容不膨胀。
  *
- * @module @chengdb/capability-panel/skills/disk
+ * @module dsh-capability-settings/skills/disk
  */
 import type { SkillFormat, SkillSpec } from "./types.js";
 /** 一个已解析的 skill：spec（frontmatter 元数据）+ 正文。 */
