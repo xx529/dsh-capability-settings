@@ -45,7 +45,7 @@
 | Skills（项目/全局） | `.agents/skills`、`~/.agents/skills` | `.dsh/skills`（可写）、`.claude/skills`（只读展示） |
 | 项目 MCP 服务器 | `<项目根>/.mcp.json`（Claude Code 标准，位置不变） | — |
 | 快捷消息（**已下线**） | **不再读写** | 旧文件 `<项目根>/.agents/quick-messages.json`、`~/.agents/quick-messages.json`（以及旧位置 `.dsh` 同名文件）**原样保留**，不会自动删除；需要清理请手动处理 |
-| Jev 能力决策配置（TypeSafe Jev） | `<dshHome>/capability-panel/jev.json`（默认 `~/.dsh/capability-panel/jev.json`；目录权限 `700`、文件权限 `600`） | —（无历史迁移；不读写 `~/.agents/jev.json`） |
+| Jev 能力决策配置（TypeSafe Jev） | `<dshHome>/dsh-capability-settings/jev.json`（默认 `~/.dsh/dsh-capability-settings/jev.json`；目录权限 `700`、文件权限 `600`） | 旧目录 `~/.dsh/capability-panel/jev.json` 首次读取时自动迁移（`rename`，幂等）；不读写 `~/.agents/jev.json` |
 
 首次写入新位置时，旧文件内容会自动**并入并删除**（不丢配置、不留两份）。
 `.agents` 与 `.dsh` 同时参与"项目根"判定（`.claude` 也纳入），换目录 / 换
@@ -308,8 +308,8 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 - 字段：Base URL（默认 `https://api.typesafe.ai`）、模型名（默认 `jev-latest`）、
   API Key 来源（`直接填写` / `环境变量`，默认变量名 `TYPESAFE_API_KEY`）、测试连接、
   保存、恢复默认（需行内再点一次确认，只重置表单）。保存成功**不关闭配置页、不跳转**。
-- 密钥与路径：配置保存到宿主 `<dshHome>/capability-panel/jev.json`
-  （默认 `~/.dsh/capability-panel/jev.json`；`DSH_HOME` 存在时以其为根；目录 `700` /
+- 密钥与路径：配置保存到宿主 `<dshHome>/dsh-capability-settings/jev.json`
+  （默认 `~/.dsh/dsh-capability-settings/jev.json`；`DSH_HOME` 存在时以其为根；目录 `700` /
   文件 `600`）。宿主解析密钥的优先级是 **环境变量（`apiKeyEnv`）> 配置文件中的 key**；
   界面只显示来源与末 4 位（短 key 显示 `****`），浏览器 / RPC 响应都拿不到明文。
 - 保存后无需刷新页面：下一次评分 / 测试立即使用新配置；首屏 hero 监听配置变更事件，

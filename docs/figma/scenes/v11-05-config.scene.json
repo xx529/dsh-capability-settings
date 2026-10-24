@@ -7567,7 +7567,7 @@
                               "opacity": 1
                             }
                           ],
-                          "characters": "密钥仅存宿主 ~/.dsh/capability-panel/jev.json（目录 700 / 文件 600），不下发浏览器",
+                          "characters": "密钥仅存宿主 ~/.dsh/dsh-capability-settings/jev.json（目录 700 / 文件 600），不下发浏览器",
                           "fontName": {
                             "family": "PingFang SC",
                             "style": "Regular"

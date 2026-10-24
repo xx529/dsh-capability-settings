@@ -10,10 +10,16 @@
 - **包名改为 `dsh-capability-settings`（fork 独立身份）**：`package.json` 的 `name`、
   `cordis.patch.yml` 的 insert `name`、`tsdown.config.ts` 的 `pluginId` 同步为新名
   （客户端 bundle 注册 id 必须等于包名，DSH 加载器契约）。`cordis.patch.yml` 的
-  `id: capability-panel`、RPC 通道 `/capability-panel`、数据目录
-  `<dshHome>/capability-panel` 保持不变。**升级需重装**：profile 里旧依赖键
-  `@chengdb/capability-panel` 与 `dsh.profile.bundles` 条目不会自动迁移，先卸载旧
-  条目再装 `github:xx529/dsh-capability-settings#master`；已有配置数据不受影响。
+  `id: capability-panel` 与 RPC 通道 `/capability-panel` 保持不变。**升级需重装**：
+  profile 里旧依赖键 `@chengdb/capability-panel` 与 `dsh.profile.bundles` 条目不会
+  自动迁移，先卸载旧条目再装 `github:xx529/dsh-capability-settings#master`；已有
+  配置数据不受影响（见下一条）。
+- **Jev 配置目录改为 `<dshHome>/dsh-capability-settings`（与包名一致）**：旧目录
+  `<dshHome>/capability-panel/jev.json` 在首次读取时**自动迁移**——优先原子
+  `rename`，失败退化为「复制 + chmod + 删除旧文件」；幂等（新文件已存在则不动），
+  并发下也不会丢配置。目录 `0700` / 文件 `0600` 权限不变；旧目录里的其它历史文件
+  （如 `stats.jsonl`）不迁移、原样保留。配置页「API Key 只保存在宿主 …」文案同步
+  改为新路径，Figma v11 的 scene/建稿脚本文案已同步（预览 PNG 未重导）。
 
 ## [1.4.2] - 2026-10-24
 

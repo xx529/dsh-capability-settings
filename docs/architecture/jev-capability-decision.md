@@ -40,7 +40,7 @@ A11Y 8 / NAR 6 / REG 5）。实现与验收**以仓库当前 spec 为准**；本
 
 | # | 契约 | 一句话结论 |
 |---|---|---|
-| 1 | **配置** | `resolveDshHome(override)` + `capability-panel/jev.json`；目录 `0700`/文件 `0600`；`readJsonDocument` 读、`withFileLock` 包读写、`atomicWriteText(..., {mode:0o600})` 写；非法/损坏读回默认，`setConfig` 校验失败返回 `{ok:false, code:"invalid-config", errors, issues}`。 |
+| 1 | **配置** | `resolveDshHome(override)` + `dsh-capability-settings/jev.json`；目录 `0700`/文件 `0600`；`readJsonDocument` 读、`withFileLock` 包读写、`atomicWriteText(..., {mode:0o600})` 写；非法/损坏读回默认，`setConfig` 校验失败返回 `{ok:false, code:"invalid-config", errors, issues}`。 |
 | 2 | **密钥** | `getConfig` 只回 `hasApiKey/apiKeySource/apiKeyLast4`，无明文；key 解析优先级 **env（`apiKeyEnv`，默认 `TYPESAFE_API_KEY`）> 文件 `apiKey`**；`test`/`rank` 在**宿主进程** fetch；所有错误/日志经脱敏（隐去 Bearer/Authorization/key 原文）。 |
 | 3 | **RPC** | 在 `PanelRpcService.jev` 增加 `getConfig/setConfig/test/rank/apply`，`handleEndpoint` 加 5 个 `case "jev.*"`；传输信封恒 `{ok:true,value}`，业务失败一律 `value:{ok:false,...}`（见 §5）。 |
 | 4 | **rank** | 一次 `POST {baseURL}/v1/systemone`：`state={request,guidance}`（**能力不进 state**）；每能力一条 `noul` question，`instructions` 为**结构化对象**并内嵌 `capability{kind,name,description,whenToUse?,tools?}`（MCP 带工具清单，题目逐能力唯一）；共享判据只在 `state.guidance` 出现一次；`score=noul`；排序 desc → 技能先于 MCP → 名称；错误映射 9 码；429/529 最多重试 2 次（退避 500/1000ms），4xx 不重试；不发 long-context header；不分片（v1.1 请求形状变更，原因见 §6.0）。 |
@@ -145,11 +145,11 @@ import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
 export const JEV_DIR_NAME = "capability-panel";
 export const JEV_FILE_NAME = "jev.json";
 
-/** 配置目录：<dshHome>/capability-panel（DSH_HOME 优先由 resolveDshHome 保证）。 */
+/** 配置目录：<dshHome>/dsh-capability-settings（DSH_HOME 优先由 resolveDshHome 保证）。 */
 export function jevConfigDir(dshHome?: string): string {
   return join(resolveDshHome(dshHome), JEV_DIR_NAME);
 }
-/** 配置文件：<dshHome>/capability-panel/jev.json。 */
+/** 配置文件：<dshHome>/dsh-capability-settings/jev.json。 */
 export function jevConfigFile(dshHome?: string): string {
   return join(jevConfigDir(dshHome), JEV_FILE_NAME);
 }
@@ -160,7 +160,7 @@ export function jevConfigFile(dshHome?: string): string {
   （`src/shared/config-location.ts:18,60-65`）[源码]。本模块**不重复实现** env 解析，
   插件 `Config.dshHome` 覆盖经 `src/index.ts:49` 透传。
 - 目录带插件名，便于将来放同域其它文件；**不使用** `<agentsHome>/jev.json`（研究 §B1 的初版建议）。
-  偏离理由 `[架构决定]`：Lead/UX v1.4 已裁决路径为 `~/.dsh/capability-panel/jev.json`；
+  偏离理由 `[架构决定]`：Lead/UX v1.4 已裁决路径为 `~/.dsh/dsh-capability-settings/jev.json`；
   与可读写的 agents home 分开，避免旧位置（`~/.claude` 等只读兼容根）干扰与密钥扩散。
 - **无历史迁移**：`~/.agents/jev.json` 从未上线，不做读取兼容（`[未找到]` 旧文件，按不存在处理）。
 
@@ -168,7 +168,7 @@ export function jevConfigFile(dshHome?: string): string {
 
 | 对象 | 目标模式 | 实现 |
 |---|---|---|
-| 目录 `<dshHome>/capability-panel/` | `0o700` | `mkdir(dir, { recursive: true, mode: 0o700 })` + `chmod(dir, 0o700)` 兜底（已存在目录的 mode 不会被 mkdir 改写） |
+| 目录 `<dshHome>/dsh-capability-settings/` | `0o700` | `mkdir(dir, { recursive: true, mode: 0o700 })` + `chmod(dir, 0o700)` 兜底（已存在目录的 mode 不会被 mkdir 改写） |
 | 文件 `jev.json` | `0o600` | `atomicWriteText(file, body, "jev", { mode: 0o600 })`（写临时文件时带 mode，rename 保留） |
 
 - `chmod` 失败（Windows / 只读 FS）**不阻断保存**：记录 `logger.warn`，保存仍成功；视图无需暴露。
@@ -1391,7 +1391,7 @@ interface FormState {
   以更新掩码/来源；本地调度状态立即用新值（§9.4）。
 - 「恢复默认」：把表单填回 `defaultJevConfig()` 的值（不立即保存，按 UX 定稿；未找到更细口径时由
   UX 决定是否直接保存）。
-- 文案必须包含：路径 `~/.dsh/capability-panel/jev.json`、目录 700/文件 600、密钥不下发浏览器、
+- 文案必须包含：路径 `~/.dsh/dsh-capability-settings/jev.json`、目录 700/文件 600、密钥不下发浏览器、
   草稿会发送到所配置 endpoint 的隐私说明、每次约 1 次请求的成本提示（文案取自 UX，不在代码里硬编码长句）。
 - 窄容器（<720/<560）与暗色：复用 `src/client/styles.ts` 的宿主 token，类名前缀 `skp-jev-`。
 
@@ -1649,7 +1649,7 @@ Authorization 是否出现）供断言；建议同时记录 `body` 原始 JSON �
 | H2 | 掩码 | 文件写入 `apiKey:"sk-test-1234567890"` ⇒ view `hasApiKey true`、`source "file"`、`last4 "7890"`、**响应 JSON 不含 key 原文** |
 | H3 | env 优先 | 同时 env + 文件 ⇒ `source "env"`；只 env ⇒ env；`apiKeyEnv` 自定义名生效 |
 | H4 | 权限 | `stat` 目录 mode & 0o777 === 0o700、文件 === 0o600（Linux/macOS） |
-| H5 | DSH_HOME | 子进程设 `DSH_HOME=/tmp/x` ⇒ 文件落在 `/tmp/x/capability-panel/jev.json` |
+| H5 | DSH_HOME | 子进程设 `DSH_HOME=/tmp/x` ⇒ 文件落在 `/tmp/x/dsh-capability-settings/jev.json` |
 | H6 | 损坏 JSON | 写入 `{oops` ⇒ `getConfig` 回默认且不抛；`setConfig` 可覆盖修复 |
 | H7 | 越界拒绝 | `pauseMs:250` / `3500` / `1050`、`minChars:0/201`、`minEditChars:0/101` ⇒ `ok:false code:"invalid-config"` + 对应 `issues[].code`；文件未变 |
 | H8 | baseURL 校验 | `http://example.com` 拒绝；`http://127.0.0.1:PORT` 接受；`https://api.typesafe.ai/v1/systemone` 拒绝（`E_BASE_URL_HAS_ENDPOINT`） |

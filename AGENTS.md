@@ -8,8 +8,9 @@ origin 为 `xx529/dsh-capability-settings`。作用是在 DSH 的 Web GUI 里浏
 **包名与插件 id 必须成套一致**：`package.json` 的 `name`、`tsdown.config.ts` 的
 `pluginId`（客户端 bundle 注册 id，DSH 加载器要求它等于解析后的包名，否则运行时报
 `loaded without registering`）、`cordis.patch.yml` 的 `insert[].name` 三者必须相同。
-`cordis.patch.yml` 的 `id: capability-panel`（profile patch 覆盖键）、RPC 通道
-`/capability-panel`、数据目录 `<dshHome>/capability-panel` 与包名无关，保持不动。
+`cordis.patch.yml` 的 `id: capability-panel`（profile patch 覆盖键）与 RPC 通道
+`/capability-panel` 与包名无关，保持不动；插件数据目录与包名一致
+（`<dshHome>/dsh-capability-settings/`，旧目录 `capability-panel/` 首次读取时自动迁移）。
 改包名还必须同步 profile `dependencies` 键与 `dsh.profile.bundles` 条目并重装。
 
 ---
@@ -184,7 +185,8 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
   `bash notes/verify/run-all.sh`。验证脚本放 `notes/`（已 gitignore），不要污染 `src/`。
 - **包名 / 插件 id / 槽位 id 已成套固定**（见文首）：`package.json` `name`、
   `tsdown.config.ts` `pluginId`、`cordis.patch.yml` `insert[].name` 必须一致，改名要
-  同步 profile 依赖键与 bundles 并重装；槽位 id（`capability-panel`）与数据目录不要动。
+  同步 profile 依赖键与 bundles 并重装；槽位 id（`capability-panel`）不要动，数据目录
+  与包名一致改（旧目录由代码自动迁移，见 `src/jev/config-file.ts`）。
 - **不要动用户正在使用的 `~/.dsh` profile**（安装/卸载/改配置需用户明确同意）。
   需要真机验收时用独立环境：独立 `DSH_HOME`（如 `.verify-home/`）+ 独立端口 +
   与桌面应用同版本的外壳（本地 `npm i @deepseek-ai/dsh@0.2.0-rc.2`），

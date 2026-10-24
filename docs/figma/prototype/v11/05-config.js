@@ -103,7 +103,7 @@ text(card, 'v11/c/key-label', 28, 372, 200, 16, 'API Key', { size: 10.5, color: 
 const keyIn = box(card, 'v11/c/key-input', 28, 392, 764, 38, { fill: C.input, r: 8, stroke: '#FFFFFF', strokeOp: 0.08 });
 text(keyIn, 'v11/c/key-t', 12, 0, 640, 38, 'sk-••••••••3f9a', { size: 11.5, font: F.code, lh: 38 });
 eye(keyIn, 730, 13);
-text(card, 'v11/c/key-hint', 28, 436, 764, 14, '密钥仅存宿主 ~/.dsh/capability-panel/jev.json（目录 700 / 文件 600），不下发浏览器', { size: 10.5, color: C.t3, lh: 14 });
+text(card, 'v11/c/key-hint', 28, 436, 764, 14, '密钥仅存宿主 ~/.dsh/dsh-capability-settings/jev.json（目录 700 / 文件 600），不下发浏览器', { size: 10.5, color: C.t3, lh: 14 });
 
 // ---------- 能力决策（默认关闭 + 三个数值字段） ----------
 hline(card, 'v11/c/auto-line', 28, 458, 764, 0.08);

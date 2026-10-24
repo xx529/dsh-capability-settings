@@ -1192,7 +1192,7 @@ MCP「工具与参数」是单列手风琴（1.3.4），窄容器不再需要换
 │            ┌ 配置卡 820 居中（#23272F r14 padding 28） ──┐    │
 │            │ Jev 模型 + 副标题                            │    │
 │            │ 说明卡：全局配置 / 密钥路径（~/.dsh/           │    │
-│            │ capability-panel/jev.json，目录 700 文件 600）/ │    │
+│            │ dsh-capability-settings/jev.json，目录 700 文件 600）/ │    │
 │            │ 隐私说明                                      │    │
 │            │ Base URL / 模型名                             │    │
 │            │ 密钥来源 [直接填写|环境变量] + API Key（脱敏） │    │
@@ -1377,7 +1377,7 @@ MCP「工具与参数」是单列手风琴（1.3.4），窄容器不再需要换
 | Jev 配置页 | 第三域 Tab `Jev 模型`：无搜索/无计数/无作用域控件；配置卡（Base URL、模型、密钥双模式、测试连接、保存、恢复默认、能力决策区）；首次进入挂载后常驻；完整规格 `docs/ux/jev-auto-select.md` |
 | 共享 | 确认对话框统一、错误条、骨架、toast、焦点回填、30×18 开关组件与置灰规则 |
 | 宿主 | **无改动**（技能/MCP 部分）：目录树/内容复用 `skills.export`；不新增 `skills.tree`/`skills.file`/`mcp.toolsCount` |
-| 宿主（Jev） | 全局配置读写 `~/.dsh/capability-panel/jev.json`（目录 700 / 文件 600）；RPC/命令与状态见 `docs/ux/jev-auto-select.md` §5 |
+| 宿主（Jev） | 全局配置读写 `~/.dsh/dsh-capability-settings/jev.json`（目录 700 / 文件 600）；RPC/命令与状态见 `docs/ux/jev-auto-select.md` §5 |
 | 文档 | README（行为说明）+ CHANGELOG `[Unreleased]`（变更/移除） |
 | 设计 | 当前 v7 2 帧（技能·项目 / MCP·项目）；待补全局 2 帧 + 状态板 + **Jev 配置帧 F6**（§10） |
 

@@ -41,7 +41,7 @@ for (const c of [...page.children]) c.remove();
 
 text(page, 'page-title', 0, 0, 1000, 40, '能力面板 · 能力决策 v11', { size: 30, font: F.sb, color: '#E8EAF0', lh: 40 });
 text(page, 'page-subtitle', 0, 48, 1360, 24,
-  '统一命名「能力决策」· 自动触发默认关闭 · 双门槛（最少触发字数 / 最少修改间隔）· 密钥路径 ~/.dsh/capability-panel · 5 帧 1440×900',
+  '统一命名「能力决策」· 自动触发默认关闭 · 双门槛（最少触发字数 / 最少修改间隔）· 密钥路径 ~/.dsh/dsh-capability-settings · 5 帧 1440×900',
   { size: 14, color: '#99A1B0', lh: 24 });
 
 // ---------- 5 帧 + 克隆底座 ----------

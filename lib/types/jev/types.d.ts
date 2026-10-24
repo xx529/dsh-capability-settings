@@ -20,7 +20,7 @@ export interface JevAutoTrigger {
     /** 最少修改间隔字符数 1–100，默认 4。 */
     minEditChars: number;
 }
-/** 落盘的完整配置（`<dshHome>/capability-panel/jev.json`）。 */
+/** 落盘的完整配置（`<dshHome>/dsh-capability-settings/jev.json`）。 */
 export interface JevConfig {
     /** 根地址，不含 `/v1/systemone`；默认 `https://api.typesafe.ai`。 */
     baseURL: string;

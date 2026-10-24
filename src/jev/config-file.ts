@@ -3,8 +3,10 @@
  *
  * 存储契约（架构 §3）：
  *
- *   - 文件：`<dshHome>/capability-panel/jev.json`（见 `paths.ts`）；
+ *   - 文件：`<dshHome>/dsh-capability-settings/jev.json`（见 `paths.ts`）；
  *   - 目录 0700、文件 0600（写入路径才改权限，读不碰权限）；
+ *   - 旧目录 `<dshHome>/capability-panel/jev.json` 首次读取时一次性迁移（见
+ *     {@link migrateLegacyJevConfig}，幂等）；
  *   - 「读-改-写」整段包在 `withFileLock` 里（F6），写用 `atomicWriteText(..., { mode: 0o600 })`；
  *   - 读：文件缺失/空/JSON 损坏 → 回默认值（并 `logger.warn`），不把面板打挂；
  *   - 写：字段级校验，越界**拒绝保存**（不夹取、不四舍五入）。
@@ -16,13 +18,14 @@
  * @module dsh-capability-settings/jev/config-file
  */
 
-import { chmod, mkdir } from "node:fs/promises";
+import { chmod, copyFile, mkdir, rename, stat, unlink } from "node:fs/promises";
+import type { Stats } from "node:fs";
 
 import { atomicWriteText } from "../shared/atomic-write.js";
 import { errMessage } from "../shared/errors.js";
 import { withFileLock } from "../shared/file-lock.js";
 import { readJsonDocument } from "../shared/json-config.js";
-import { jevConfigDir, jevConfigFile } from "./paths.js";
+import { jevConfigDir, jevConfigFile, legacyJevConfigFile } from "./paths.js";
 import type {
   JevAutoTrigger,
   JevConfig,
@@ -180,12 +183,65 @@ function sanitizeStoredConfig(raw: Record<string, unknown>): JevConfig {
 }
 
 /**
+ * 一次性迁移：`<dshHome>/capability-panel/jev.json` →
+ * `<dshHome>/dsh-capability-settings/jev.json`。
+ *
+ * 幂等：新文件存在且不比旧文件旧 → 不动；旧文件不存在直接返回。**旧文件更新时
+ * 覆盖新文件**（升级前旧版本又写过配置的场景，避免丢最后一次保存）。优先
+ * `rename`（同分区原子，保留内容与 inode），失败再退化为
+ * `copyFile + chmod + unlink`。并发下若另一调用已完成迁移，看到新文件即视为
+ * 成功。迁移失败只告警，读取继续走新路径（缺失则回默认值），不阻断面板。
+ */
+export async function migrateLegacyJevConfig(dshHome?: string, logger?: JevLogger): Promise<void> {
+  const next = jevConfigFile(dshHome);
+  const legacy = legacyJevConfigFile(dshHome);
+  if (next === legacy) return;
+  let nextStat: Stats | undefined;
+  try {
+    nextStat = await stat(next);
+  } catch {
+    nextStat = undefined;
+  }
+  let legacyStat: Stats;
+  try {
+    legacyStat = await stat(legacy);
+  } catch {
+    return;
+  }
+  if (nextStat !== undefined && legacyStat.mtimeMs <= nextStat.mtimeMs) return;
+  const dir = jevConfigDir(dshHome);
+  try {
+    await mkdir(dir, { recursive: true, mode: DIR_MODE });
+    await chmod(dir, DIR_MODE).catch(() => undefined);
+    try {
+      await rename(legacy, next);
+      // rename 保留旧文件的 inode/mode；密钥文件统一收敛到 0600（失败不阻断读取）。
+      await chmod(next, FILE_MODE).catch(() => undefined);
+    } catch {
+      // 并发下可能刚被另一个调用迁走；新文件已不旧于旧文件就当作成功。
+      try {
+        const fresh = await stat(next);
+        if (fresh.mtimeMs >= legacyStat.mtimeMs) return;
+      } catch {
+        // 新文件仍不存在：退化为复制 + 删除旧文件。
+      }
+      await copyFile(legacy, next);
+      await chmod(next, FILE_MODE).catch(() => undefined);
+      await unlink(legacy).catch(() => undefined);
+    }
+  } catch (error) {
+    logger?.warn?.(`capability-panel: Jev 配置迁移失败，继续使用新路径（${redact(errMessage(error), [])}）`);
+  }
+}
+
+/**
  * 读取有效配置：缺失/空/损坏都回默认值（不创建文件）。
  *
  * 单字段损坏（例如手工把 `pauseMs` 改成 250）只回落该字段，不丢其它字段
  * （尤其不丢 `apiKey`）；整个 JSON 损坏才整体回默认。
  */
 export async function readJevConfig(dshHome?: string, logger?: JevLogger): Promise<JevConfig> {
+  await migrateLegacyJevConfig(dshHome, logger);
   const file = jevConfigFile(dshHome);
   let raw: Record<string, unknown> | undefined;
   try {

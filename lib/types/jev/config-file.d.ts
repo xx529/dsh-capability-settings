@@ -3,8 +3,10 @@
  *
  * 存储契约（架构 §3）：
  *
- *   - 文件：`<dshHome>/capability-panel/jev.json`（见 `paths.ts`）；
+ *   - 文件：`<dshHome>/dsh-capability-settings/jev.json`（见 `paths.ts`）；
  *   - 目录 0700、文件 0600（写入路径才改权限，读不碰权限）；
+ *   - 旧目录 `<dshHome>/capability-panel/jev.json` 首次读取时一次性迁移（见
+ *     {@link migrateLegacyJevConfig}，幂等）；
  *   - 「读-改-写」整段包在 `withFileLock` 里（F6），写用 `atomicWriteText(..., { mode: 0o600 })`；
  *   - 读：文件缺失/空/JSON 损坏 → 回默认值（并 `logger.warn`），不把面板打挂；
  *   - 写：字段级校验，越界**拒绝保存**（不夹取、不四舍五入）。
@@ -34,6 +36,17 @@ export type BaseURLNormalization = {
  * 允许 http）；pathname 不得以 `/v1/systemone` 结尾；长度 ≤ 2048。
  */
 export declare function normalizeBaseURL(raw: string): BaseURLNormalization;
+/**
+ * 一次性迁移：`<dshHome>/capability-panel/jev.json` →
+ * `<dshHome>/dsh-capability-settings/jev.json`。
+ *
+ * 幂等：新文件存在且不比旧文件旧 → 不动；旧文件不存在直接返回。**旧文件更新时
+ * 覆盖新文件**（升级前旧版本又写过配置的场景，避免丢最后一次保存）。优先
+ * `rename`（同分区原子，保留内容与 inode），失败再退化为
+ * `copyFile + chmod + unlink`。并发下若另一调用已完成迁移，看到新文件即视为
+ * 成功。迁移失败只告警，读取继续走新路径（缺失则回默认值），不阻断面板。
+ */
+export declare function migrateLegacyJevConfig(dshHome?: string, logger?: JevLogger): Promise<void>;
 /**
  * 读取有效配置：缺失/空/损坏都回默认值（不创建文件）。
  *

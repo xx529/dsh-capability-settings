@@ -452,7 +452,7 @@ export interface JevAutoTrigger {
 }
 
 /**
- * 配置文件 `~/.dsh/capability-panel/jev.json` 的完整形状。
+ * 配置文件 `~/.dsh/dsh-capability-settings/jev.json` 的完整形状。
  *
  * 客户端只镜像语义、不落盘；`apiKey` 仅在提交 `setConfig` 时单向下发，
  * 任何读取响应都不会带明文（架构 §4.2）。
