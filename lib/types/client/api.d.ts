@@ -603,7 +603,16 @@ export interface JevApplyFailed {
 /** `jev.apply` 的返回：成功分支含 applied/skipped/pending；失败分支带分类码。 */
 export type JevApplyResult = {
     ok: true;
+    /** 生效条数（旧宿主语义 = 本次启用数；回滚后为 0）。 */
     applied: number;
+    /**
+     * additive（task-42 筛选语义）：本次实际启用条数。
+     *
+     * 旧宿主不返回；客户端缺失时回退 `applied`（旧宿主只会启用，不会关闭）。
+     */
+    enabled?: number;
+    /** additive（task-42 筛选语义）：本次实际关闭条数；旧宿主缺失视为 0。 */
+    disabled?: number;
     skipped: JevApplySkipped[];
     pending: boolean;
     failed?: JevApplyFailed[];

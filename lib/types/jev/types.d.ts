@@ -147,13 +147,18 @@ export interface JevApplyInput {
     sessionId: string;
     plan: JevApplyPlanItem[];
 }
-/** 客户端提交的计划项；宿主只信 `id`，`name`/`target` 仅用于诊断。 */
+/**
+ * 客户端提交的计划项（**只含勾选项**；宿主只信 `id`，`name`/`target` 仅用于诊断）。
+ *
+ * 筛选语义（task-42）：宿主把 plan 当「选中集合」——选中项目标 enable，
+ * 当前会话里其余**可应用**能力目标 disable（未勾选 = 关闭），只改会话开关。
+ */
 export interface JevApplyPlanItem {
     id: string;
     kind: "skill" | "mcp";
     name: string;
     target?: string;
-    /** 本期只支持「启用」。 */
+    /** 本期客户端只提交勾选项，恒为 true。 */
     enabled: true;
 }
 export interface JevApplySkipped {
@@ -166,6 +171,7 @@ export interface JevApplyFailed {
 }
 /** 冷会话排队结果回执：读取即消费，附在下一次 rank/apply 成功响应里。 */
 export interface JevPendingOutcome {
+    /** 激活后实际写入条数（筛选语义下 = 启用数 + 关闭数）。 */
     applied: number;
     failed: number;
     errors: string[];
@@ -174,10 +180,18 @@ export interface JevPendingOutcome {
 }
 export type JevApplyResult = {
     ok: true;
-    /** 回滚后仍生效的条数（全部成功 = 有效条数；回滚 = 0）。 */
+    /** 本次实际写入条数 = `enabled + disabled`（回滚 = 0）。 */
     applied: number;
+    /**
+     * 本次实际**启用**的条数（筛选语义：勾选项里当前关闭 → 打开）。
+     *
+     * additive（task-42）：客户端旧版本忽略该字段即可；`applied` 语义不变。
+     */
+    enabled: number;
+    /** 本次实际**关闭**的条数（筛选语义：可应用但未勾选、当前开启 → 关闭）。 */
+    disabled: number;
     skipped: JevApplySkipped[];
-    /** true = 冷会话排队，尚未写入。 */
+    /** true = 冷会话排队，尚未写入（此时 enabled/disabled/applied 均为 0）。 */
     pending: boolean;
     failed?: JevApplyFailed[];
     /** additive：回滚细节/诊断（脱敏）。 */

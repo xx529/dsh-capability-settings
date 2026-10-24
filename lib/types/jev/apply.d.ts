@@ -1,22 +1,25 @@
 /**
  * 能力枚举、应用事务与冷会话排队（架构 §7 / §8）。
  *
- * 三条不变量：
+ * 四条不变量：
  *
  *   1. **枚举是唯一入口**：`rank` 与 `apply` 都走 `enumerateCapabilities`，
  *      客户端传来的 `name` / `target` 一律不信任 —— 应用时按 `id` 重新枚举解析；
- *   2. **写入串行 + 失败逆序回滚**：skills 的 shadow 注册与 MCP 重挂都不是并发
- *      安全的；部分失败时按前态快照逆序恢复；
- *   3. **冷会话只排队不写**：无 live agent 时把已解析的计划存进内存
- *      `Map<sessionId, PendingPlan>`，`ctx.on("agent/created")` 命中后
- *      `setTimeout(0)` 延后应用（让 mcp/loader 等监听先完成登记），失败短重试。
+ *   2. **筛选语义**（task-42）：plan 只是「已勾选」集合；当前会话里**所有可应用**
+ *      能力中，选中 → 目标启用、未选 → 目标关闭（只改会话开关，不动项目默认）；
+ *      不可应用项（hard-disabled / not-restrictable / live 下 not-toggleable）不动；
+ *   3. **只写状态不一致的 + 串行 + 失败逆序回滚**：skills 的 shadow 注册与 MCP
+ *      重挂都不是并发安全的；部分失败时按前态快照逆序恢复（启用/关闭都可还原）；
+ *   4. **冷会话只排队不写**：无 live agent 时把「可应用能力的完整目标集合」
+ *      （含关闭）存进内存 `Map<sessionId, PendingPlan>`，`ctx.on("agent/created")`
+ *      命中后 `setTimeout(0)` 延后重放（让 mcp/loader 等监听先完成登记），失败短重试。
  *
  * @module @chengdb/capability-panel/jev/apply
  */
 import type { McpOpResult } from "../mcp/manager.js";
 import type { McpListResult, McpRuntimeView } from "../mcp/types.js";
 import type { SessionSkillOpResult, SessionSkillView } from "../skills/session.js";
-import type { JevApplyResult, JevApplySkipped, JevCapability, JevHostContext, JevLogger, JevPendingOutcome, JevPrevState } from "./types.js";
+import type { JevApplyResult, JevApplySkipped, JevCapability, JevHostContext, JevLogger, JevPendingOutcome } from "./types.js";
 /**
  * 枚举/写入依赖的宿主服务（结构子集）。
  *
@@ -66,11 +69,17 @@ export interface JevPendingPlan {
     sessionId: string;
     cwd?: string;
     createdAt: number;
-    /** 已通过入参校验与能力本体可应用判定的条目（含前态快照）。 */
-    items: Array<{
-        cap: JevCapability;
-        prev: JevPrevState;
+    /**
+     * 目标集合：`{ id, desired }`（`desired=true` 启用、`false` 关闭）。
+     *
+     * 筛选语义下，入队时记录**当时所有可应用能力**的目标态（含关闭）；激活后
+     * 重新枚举、按 id 匹配并只写「当前状态 ≠ 目标状态」的项（不复用入队快照）。
+     */
+    ops: Array<{
+        id: string;
+        desired: boolean;
     }>;
+    /** 入队时已确定的跳过项（计划里 unknown/非启用/不可应用的 id）。 */
     skipped: JevApplySkipped[];
 }
 /** 冷会话队列/应用引擎。 */

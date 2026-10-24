@@ -3,6 +3,20 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.4.1] - 2026-10-24
+
+### 修复
+
+- **能力决策「应用所选」改为筛选语义**（用户 bug：应用后本会话能力面板仍全开）：
+  旧实现只启用勾选项、未勾选项保持现状，因此面板保留全部已启用能力（如 145/145），
+  看起来没有过滤。现在宿主枚举当前会话全部可应用能力：勾选 → 启用、未勾选 → 关闭
+  （只改当前会话、不动项目默认），只写状态不一致项；成功支新增 `enabled` / `disabled`
+  计数（`applied = enabled + disabled`）；跳过项区分真正不可应用与 `already-applied`
+  （后者不展示为「不可切换」），重复应用只写差异；冷会话 pending 保存完整 ops
+  （含关闭）并在 `agent/created` 后重放，失败仍按前态逆序回滚。
+  实现 / 验证：task-42（宿主筛选语义）、task-43（客户端 toast / 过滤）、
+  task-44（tester 571 PASS / 0 FAIL，`notes/verify/jev-capability-decision/report.md`）。
+
 ## [1.4.0] - 2026-10-24
 
 ### 新增
@@ -552,6 +566,7 @@
   输出总量上限（对接入的压缩包上限之下再拦一层"膨胀内存"），并修复
   数据区越界被静默截断、短归档负面偏移读越界的问题（zip bomb 防护）。
 
+[1.4.1]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.3.4...v1.4.0
 [1.3.4]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.3.3...v1.3.4
 [1.3.3]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.3.2...v1.3.3
