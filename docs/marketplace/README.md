@@ -86,6 +86,12 @@ CI 依次检查：条目数量 → `dsh.bundle` → 仓库年龄 → `awesome-li
   `screenshots.json`。
 - 当前提交：PR <https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/9197>
   （2026-10-24 提交，分支 `xx529:add/xx529-dsh-capability-settings`）。
+  **状态**：`MERGEABLE` / `CLEAN`，CI `check`（10m52s）与 `Submission gate` 均通过，
+  等维护者评审合并。
+- 合并后站点自动重建，详情页为
+  <https://awesome-dsh-plugin.com/p/xx529/dsh-capability-settings/>；
+  市场卡片给出的安装命令是 `dsh plugin --profile web add github:xx529/dsh-capability-settings`
+  （没有 npm 包时只给 GitHub 一种；desktop profile 把 `web` 换成 `desktop`）。
 - 注意：该 fork 默认分支落后上游，`gh repo sync` 会因 token 缺 `workflow` scope 被拒；
   本次分支基于旧 `main`（PR 只新增一个文件，CI 用 merge ref 构建，不影响检查）。
   若之后仍被要求同步，用 GitHub 网页的 “Sync fork” 或 `gh auth refresh -s workflow` 后重试。
