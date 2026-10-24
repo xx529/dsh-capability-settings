@@ -193,22 +193,31 @@ fi
 if [ "$DO_INSTALL" = 1 ]; then
   say ""
   say "== 重装到 profile: $PROFILE =="
+  SKIPPED=0
   if [ "$CURRENT_SPEC" = "" ]; then
-    say "> 未安装：pnpm add $TARGET_SPEC"
+    say "> 未安装：pnpm add ${TARGET_SPEC}"
+    run "$DSH_CLI" plugin --profile "$PROFILE" add "$TARGET_SPEC"
+  elif [ "$CURRENT_SPEC" != "$TARGET_SPEC" ]; then
+    # 依赖规格变了（例如 --ref 从 master 换成别的分支/标签）：add 会同时更新 spec 与版本。
+    say "> 规格变化（${CURRENT_SPEC} → ${TARGET_SPEC}）：pnpm add ${TARGET_SPEC}"
     run "$DSH_CLI" plugin --profile "$PROFILE" add "$TARGET_SPEC"
   elif [ "$REMOTE_SHA" = "$INSTALLED_SHA" ] && [ "$FORCE_REINSTALL" = 0 ]; then
     say "> 已是最新（${INSTALLED_SHA}），跳过重装"
+    SKIPPED=1
   else
     say "> 已安装：pnpm update ${NAME}（重新解析 ${REF}）"
     run "$DSH_CLI" plugin --profile "$PROFILE" update "$NAME"
+  fi
+
+  if [ "$SKIPPED" = 0 ] && [ "$DRY_RUN" = 0 ]; then
     NEW_SHA=$(read_installed_sha)
-    if [ "$DRY_RUN" = 0 ] && [ "$NEW_SHA" != "$REMOTE_SHA" ]; then
+    if [ "$NEW_SHA" != "$REMOTE_SHA" ]; then
       if [ "$FORCE_REINSTALL" = 1 ]; then
-        say "⚠ update 后仍是 ${NEW_SHA:-<未知>}，按 --force-reinstall 执行 remove + add"
+        say "⚠ 安装后仍是 ${NEW_SHA:-<未知>}，按 --force-reinstall 执行 remove + add"
         run "$DSH_CLI" plugin --profile "$PROFILE" remove "$NAME"
         run "$DSH_CLI" plugin --profile "$PROFILE" add "$TARGET_SPEC"
       else
-        say "⚠ update 后仍是 ${NEW_SHA:-<未知>}（期望 ${REMOTE_SHA}）"
+        say "⚠ 安装后仍是 ${NEW_SHA:-<未知>}（期望 ${REMOTE_SHA}）"
         say "  可加 --force-reinstall 走 remove + add 强刷"
       fi
     fi
