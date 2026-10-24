@@ -21,6 +21,16 @@
   （如 `stats.jsonl`）不迁移、原样保留。配置页「API Key 只保存在宿主 …」文案同步
   改为新路径，Figma v11 的 scene/建稿脚本文案已同步（预览 PNG 未重导）。
 
+### 内部
+
+- **新增 `scripts/push-and-reinstall.sh`（`pnpm push:install`）**：一条命令完成
+  「typecheck + build → `git push` → 重装 profile」。内置桌面应用自带的 dsh CLI 路径
+  （PATH 里的 0.1.x 旧 CLI 会被拒绝）、用 `pnpm update` 重新解析 `github:…#master`
+  （`install` 不会重解析）、校验/补齐 `dsh.profile.bundles`、安装后校验 commit 并提示
+  重启。参数：`--dry-run` / `--profile` / `--ref` / `--remote` / `--dsh-home` /
+  `--dsh-cli` / `--no-push` / `--no-install` / `--no-build` / `--force-reinstall` /
+  `--force`。AGENTS.md 与 README 新增「推送 + 重装」说明，后续不需要再探索安装方式。
+
 ## [1.4.2] - 2026-10-24
 
 ### 修复

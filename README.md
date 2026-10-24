@@ -460,6 +460,24 @@ dsh plugin --profile web add "link:<本仓库路径>"
 dsh web
 ```
 
+### 推送与重装（维护者）
+
+改完 `src/`、提交并构建（`lib/**` 一起提交）后，用仓库脚本一条命令完成推送 + 重装：
+
+```powershell
+bash scripts/push-and-reinstall.sh --dry-run   # 先看参数与计划，不写入
+bash scripts/push-and-reinstall.sh             # 默认 push master + 重装 desktop profile
+pnpm push:install                              # 等价入口
+```
+
+脚本会先打印参数（包名/版本、remote/ref、profile、DSH_HOME、dsh CLI 版本、已装 commit），
+再跑 `pnpm typecheck && pnpm build`、`git push`，最后用**桌面应用自带的 dsh CLI**
+在 profile 里执行 `pnpm update <包名>`（`install` 不会重新解析 `github:…#master`），
+并校验/补齐 `dsh.profile.bundles`。装完需要**重启 DeepSeek Harness** 才会加载新代码。
+
+常用参数：`--profile <name>`、`--ref <ref>`、`--no-push`、`--no-install`、`--no-build`、
+`--force-reinstall`、`--force`、`--dry-run`，完整列表见 `bash scripts/push-and-reinstall.sh --help`。
+
 ## 目录结构
 
 ```

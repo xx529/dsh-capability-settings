@@ -23,6 +23,7 @@ pnpm typecheck       # tsc --noEmit
 pnpm build           # = pnpm host (tsc -p tsconfig.json) + pnpm bundle (tsdown)
 pnpm host            # 仅宿主侧 tsc 编译（产物 lib/**.js + lib/types/**.d.ts）
 pnpm bundle          # 仅客户端 tsdown 打包（产物 lib/client.js + lib/client.map）
+pnpm push:install    # 推送 + 重装当前 profile（= bash scripts/push-and-reinstall.sh）
 ```
 
 本地回归套件（**已 gitignore，不在版本库**）：`bash notes/verify/run-all.sh`。
@@ -34,6 +35,43 @@ pnpm bundle          # 仅客户端 tsdown 打包（产物 lib/client.js + lib/c
 bash notes/verify/setup.sh                     # 重建编译产物 + 本地 MCP 测试服务器
 npm i --prefix notes/verify/tmp/env jsdom      # 重装 jsdom（harness 用绝对路径加载它）
 ```
+
+## 推送 + 重装（一条命令）
+
+改完 `src/` 并提交后，用脚本完成「构建 → push → 重装 profile」，不要再手摸 DSH CLI
+路径和 pnpm 语义：
+
+```bash
+bash scripts/push-and-reinstall.sh                  # 默认 push master + 重装 desktop
+bash scripts/push-and-reinstall.sh --dry-run        # 只打印参数与计划命令，不写入
+bash scripts/push-and-reinstall.sh --profile web    # 换 profile
+bash scripts/push-and-reinstall.sh --ref feat/x --no-push   # 远端已有分支，只重装
+bash scripts/push-and-reinstall.sh --no-build       # 跳过 typecheck/build
+pnpm push:install                                   # 等价入口
+```
+
+脚本固定做的事（对应当前踩过的坑）：
+
+1. 先打印参数：repo / 包名+版本 / remote+ref / profile 目录 / DSH_HOME / dsh CLI
+   路径与版本 / profile 当前 spec / 已安装 commit；
+2. 要求工作区干净（`--force` 可跳过）；`pnpm typecheck && pnpm build`，构建后若
+   工作区出现变化（`lib/**` 落后于 `src/`）会中止并提示先提交；
+3. `git push <remote> <ref>`；
+4. 装进 profile：已安装 → `pnpm update <包名>`（**必须 update**；`install` 不会重新
+   解析 `github:…#master`，会报 Already up to date）；未安装 → `pnpm add
+   github:<owner>/<repo>#<ref>`；`update` 后 commit 没变时打印提示，可加
+   `--force-reinstall` 走 remove + add；
+5. 校验并补齐 profile `package.json` 的 `dsh.profile.bundles` 条目，最后打印安装后
+   commit / 版本 / patch insert 名，并提示**重启 DeepSeek Harness**（只刷新页面不够，
+   宿主内存里仍是旧模块）。
+
+要点：**必须用桌面应用自带的 CLI**
+`/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh`
+（脚本默认值；PATH 里的 `dsh` 曾解析到 0.1.2-alpha.2，脚本会直接拒绝 0.1.x）。
+写 `~/.dsh` 在 DSH 沙箱里会报 `sandbox: file access denied`，用
+danger-full-access 审批重试同一条命令即可。手动兜底通道仍是 `plugin_manager` 的
+`remove_bundle` + `install_bundle`（desktop profile 是 `patchReload: live`：宿主
+热生效，客户端 UI 需刷新页面）。
 
 ---
 
@@ -191,8 +229,9 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
   需要真机验收时用独立环境：独立 `DSH_HOME`（如 `.verify-home/`）+ 独立端口 +
   与桌面应用同版本的外壳（本地 `npm i @deepseek-ai/dsh@0.2.0-rc.2`），
   profile bundles = `@deepseek-ai/dsh-base` + `@deepseek-ai/dsh-web-app` + `link:<本仓库>`。
-- **装到当前 profile 的官方通道**：`plugin_manager` 的
-  `remove_bundle` + `install_bundle github:xx529/dsh-capability-settings#master`
+- **推送 + 重装优先用脚本**：`bash scripts/push-and-reinstall.sh`（或 `pnpm push:install`，
+  默认 desktop/master，`--dry-run` 先看参数与计划）；细节见上文「推送 + 重装（一条命令）」。
+  手动兜底通道才是 `plugin_manager` 的 `remove_bundle` + `install_bundle`
   （desktop profile 是 `patchReload: live`：宿主热生效，客户端 UI 需刷新页面）。
 
 ---

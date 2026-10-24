@@ -48,7 +48,8 @@
     "host": "tsc -p tsconfig.json",
     "bundle": "tsdown",
     "watch": "tsc -p tsconfig.json --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "push:install": "bash scripts/push-and-reinstall.sh"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "~4.0.4",
