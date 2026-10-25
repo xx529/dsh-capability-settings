@@ -451,6 +451,7 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
           // skills 域是宿主 additive 字段：旧宿主缺失时按空清单（旧行为不变）。
           skills: listOf(view.skills),
           ...(typeof view.filePath === "string" ? { filePath: view.filePath } : {}),
+          ...(typeof view.projectRoot === "string" ? { projectRoot: view.projectRoot } : {}),
         } satisfies ClientOverrides;
       },
 

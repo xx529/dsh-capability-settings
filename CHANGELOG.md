@@ -31,6 +31,26 @@
   的存在性校验（`sessionPersistence.stat`）决定：确认缺失先记 `missingSince`，
   累计 ≥24h 才删除；服务缺失 / 探测抛错一律保留。
 
+### 变更
+
+- **项目级「默认关闭」声明统一收进插件数据目录**：原先写在项目仓库的
+  `<项目根>/.agents/capability-overrides.json`，现在统一写到
+  `<dshHome>/dsh-capability-settings/capability-overrides.json`（与 `jev.json` /
+  会话开关同目录，文件权限 0600），**一个文件按项目根分 key**：
+  `projects.<项目根>.mcp` / `.skills`，条目带 `updatedAt` 与最近 `cwd`。
+  影响与边界：
+  - 面板「默认」开关不再改项目仓库文件，声明也不再随 git 提交 / 跨机器共享
+    （换机器或清空 dsh home 后需重新设置）；
+  - 旧项目内声明（`.agents`，兼容 `.dsh` / `.claude`）**只读兼容**：统一存储里
+    还没有该项目时回退读取；首次写入时把旧内容并入统一存储并删除旧文件
+    （之后只有统一存储生效，避免两处维护）；
+  - 项目根 key 取自 `findProjectRoot(cwd)`：同一项目的不同子目录共享同一份；
+    项目路径移动后会生成新 key，旧条目保留但不再命中；
+  - 统一存储损坏 / 版本不认识：列表降级为空、写入显式报错（不静默覆盖用户数据）；
+  - `overrides.get` 回包 additive 增加 `projectRoot`，`filePath` 改指统一存储；
+    新增公开导出 `overridesStoreFile` / `readOverridesStore` / `writeOverridesStore` /
+    `OVERRIDES_STORE_VERSION`。
+
 ### 内部
 
 - `skills/session.ts`：`applyProjectDefaults` 早退条件纳入显式开关；新增
@@ -39,9 +59,14 @@
   hydrate；`agent/disposed` 只清内存、不删磁盘。
 - `index.ts`：组合根创建单一 `sessionState` 注入两个域，并接线对账调度
   （`session/disposed` / `agent/disposed` → debounce 只标记核对）。
+- `overrides/*`：`paths.ts` 新增统一存储路径；`config-file.ts` 新增 store 读写
+  （版本 / 形状校验、空条目不落盘、文件 0600）；`manager.ts` 按项目根读写 +
+  旧文件兼容迁移。
 - 回归：`notes/verify/session-state.test.mjs`（8 例：重启读回 / 清除 / 防 id 复用 /
-  两阶段对账 / 跨实例合并 / 权限 / 损坏降级 / 未知版本）与
-  `notes/verify/session-restore.test.mjs`（2 例：Skills 与 MCP 的重启恢复接线）。
+  两阶段对账 / 跨实例合并 / 权限 / 损坏降级 / 未知版本）、
+  `notes/verify/session-restore.test.mjs`（2 例：Skills 与 MCP 的重启恢复接线）、
+  `notes/verify/overrides-store.test.mjs`（8 例：按项目分 key / 项目隔离 / 子目录共享 /
+  旧文件迁移删除 / 空条目 / 坏旧文件 / 坏存储 / `get` 视图 / 非法入参）。
 
 ## [1.5.0] - 2026-10-25
 

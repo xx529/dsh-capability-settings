@@ -42,11 +42,12 @@
 ## 配置文件位置
 
 本插件的配置文件**写入优先用 `.agents` 目录**，读取兼容旧位置与跨工具生态
-（例外：Jev 能力决策配置独立存放在 dsh home 的插件目录，见下表末行）：
+（例外：Jev 能力决策配置、项目级「默认关闭」声明统一存放在 dsh home 的插件
+目录，见下表）：
 
 | 配置 | 写入目标 | 读取兼容（旧位置） |
 |---|---|---|
-| 项目级「默认关闭」声明（MCP 面板的「默认」开关 + 注入技能的「本项目启用」开关） | `<项目根>/.agents/capability-overrides.json`（`mcp` / `skills` 两个列表） | `.dsh` → `.claude` |
+| 项目级「默认关闭」声明（MCP 面板的「默认」开关 + 注入技能的「本项目启用」开关） | `<dshHome>/dsh-capability-settings/capability-overrides.json`（一个文件按**项目根**分 key：`projects.<项目根>.mcp` / `.skills`） | 旧项目内 `.agents/capability-overrides.json`（兼容 `.dsh` → `.claude`）：只读兼容，首次写入时把内容并入统一存储并删除旧文件 |
 | 项目级「全局能力引用」声明（MCP 的「导入到本项目」） | `<项目根>/.agents/capability-imports.json` | — |
 | 全局 MCP 服务器 | `~/.agents/mcp.json` | `~/.dsh` → `~/.claude` |
 | Skills（项目/全局） | `.agents/skills`、`~/.agents/skills` | `.dsh/skills`（可写）、`.claude/skills`（只读展示） |
@@ -214,10 +215,12 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 
 启停与只读语义（与磁盘技能**同逻辑、同开关位置**）：
 
-- **面板行开关 = 本项目默认启停**：写 `<项目根>/.agents/capability-overrides.json`
-  的 `skills` 列表（与 `mcp` 列表并列、互不影响），新建对话按它决定该注入技能
-  是否默认可用；只影响本项目。注入技能没有磁盘文件，所以**不写 frontmatter**，
-  由插件在 `agent/created` 时按该名单在 agent 作用域注册同名 runtime shadow。
+- **面板行开关 = 本项目默认启停**：写统一存储
+  `<dshHome>/dsh-capability-settings/capability-overrides.json` 里
+  `projects.<项目根>.skills` 列表（与 `mcp` 列表并列、互不影响），新建对话按它
+  决定该注入技能是否默认可用；只影响本项目。注入技能没有磁盘文件，所以
+  **不写 frontmatter**，由插件在 `agent/created` 时按该名单在 agent 作用域注册
+  同名 runtime shadow。
 - **会话能力区 / 首屏 hero = 当前对话启停**：注入行与磁盘技能同列，开关调
   `skills.setSessionEnabled`，只作用于当前会话（**按会话落盘**，宿主重启 / resume
   后自动恢复；优先级 **显式会话覆盖 > 项目默认**）；冷会话（没有 live agent）时
@@ -315,8 +318,8 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   整体屏蔽，删除即恢复）；
 - **MCP**：「导入到本项目」登记**引用**（内容实时跟随全局，启停是引用上的
   项目级标记，写在 `.agents/capability-imports.json`）；全局条目的行尾
-  「默认」开关写 `.agents/capability-overrides.json` 的 mcp 列表，决定新建
-  对话是否默认启用；
+  「默认」开关写统一存储 `capability-overrides.json` 的 `projects.<项目根>.mcp`
+  列表，决定新建对话是否默认启用；
 - **全局实例的「关掉」靠 `tools.restrict`**：全局 MCP 实例是共享的、无法按
   项目卸载，所以按 session 在该 agent 作用域上 deny 掉
   `mcp__<serverName>__*`——全局配置不动、其他项目不受影响；宿主不提供
@@ -521,7 +524,8 @@ dsh plugin --profile web remove dsh-capability-settings
 
 移除后重新运行 `dsh web` 即可，侧栏入口与会话内入口随之消失。卸载**不会**触碰
 你已经管理的任何数据——`.agents/skills`（及旧位置 `.dsh/skills`）、`.mcp.json`、
-`capability-overrides.json`、`capability-imports.json` 等文件全部原样保留，
+`capability-overrides.json`（现位于 `<dshHome>/dsh-capability-settings/`）、
+`capability-imports.json` 等文件全部原样保留，
 随时可重新安装接管。旧版快捷消息的 `quick-messages.json`（项目/全局）本版
 **不再读写**，同样不会被卸载动作删除。
 
@@ -564,7 +568,7 @@ src/
   skills/         skills 域：磁盘读写、CRUD、安装/导出、URL 下载、shadow stub、校验、
                   registry 桥（宿主注入技能合并 / 详情 fallback / 资源边界 / 导出快照）
   mcp/            MCP 域：.mcp.json 读写、全局单例 + 项目级每会话挂载、探测（测试连接）
-  overrides/      项目级「默认关闭」声明：.agents/capability-overrides.json
+  overrides/      项目级「默认关闭」声明：统一存储 <dshHome>/dsh-capability-settings/capability-overrides.json
   imports/        项目级「全局能力引用」：.agents/capability-imports.json（MCP）
   jev/            Jev 能力决策：配置读写/校验（config-file）、密钥解析与 RPC（manager）、
                   rank（systemone 请求/容错解析/排序）、apply（会话开关事务 + 冷会话排队）

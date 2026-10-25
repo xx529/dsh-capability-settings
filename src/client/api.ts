@@ -456,7 +456,7 @@ export interface McpApi {
 // 项目级"全局能力禁用"域
 // ---------------------------------------------------------------------------
 
-/** 面板视角的完整禁用状态（各域的禁用清单 + 声明文件路径）。 */
+/** 面板视角的完整禁用状态（各域的禁用清单 + 统一存储路径）。 */
 export interface ClientOverrides {
   mcp: string[];
   /**
@@ -465,8 +465,10 @@ export interface ClientOverrides {
    * 旧宿主缺失该字段 ⇒ 视作空清单。
    */
   skills: string[];
-  /** 声明文件绝对路径（无项目时缺省）。 */
+  /** 统一存储文件绝对路径（`<dshHome>/dsh-capability-settings/capability-overrides.json`；无项目时缺省）。 */
   filePath?: string;
+  /** 当前项目根（统一存储里该项目条目的 key；无项目时缺省）。 */
+  projectRoot?: string;
 }
 
 /** 项目级禁用域的面板 API。 */
@@ -474,9 +476,10 @@ export interface OverridesApi {
   /** 当前项目的禁用声明全量（无工作区时返回空清单）。 */
   get(): Promise<ClientOverrides>;
   /**
-   * 切换某个**全局**能力在本项目的禁用状态：不在清单里 → 加入（禁用）；
-   * 已在清单里 → 移除（恢复）。落盘 `<项目根>/.agents/capability-overrides.json`，
-   * 读取兼容旧位置 `.dsh` / `.claude`。
+   * 切换某个能力在本项目的**默认关闭**状态：不在清单里 → 加入（默认关闭）；
+   * 已在清单里 → 移除（恢复默认开启）。落盘统一存储
+   * `<dshHome>/dsh-capability-settings/capability-overrides.json`（按项目根分 key）；
+   * 项目内旧声明（`.agents` / `.dsh` / `.claude`）只做兼容读取，首次写入时并入并删除。
    *
    * `domain` 取 `"skills"` 时只对注入技能生效（合法的 kebab-case 名）；
    * 写盘成功后宿主会对同项目的 live 会话热应用（注册/解除会话 shadow）。

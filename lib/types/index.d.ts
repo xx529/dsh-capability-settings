@@ -105,8 +105,8 @@ export type { JevConfig, JevConfigInput, JevConfigView, JevRankItem, JevRankResu
 export { mountRpcChannel, handleEndpoint, CHANNEL } from "./remote.js";
 export { findProjectRoot } from "./shared/project-root.js";
 export { globalSkillsDir, projectSkillsDir, userAgentsSkillsDir } from "./skills/roots.js";
-export { projectOverridesFile, OVERRIDES_FILE_NAME } from "./overrides/paths.js";
-export { readOverrides, writeOverrides, DOMAIN_KEYS } from "./overrides/config-file.js";
+export { projectOverridesFile, OVERRIDES_FILE_NAME, overridesStoreFile, OVERRIDES_STORE_FILE_NAME } from "./overrides/paths.js";
+export { readOverrides, writeOverrides, readOverridesStore, writeOverridesStore, DOMAIN_KEYS, OVERRIDES_STORE_VERSION, } from "./overrides/config-file.js";
 export { createSkill, updateSkill, removeSkill, readSkillDetail, cloneSkill, listSkillNames } from "./skills/crud.js";
 export { installFromPath, installFromFiles, exportToPath, exportSkillFiles } from "./skills/transfer.js";
 export { installFromUrl, fetchSkillFiles, classifySkillUrl } from "./skills/download.js";
@@ -119,7 +119,7 @@ export { globalMcpFile, projectMcpFile } from "./mcp/paths.js";
 export { readMcpFile, writeMcpFile, sanitizeServerName, toClientConfig, validateEntry } from "./mcp/config-file.js";
 export type { SkillSummaryView, SkillSpec, SkillFormat, WritableScope, InvocationPolicy, InjectedSkillFields, RegistryResourceBaseKind, SkillOrigin, SkillSource, } from "./skills/types.js";
 export type { McpScope, McpServerEntry, McpServerView, McpListResult, McpStatusView, McpMountState } from "./mcp/types.js";
-export type { CapabilityDomain, CapabilityOverrides, OverridesSet, OverridesView } from "./overrides/types.js";
+export type { CapabilityDomain, CapabilityOverrides, OverridesProjectEntry, OverridesSet, OverridesStore, OverridesView, } from "./overrides/types.js";
 export type { OverridesManager } from "./overrides/manager.js";
 /**
  * Cordis 以 `module.default || module` 解析插件包。这里提供默认导出

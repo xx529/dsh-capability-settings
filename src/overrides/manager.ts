@@ -1,10 +1,15 @@
 /**
- * 项目级"全局能力禁用"管理服务（挂载为 `ctx.capabilityPanel.overrides`）。
+ * 项目级"默认关闭"管理服务（挂载为 `ctx.capabilityPanel.overrides`）。
  *
- * MCP 域的列表读取与 MCP 自动挂载共用它的 `sets()` 快照
- * 得到"本项目禁用了哪些全局条目"；面板通过 `get()` 读全量、`toggle()`
- * 切换某一条的禁用状态（写 `.agents/capability-overrides.json`，读取兼容
- * 旧位置 `.dsh` / `.claude`，首次写入时并入并删除旧文件）。
+ * **统一存储**：`<dshHome>/dsh-capability-settings/capability-overrides.json`
+ * ——一个文件按**项目根**（`findProjectRoot(cwd)`）分 key，记录每个项目默认关闭
+ * 的 MCP server / 注入技能清单。MCP 列表读取、MCP 自动挂载、技能项目默认投影
+ * 共用它的 `sets()` 快照；面板通过 `get()` 读全量、`toggle()` 切换某一条。
+ *
+ * **旧位置兼容**：`<项目根>/.agents/capability-overrides.json`（以及更早的
+ * `.dsh` / `.claude`）仍会被读取；某个项目在统一存储里还没有记录时，`sets()`
+ * 回退到旧文件。首次 `toggle()` 会把旧内容并入统一存储并删除项目内旧文件
+ * （之后旧文件不再生效，避免同一份声明两处维护）。
  *
  * `skills` 域只对**宿主 registry 注入的技能**生效（写入 `skills: string[]`；
  * 非法/非 kebab-case 名字直接拒绝），由组合根在写盘成功后对同项目的 live
@@ -20,9 +25,16 @@ import { findProjectRoot } from "../shared/project-root.js";
 import { withFileLock } from "../shared/file-lock.js";
 import { locateConfigFile, removeFiles, type ConfigFileLocation } from "../shared/config-location.js";
 import { isSkillName } from "../skills/validate.js";
-import { DOMAIN_KEYS, emptyOverrides, normalizeList, readOverrides, writeOverrides } from "./config-file.js";
-import { OVERRIDES_FILE_NAME, projectOverridesDirs } from "./paths.js";
-import type { CapabilityDomain, OverridesSet, OverridesView } from "./types.js";
+import {
+  DOMAIN_KEYS,
+  emptyOverrides,
+  normalizeList,
+  readOverrides,
+  readOverridesStore,
+  writeOverridesStore,
+} from "./config-file.js";
+import { OVERRIDES_FILE_NAME, overridesStoreFile, projectOverridesDirs } from "./paths.js";
+import type { CapabilityDomain, OverridesProjectEntry, OverridesSet, OverridesView } from "./types.js";
 
 /** 管理服务的构造依赖。 */
 export interface OverridesManagerDeps {
@@ -41,42 +53,85 @@ export interface OverrideToggleInput {
 /** 写操作的结果：成功或带错误信息列表。 */
 export type OverrideOpResult = { ok: true } | { ok: false; errors: string[] };
 
+/** 一次解析出的项目定位信息（统一存储 key + 旧文件读取位置）。 */
+interface ProjectLocation {
+  /** 统一存储的 key：项目根。 */
+  projectRoot: string;
+  /** 触发本次操作的工作区目录（记录进条目，仅诊断）。 */
+  cwd: string;
+  /** 统一存储文件绝对路径。 */
+  storeFile: string;
+  /** 旧的项目内声明定位（兼容读取 + 首次迁移删除）。 */
+  legacy: ConfigFileLocation;
+}
+
 /** 创建管理服务。 */
-export function createOverridesManager(_deps: OverridesManagerDeps = {}) {
-  /** 本项目管理器的声明文件定位结果（cwd 缺省时返回 undefined）。 */
-  function locationFor(cwd?: string): ConfigFileLocation | undefined {
+export function createOverridesManager(deps: OverridesManagerDeps = {}) {
+  /** 解析项目定位（cwd 缺省时返回 undefined）。 */
+  function locationFor(cwd?: string): ProjectLocation | undefined {
     if (cwd === undefined) return undefined;
-    return locateConfigFile(projectOverridesDirs(cwd, findProjectRoot(cwd)), OVERRIDES_FILE_NAME);
+    const projectRoot = findProjectRoot(cwd);
+    return {
+      projectRoot,
+      cwd,
+      storeFile: overridesStoreFile(deps.dshHome),
+      legacy: locateConfigFile(projectOverridesDirs(cwd, projectRoot), OVERRIDES_FILE_NAME),
+    };
   }
 
-  /**
-   * 当前项目的禁用快照：无工作区返回全空快照；声明文件缺失 / 读失败
-   * （如手改坏了 JSON）也返回全空快照——列表读取不能被一个坏文件拖垮，
-   * 写路径（toggle）才会显式报错暴露问题。
-   */
-  async function sets(cwd?: string): Promise<OverridesSet> {
-    const loc = locationFor(cwd);
-    if (loc === undefined) return emptyOverrides();
+  /** 统一存储条目 → 规范化清单（缺失域 = 空数组）。 */
+  function setOf(entry: OverridesProjectEntry | undefined): OverridesSet {
+    return { mcp: normalizeList(entry?.mcp ?? []), skills: normalizeList(entry?.skills ?? []) };
+  }
+
+  /** 读统一存储；失败返回 undefined（列表降级为空，写路径会显式再读以暴露错误）。 */
+  async function readStoreSafe(file: string) {
     try {
-      return await readOverrides(loc.readFile);
+      return await readOverridesStore(file);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** 兼容读取旧的项目内声明；坏文件降级为空（列表不被拖垮）。 */
+  async function readLegacySafe(loc: ProjectLocation): Promise<OverridesSet> {
+    try {
+      return await readOverrides(loc.legacy.readFile);
     } catch {
       return emptyOverrides();
     }
   }
 
-  /** 读取全量视图（attach 生效读取文件路径；无工作区时返回空视图）。 */
+  /**
+   * 当前项目的默认关闭快照：无工作区返回全空快照；统一存储里已有该项目记录
+   * 时以它为准，否则回退读项目内旧声明；两者都缺失 / 坏文件时返回全空。
+   */
+  async function sets(cwd?: string): Promise<OverridesSet> {
+    const loc = locationFor(cwd);
+    if (loc === undefined) return emptyOverrides();
+    const store = await readStoreSafe(loc.storeFile);
+    const entry = store?.projects[loc.projectRoot];
+    if (entry !== undefined) return setOf(entry);
+    return readLegacySafe(loc);
+  }
+
+  /** 读取全量视图（attach 统一存储路径 + 项目根；无工作区时返回空视图）。 */
   async function get(cwd?: string): Promise<OverridesView> {
     const loc = locationFor(cwd);
     const view: OverridesView = { ...(await sets(cwd)) };
-    if (loc !== undefined) view.filePath = loc.readFile;
+    if (loc !== undefined) {
+      view.filePath = loc.storeFile;
+      view.projectRoot = loc.projectRoot;
+    }
     return view;
   }
 
   /**
-   * 切换某个全局能力在本项目的禁用状态：已在清单里则移除（恢复），否则
-   * 加入（禁用）。读→改→写整段按文件串行化，避免并发写者互相覆盖。
-   * 读取走生效位置（可能是旧 `.dsh` / `.claude` 文件），写入固定落
-   * `.agents`；首次迁移时并入旧内容并删除旧文件。
+   * 切换某个能力在本项目的默认关闭状态：已在清单里则移除（恢复），否则加入
+   * （禁用）。读→改→写整段按统一存储文件串行化，避免并发写者互相覆盖。
+   *
+   * 某个项目首次写入时：把项目内旧声明（`.agents` / `.dsh` / `.claude`）并入
+   * 统一存储，成功后删除旧文件。旧文件损坏时显式报错（不静默覆盖用户数据）。
    */
   async function toggle(input: OverrideToggleInput): Promise<OverrideOpResult> {
     const key = input.key.trim();
@@ -91,15 +146,27 @@ export function createOverridesManager(_deps: OverridesManagerDeps = {}) {
       return { ok: false, errors: [`invalid skill name "${key}" — must match kebab-case /^[a-z0-9]+(?:-[a-z0-9]+)*$/`] };
     }
     try {
-      return await withFileLock(loc.writeFile, async () => {
-        const current = await readOverrides(loc.readFile);
-        // 按域键重建（不能硬编码单个域，否则会把其它域的清单抹掉）。
-        const next: OverridesSet = emptyOverrides();
-        for (const domain of DOMAIN_KEYS) next[domain] = [...current[domain]];
+      return await withFileLock(loc.storeFile, async () => {
+        const store = await readOverridesStore(loc.storeFile);
+        const existing = store.projects[loc.projectRoot];
+        // 统一存储里还没有该项目 ⇒ 首次写入，把旧声明并入（坏文件抛错，绝不静默丢弃）。
+        const current = existing !== undefined ? setOf(existing) : await readOverrides(loc.legacy.readFile);
+        const next: OverridesSet = { mcp: [...current.mcp], skills: [...current.skills] };
         const list = normalizeList(next[input.domain]);
-        next[input.domain] = list.includes(key) ? list.filter((k) => k !== key) : [...list, key].sort((a, b) => a.localeCompare(b));
-        await writeOverrides(loc.writeFile, next);
-        await removeFiles(loc.legacyFiles);
+        next[input.domain] = list.includes(key)
+          ? list.filter((item) => item !== key)
+          : [...list, key].sort((a, b) => a.localeCompare(b));
+        const entry: OverridesProjectEntry = { updatedAt: Date.now(), cwd: loc.cwd };
+        const mcp = normalizeList(next.mcp);
+        if (mcp.length > 0) entry.mcp = mcp;
+        const skills = normalizeList(next.skills);
+        if (skills.length > 0) entry.skills = skills;
+        // 两个域都空 ⇒ 删除该项目条目（空条目不落盘）。
+        if (entry.mcp === undefined && entry.skills === undefined) delete store.projects[loc.projectRoot];
+        else store.projects[loc.projectRoot] = entry;
+        await writeOverridesStore(loc.storeFile, store);
+        // 旧声明已并入统一存储：删除项目内旧文件（所有兼容位置）。
+        await removeFiles([loc.legacy.readFile, ...loc.legacy.legacyFiles]);
         return { ok: true };
       });
     } catch (error) {

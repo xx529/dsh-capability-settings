@@ -122,8 +122,12 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
 - **项目根**：从 cwd 向上找第一个含 `.git` / `.dsh` / `.agents` / `.claude` / `dsh.json`
   的目录；用户主目录永不当作项目根；找不到则回退原 cwd。见 `src/shared/project-root.ts`。
 - **配置文件**：全局 `~/.agents/mcp.json`、项目 `<项目根>/.mcp.json`；skills 目录；
-  `quick-messages.json`；项目级声明 `capability-overrides.json`（MCP 的「默认关闭」
-  列表也存这里）、`capability-imports.json`（导入/引用）。
+  `quick-messages.json`；项目级「全局能力引用」`capability-imports.json`（导入/引用）。
+- **项目级「默认关闭」统一存储**：`<dshHome>/dsh-capability-settings/capability-overrides.json`
+  （`src/overrides/*`；一个文件按**项目根**分 key：`projects.<项目根>.mcp` /
+  `.skills`，条目带 `updatedAt` / 最近 `cwd`；文件权限 0600）。旧项目内
+  `.agents/capability-overrides.json`（兼容 `.dsh` / `.claude`）**只读兼容**，
+  首次写入时并入统一存储并删除旧文件；**不要把声明再写回项目仓库**。
 - **会话级开关持久化**：`<dshHome>/dsh-capability-settings/session-capabilities.json`
   （`src/session-state.ts`；按 sessionId 记录 Skills/MCP 的显式覆盖，目录 0700 /
   文件 0600）。与 `jev.json` 同目录。宿主重启 / resume 后恢复；孤儿记录由
@@ -147,8 +151,10 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
    逐条起进程 + MCP 握手（本机 npx/bunx 冷启动数秒），await 会把「删除/保存/启停」
    RPC 卡住数秒——这正是历史 bug「删除后列表不消失」的根因。挂载状态由
    `status().settling` + 面板静默轮询收敛。
-4. **「默认关闭」= 项目级 overrides**：面板每行的「默认」开关写
-   `.agents/capability-overrides.json` 的 mcp 列表；新建对话按它来。
+4. **「默认关闭」= 项目级 overrides**：面板每行的「默认」开关写统一存储
+   `<dshHome>/dsh-capability-settings/capability-overrides.json` 里
+   `projects.<项目根>.mcp` 列表（旧项目内 `.agents/capability-overrides.json` 只读
+   兼容，首次写入时迁移删除）；新建对话按它来。
    **「当前对话」开关按会话落盘**：内存镜像 `loader.sessionToggles`（键
    `project:<key>` / `server:<serverName>`），磁盘在
    `session-capabilities.json`（`src/session-state.ts`），agent 重建时在
