@@ -86,15 +86,27 @@ CI 依次检查：条目数量 → `dsh.bundle` → 仓库年龄 → `awesome-li
   `screenshots.json`。
 - 当前提交：PR <https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/9197>
   （2026-10-24 提交，分支 `xx529:add/xx529-dsh-capability-settings`）。
-  **状态**：`MERGEABLE` / `CLEAN`，CI `check`（10m52s）与 `Submission gate` 均通过，
-  等维护者评审合并。
-- 合并后站点自动重建，详情页为
-  <https://awesome-dsh-plugin.com/p/xx529/dsh-capability-settings/>；
-  市场卡片给出的安装命令是 `dsh plugin --profile web add github:xx529/dsh-capability-settings`
+  **已合并** `2026-10-24T20:31:29Z`（= 2026-10-25 04:31 +08）；CI `check`（10m52s）
+  与 `Submission gate` 均通过。**已上线**：详情页
+  <https://awesome-dsh-plugin.com/p/xx529/dsh-capability-settings/>（200，标题
+  “xx529/dsh-capability-settings — dsh plugin · UI Enhancements”），分类列表页
+  <https://awesome-dsh-plugin.com/ui/> 也能检索到。
+- 线上条目内容与本目录 `awesome-dsh-plugin.yml` 一致；维护者合并时补了两句
+  「fork 自 `chengdb/dsh-plugin-capability-panel`、与 `pure-craft/dsh-capability-panel`
+  共用 patch id / 勿同装」，本地副本已同步。
+- 市场卡片给出的安装命令是
+  `dsh plugin --profile web add github:xx529/dsh-capability-settings`
   （没有 npm 包时只给 GitHub 一种；desktop profile 把 `web` 换成 `desktop`）。
+- **维护者合并后的建议（未处理）**：`@deepseek-ai/dsh-home-paths` 与
+  `@deepseek-ai/dsh-mcp-client` 目前在 `dependencies`，会被装成 0.2.0-rc.2 的副本；
+  建议移到 `peerDependencies`（宿主已提供）。改动涉及 `package.json` + 重新构建 +
+  重装 profile，需先确认宿主解析无问题。
 - 注意：该 fork 默认分支落后上游，`gh repo sync` 会因 token 缺 `workflow` scope 被拒；
   本次分支基于旧 `main`（PR 只新增一个文件，CI 用 merge ref 构建，不影响检查）。
   若之后仍被要求同步，用 GitHub 网页的 “Sync fork” 或 `gh auth refresh -s workflow` 后重试。
+- 记录（2026-10-25 23:00 定时检查）：PR `MERGED`，上游条目文件存在，站点详情页 200、
+  `/ui/` 列表命中；`dsh-plugin-catalog` 的 npm/CDN index 尚未更新（滞后），但站点
+  已可安装，跟踪任务按约定停止。
 
 ## 上传 / 本地校验命令备注
 
