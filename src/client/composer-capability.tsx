@@ -1542,7 +1542,7 @@ export function CapabilityCard({ row, busy, onToggle }: { row: Row; busy: boolea
       <div className="skp-dock-card-foot">
         <Tag label={row.tag} tone={row.tone} />
         {row.kind === "skill" && row.channel !== undefined && (
-          <span className="skp-dock-tag-channel" title="注入方 / 渠道名（内容只读，开关只作用于当前会话）">
+          <span className="skp-dock-tag-channel" title={`${row.channel} · 注入方 / 渠道名（内容只读，开关只作用于当前会话）`}>
             {row.channel}
           </span>
         )}

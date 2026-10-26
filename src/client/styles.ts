@@ -358,16 +358,20 @@ export const SKP_CSS = `
 .skp-dock-card-on .skp-dock-card-icon{color:var(--dsw-alias-state-business-primary,#4176e6);}
 .skp-dock-card-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600;color:var(--dsw-alias-label-primary,#1b1f26);}
 .skp-dock-card-desc{margin:0;min-height:28px;font-size:10.5px;line-height:14px;color:var(--dsw-alias-label-tertiary,#8b95a1);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;}
-.skp-dock-card-foot{display:flex;align-items:center;gap:6px;margin-top:auto;min-width:0;}
+.skp-dock-card-foot{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;margin-top:auto;min-width:0;}
 .skp-dock-tag{flex:none;padding:0 5px;border-radius:4px;font-size:9.5px;font-weight:600;line-height:16px;letter-spacing:.02em;}
 .skp-dock-tag-project{color:var(--dsw-alias-state-business-primary,#4176e6);background:color-mix(in srgb,var(--dsw-alias-state-business-primary,#4176e6) 12%,transparent);}
 .skp-dock-tag-global{color:var(--dsw-alias-state-success-primary,#189a52);background:color-mix(in srgb,var(--dsw-alias-state-success-primary,#189a52) 12%,transparent);}
 .skp-dock-tag-external{color:var(--dsw-alias-state-warn-primary,#f59e0b);background:color-mix(in srgb,var(--dsw-alias-state-warn-primary,#f59e0b) 14%,transparent);}
-/* 注入来源标签（内置琥珀 / 插件紫 / 预设灰）与渠道小标签（等宽、可截断）。 */
+/* 注入来源标签（内置琥珀 / 插件紫 / 预设灰）与渠道小标签（等宽、按内容自适应宽度）。 */
 .skp-dock-tag-bundled{color:var(--dsw-alias-state-warn-primary,#c26a0a);background:color-mix(in srgb,var(--dsw-alias-state-warn-primary,#c26a0a) 14%,transparent);}
 .skp-dock-tag-plugin{color:#a78bfa;background:color-mix(in srgb,#8b5cf6 18%,transparent);}
 .skp-dock-tag-preset{color:var(--dsw-alias-label-tertiary,#8b95a1);background:var(--dsw-alias-interactive-bg-hover,rgba(20,28,40,.05));}
-.skp-dock-tag-channel{flex:none;max-width:92px;padding:0 5px;border-radius:4px;font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:9.5px;line-height:16px;color:var(--dsw-alias-label-tertiary,#8b95a1);background:color-mix(in srgb,var(--dsw-alias-label-primary,#1b1f26) 8%,transparent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* 渠道名要能完整读出：原先 CSS 里写死 max-width:92px，把「DSH 内置（Office）」(105px)
+   /「DSH 内置（随包技能目录）」(128px) /「dsh-diff-approval」(107px) 都截成半截。
+   现在按内容自适应（上限 = 卡片可用宽度），只有真的放不下才 shrink + 省略；
+   foot 允许换行，窄卡片上渠道名整体掉到第二行显示全文。 */
+.skp-dock-tag-channel{flex:0 1 auto;min-width:0;max-width:100%;padding:0 5px;border-radius:4px;font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:9.5px;line-height:16px;color:var(--dsw-alias-label-tertiary,#8b95a1);background:color-mix(in srgb,var(--dsw-alias-label-primary,#1b1f26) 8%,transparent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .skp-dock-card-meta{margin-left:auto;flex:none;font-size:9.5px;color:var(--dsw-alias-label-tertiary,#8b95a1);}
 .skp-dock-dot{flex:none;width:6px;height:6px;margin-left:auto;border-radius:50%;background:var(--dsw-alias-border-l3,rgba(20,28,40,.16));}
 .skp-dock-dot-mounted{background:var(--dsw-alias-state-success-primary,#22c55e);}

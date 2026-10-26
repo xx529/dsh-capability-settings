@@ -7,6 +7,15 @@
 
 ### 修复
 
+- **会话能力卡片来源标签被截断**：注入技能卡片底部的渠道名原先受
+  `.skp-dock-tag-channel` 的固定 `max-width:92px` 限制，`DSH 内置（Office）`
+  （实测 105px）、`DSH 内置（随包技能目录）`（128px）、`dsh-diff-approval`
+  （107px）都被截成 `DSH 内置（Offi…` / `dsh-diff-appro…`，来源读不全。
+  现在渠道名改为按内容自适应宽度（`flex:0 1 auto; min-width:0; max-width:100%`，
+  上限 = 卡片可用宽度）；`.skp-dock-card-foot` 允许换行（`flex-wrap:wrap`），
+  窄卡片上渠道名整块掉到第二行显示全文，只有极窄容器才收缩 + 省略。完整渠道名
+  同时写进标签 `title`（悬停可读）。与 Figma v12 基线一致（设计稿标签宽度按文本
+  自适应，代码的 92px 单行上限是偏差）。
 - **「当前对话」能力开关重启后不保持**：Skills / MCP 的会话级开关原先只有内存态
   （`loader.sessionToggles` / `skills/session.ts` 的 `explicit`），宿主重启 / agent
   重建后回到项目默认，用户看到的行为与重启前不一致（`README` 原文也写着
