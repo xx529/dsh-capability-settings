@@ -763,8 +763,6 @@ interface UseDecisionOptions {
 
 interface DecisionController {
   state: DecisionState | undefined;
-  /** 自动触发的停顿倒计时（约 100ms 刷新）；`undefined` = 未计时。 */
-  countdown: { elapsedMs: number; pauseMs: number } | undefined;
   toast: { text: string; tone: "ok" | "warn" } | undefined;
   liveMessage: string;
   start: () => void;
@@ -782,8 +780,6 @@ interface DecisionController {
 function useDecision(options: UseDecisionOptions): DecisionController {
   const { api, enabled, draft, isComposing, config, reloadConfig, capabilitiesReady, onManage, onRefreshCapabilities, onOptimisticApplied, onClosed } = options;
   const [state, setState] = useState<DecisionState | undefined>(undefined);
-  const [countdown, setCountdown] = useState<{ startedAt: number; pauseMs: number } | undefined>(undefined);
-  const [nowTick, setNowTick] = useState(0);
   const [toast, setToast] = useState<{ text: string; tone: "ok" | "warn" } | undefined>(undefined);
   const [liveMessage, setLiveMessage] = useState("");
 
@@ -804,7 +800,6 @@ function useDecision(options: UseDecisionOptions): DecisionController {
       window.clearTimeout(timerRef.current);
       timerRef.current = undefined;
     }
-    setCountdown(undefined);
   }, []);
 
   const pushToast = useCallback((text: string, tone: "ok" | "warn" = "ok") => setToast({ text, tone }), []);
@@ -815,13 +810,8 @@ function useDecision(options: UseDecisionOptions): DecisionController {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  // 倒计时每 100ms 刷新一次（只驱动展示，不进 aria-live）。
-  useEffect(() => {
-    if (countdown === undefined) return;
-    setNowTick(Date.now());
-    const timer = window.setInterval(() => setNowTick(Date.now()), 100);
-    return () => window.clearInterval(timer);
-  }, [countdown]);
+  // 倒计时不再展示（用户要求去掉等待期文本），也不再有 100ms 刷新的 ticker；
+  // 自动触发行为不变，仍由下面的 setTimeout 驱动。
 
   useEffect(() => () => {
     if (timerRef.current !== undefined) window.clearTimeout(timerRef.current);
@@ -836,7 +826,6 @@ function useDecision(options: UseDecisionOptions): DecisionController {
     const controller = new AbortController();
     inFlightRef.current = { runId, controller };
     editCharsRef.current = 0;
-    setCountdown(undefined);
     setState({ phase: "loading", origin, pauseMs: prefs.pauseMs, threshold, manual: {} });
     if (origin === "auto") setLiveMessage("停顿时长已达，已自动发起评分");
     void (async () => {
@@ -914,11 +903,8 @@ function useDecision(options: UseDecisionOptions): DecisionController {
     if (inFlightRef.current !== undefined) return;
     if (silentDraftRef.current !== undefined) return;
     const pauseMs = prefs.pauseMs;
-    const startedAt = Date.now();
-    setCountdown({ startedAt, pauseMs });
     timerRef.current = window.setTimeout(() => {
       timerRef.current = undefined;
-      setCountdown(undefined);
       const current = stateRef.current;
       beginRef.current("auto", current !== undefined && current.phase === "results" ? current.threshold : DECISION_DEFAULT_THRESHOLD);
     }, pauseMs);
@@ -967,7 +953,6 @@ function useDecision(options: UseDecisionOptions): DecisionController {
     runIdRef.current += 1;
     silentDraftRef.current = draft;
     editCharsRef.current = 0;
-    setCountdown(undefined);
     setState(undefined);
     setLiveMessage("已取消本次能力决策");
     // 自动触发路径不把焦点从输入框抢走；手动触发才把焦点还给入口。
@@ -1070,14 +1055,8 @@ function useDecision(options: UseDecisionOptions): DecisionController {
     })();
   }
 
-  const countdownInfo =
-    countdown === undefined
-      ? undefined
-      : { elapsedMs: Math.max(0, Math.min(countdown.pauseMs, nowTick - countdown.startedAt)), pauseMs: countdown.pauseMs };
-
   return {
     state,
-    countdown: countdownInfo,
     toast,
     liveMessage,
     start: startManual,
@@ -1586,12 +1565,10 @@ interface PanelProps {
   decisionEntry?: ReactNode;
   /** 自动触发默认关闭的弱提示（与入口同排，窄容器隐藏）。 */
   decisionHint?: string;
-  /** 自动触发停顿倒计时（aria-live="off"，不干扰读屏）。 */
-  decisionWaiting?: { elapsedMs: number; pauseMs: number } | undefined;
 }
 
 export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
-  const { mode, loading, error, skillRows, mcpRows, pending, busy, onToggle, onReset, onCollapse, onManage, onRefresh, onRetry, initialTab, decisionEntry, decisionHint, decisionWaiting } = props;
+  const { mode, loading, error, skillRows, mcpRows, pending, busy, onToggle, onReset, onCollapse, onManage, onRefresh, onRetry, initialTab, decisionEntry, decisionHint } = props;
   const [tab, setTab] = useState<TabId>(initialTab ?? "skills");
   const [query, setQuery] = useState("");
   const [resetBusy, setResetBusy] = useState(false);
@@ -1662,7 +1639,7 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
             className={`skp-dock-tab${tab === "mcp" ? " skp-dock-tab-active" : ""}`}
             onClick={() => setTab("mcp")}
           >
-            MCP 服务器
+            MCP
             <span className="skp-dock-tab-count">
               {mcpOn} / {mcpRows.length}
             </span>
@@ -1677,12 +1654,6 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
           </button>
         )}
       </div>
-
-      {decisionWaiting !== undefined && (
-        <div className="skp-decision-countdown" aria-live="off">
-          停顿 {formatSeconds(decisionWaiting.elapsedMs)}s / {formatSeconds(decisionWaiting.pauseMs)}s · 即将能力决策
-        </div>
-      )}
 
       {error !== undefined && (
         <div className="skp-dock-banner" role="alert">
@@ -2097,7 +2068,6 @@ function HeroBody({
   const entryButton = (inBar: boolean) => (
     <DecisionEntryButton inBar={inBar} label={entryLabel} tooltip={entryTooltip} disabled={entryDisabled} guide={entryGuide} onClick={onEntryClick} />
   );
-  const countdown = decision.countdown;
 
   // 零高锚点：input.dock 里的真实 DOM（hero 时负责相位探测 + 定位面板）。
   // 不用 portal：fixed 元素不受祖先 overflow 裁剪，且避免引入 react-dom 类型
@@ -2147,7 +2117,6 @@ function HeroBody({
             onRetry={controller.refresh}
             decisionEntry={entryButton(false)}
             {...(decisionHint !== undefined ? { decisionHint } : {})}
-            {...(countdown !== undefined ? { decisionWaiting: countdown } : {})}
           />
         ) : (
           <div className="skp-decision-bar-wrap">
@@ -2158,11 +2127,6 @@ function HeroBody({
               onExpand={() => setOpen(true)}
               decisionEntry={entryButton(true)}
             />
-            {countdown !== undefined && (
-              <div className="skp-decision-countdown skp-decision-countdown-bar" aria-live="off">
-                停顿 {formatSeconds(countdown.elapsedMs)}s / {formatSeconds(countdown.pauseMs)}s · 即将能力决策
-              </div>
-            )}
           </div>
         )}
         {decision.toast !== undefined && (

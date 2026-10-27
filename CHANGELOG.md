@@ -42,6 +42,14 @@
 
 ### 变更
 
+- **会话能力面板 Tab 文案 `MCP 服务器` → `MCP`**：与主能力面板的域 Tab（`MCP`）和
+  Figma v12 基线一致，去掉「服务器」后缀；只是文案，Tab 切换与计数不变。
+- **移除自动触发等待期的倒计时弱提示**：能力条 / 面板标题行原先在等待停顿期间显示
+  「停顿 0.9s / 1.0s · 即将能力决策」，现按用户要求**不再显示**（首屏少一行常驻
+  文本）。同时删除 `DecisionController.countdown` 状态与 100ms 刷新 ticker（少一处
+  只驱动展示的定时重渲染）及 `.skp-decision-countdown*` 样式。自动触发行为不变：
+  门槛（最少触发字数 / 最少修改间隔字符数）、停顿阈值、到点发起评分、取消后同草稿
+  静默、不弹 toast、不抢焦点均保持原样，等待期不再有可见进度提示。
 - **项目级「默认关闭」声明统一收进插件数据目录**：原先写在项目仓库的
   `<项目根>/.agents/capability-overrides.json`，现在统一写到
   `<dshHome>/dsh-capability-settings/capability-overrides.json`（与 `jev.json` /

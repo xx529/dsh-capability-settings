@@ -117,11 +117,6 @@ interface PanelProps {
     decisionEntry?: ReactNode;
     /** 自动触发默认关闭的弱提示（与入口同排，窄容器隐藏）。 */
     decisionHint?: string;
-    /** 自动触发停顿倒计时（aria-live="off"，不干扰读屏）。 */
-    decisionWaiting?: {
-        elapsedMs: number;
-        pauseMs: number;
-    } | undefined;
 }
 export declare function CapabilityPanel(props: PanelProps & {
     initialTab?: TabId;
