@@ -14,9 +14,18 @@
 /** 参数表的一行（从 inputSchema 的 `properties` + `required` 展开）。 */
 export interface ToolParameter {
     name: string;
+    /**
+     * 类型列展示文本：基础类型 + enum 指示（如 `string (enum)`）。
+     * 无 enum 时就是原始类型名（`string` / `number` / `string | number` …）。
+     */
     type: string;
     required: boolean;
     description?: string;
+    /**
+     * enum 允许值（仅含 enum 的字段）。用于类型列的 `title` 提示
+     * （如 `允许值：find / show`）；原始 JSON 仍完整保留 `parameters`。
+     */
+    options?: string[];
 }
 /**
  * 从工具的 `parameters`（JSON Schema 原样）展开参数行。

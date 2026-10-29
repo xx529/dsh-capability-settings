@@ -18,9 +18,18 @@ import type { CSSProperties } from "react";
 /** 参数表的一行（从 inputSchema 的 `properties` + `required` 展开）。 */
 export interface ToolParameter {
   name: string;
+  /**
+   * 类型列展示文本：基础类型 + enum 指示（如 `string (enum)`）。
+   * 无 enum 时就是原始类型名（`string` / `number` / `string | number` …）。
+   */
   type: string;
   required: boolean;
   description?: string;
+  /**
+   * enum 允许值（仅含 enum 的字段）。用于类型列的 `title` 提示
+   * （如 `允许值：find / show`）；原始 JSON 仍完整保留 `parameters`。
+   */
+  options?: string[];
 }
 
 /** 参数表栅格：参数 / 类型 / 必填 / 说明 四列。 */
@@ -41,17 +50,45 @@ const PARAM_CELL_STYLE: CSSProperties = {
 /** 参数表表头单元格（去掉上内边距）。 */
 const PARAM_HEAD_CELL_STYLE: CSSProperties = { ...PARAM_CELL_STYLE, paddingTop: 0 };
 
-/** 一个 JSON Schema 属性的类型名（联合类型用 ` | ` 连接；缺 type 时给结构提示）。 */
+/** true = 该属性声明了非空 `enum`（对齐 dsh-context：类型列标 `(enum)`）。 */
+function hasEnum(property: Record<string, unknown>): boolean {
+  return Array.isArray(property.enum) && property.enum.length > 0;
+}
+
+/**
+ * enum 允许值的展示文本（字符串原样、其余 JSON 化），用于类型列 title。
+ * 无 enum 时返回 undefined。
+ */
+function enumOptions(property: Record<string, unknown>): string[] | undefined {
+  if (!hasEnum(property)) return undefined;
+  return (property.enum as unknown[]).map((value) => {
+    if (typeof value === "string") return value;
+    if (value === null) return "null";
+    return JSON.stringify(value);
+  });
+}
+
+/**
+ * 一个 JSON Schema 属性的类型名（联合类型用 ` | ` 连接；缺 type 时给结构提示）。
+ *
+ * 含 `enum` 时补 ` (enum)` 指示（如 `string (enum)`）——dsh-context 的检视器
+ * 同样把可选值的约束放在类型列；允许值明细走 {@link enumOptions} 的 title。
+ */
 function schemaType(property: Record<string, unknown>): string {
   const type = property.type;
-  if (typeof type === "string") return type;
-  if (Array.isArray(type)) {
+  let base: string | undefined;
+  if (typeof type === "string") base = type;
+  else if (Array.isArray(type)) {
     const parts = type.filter((part): part is string => typeof part === "string");
-    if (parts.length > 0) return parts.join(" | ");
+    if (parts.length > 0) base = parts.join(" | ");
   }
-  if (Array.isArray(property.enum)) return "enum";
-  if (property.anyOf !== undefined || property.oneOf !== undefined) return "union";
-  return "unknown";
+  if (base === undefined) {
+    // 只有 enum 没有 type：类型本身就是枚举集合（沿用旧口径 `enum`）。
+    if (hasEnum(property)) return "enum";
+    if (property.anyOf !== undefined || property.oneOf !== undefined) return "union";
+    return "unknown";
+  }
+  return hasEnum(property) ? `${base} (enum)` : base;
 }
 
 /**
@@ -68,11 +105,13 @@ export function toolParameters(parameters: Record<string, unknown> | undefined):
   return Object.entries(properties as Record<string, unknown>).map(([name, raw]) => {
     const property = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
     const description = typeof property.description === "string" ? property.description : undefined;
+    const options = enumOptions(property);
     return {
       name,
       type: schemaType(property),
       required: required.includes(name),
       ...(description !== undefined ? { description } : {}),
+      ...(options !== undefined ? { options } : {}),
     };
   });
 }
@@ -103,7 +142,20 @@ export function ToolParameterTable({
           <code className="skp-param-name" style={PARAM_CELL_STYLE}>
             {parameter.name}
           </code>
-          <span className="skp-test-stat" style={PARAM_CELL_STYLE}>
+          <span
+            className="skp-test-stat"
+            style={PARAM_CELL_STYLE}
+            title={
+              parameter.options !== undefined && parameter.options.length > 0
+                ? `允许值：${parameter.options.join(" / ")}`
+                : undefined
+            }
+            aria-label={
+              parameter.options !== undefined && parameter.options.length > 0
+                ? `${parameter.type}，允许值：${parameter.options.join(" / ")}`
+                : undefined
+            }
+          >
             {parameter.type}
           </span>
           <span style={PARAM_CELL_STYLE}>
