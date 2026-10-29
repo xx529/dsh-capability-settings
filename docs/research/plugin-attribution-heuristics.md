@@ -413,3 +413,51 @@ grep -n "	packageOf(specifier, parentURL)" /tmp/asar-scout/src/dsh-app-boot/lib/
 - 现状实现：`src/shared/plugin-attribution.ts`（TOOL_RULES / MCP_NAMESPACE_RULES / SOURCE_DISPLAY）、`src/tools/manager.ts:170-285`（枚举与归属应用）、`src/tools/types.ts:21-25`（`plugin:<unit>` 持久化键）、`src/tools/global-state.ts:26-60`（缓存文件范式）。
 - 宿主包：`@deepseek-ai/cordis`（Fiber/Runtime/emit/effect meta）、`@deepseek-ai/cordis-plugin-loader`（Entry/entries/baseUrl）、`@deepseek-ai/dsh-tools`（register/tools.change）、`@deepseek-ai/dsh-scope`（ScopedLayers.effect）、`@deepseek-ai/dsh-app-boot`（PluginPackages.packageOf/metaOf）、`@deepseek-ai/dsh-tool-cordis`（packageDir 官方消费范例）。
 - 本机：`~/.dsh/profiles/desktop/{package.json,cordis.yml}`、`~/.dsh/profiles/desktop/node_modules/{dsh-to-figma,dsh-univer-office,dsh-remote,@xmanrui/dsh-im,dsh-better-sidebar,@local/dsh-popout-window,dsh-diff-approval}`。
+
+---
+
+## 附录 · v14 修订取证（2026-10-30）：T0 不能只靠"栈里第一个第三方帧"
+
+> 本节记录 §4 结论被现实推翻的部分与修正后的信号，供后续维护者直接复用；
+> 最小复现脚本见 `notes/verify/attribution-t0-signal.mjs`（gitignore，本地运行）。
+
+**现场**：能力面板 Tools 域把 28 个别家插件的工具（`rw_*`/`dsh_im_*`/`figma_*`/
+`diff_approval_annotate`/`open_in_popout`）全部判给 `dsh-context`，而 `dsh-context`
+自身 **0 个工具**。归属缓存 `~/.dsh/dsh-capability-settings/tool-attribution.json`
+里 141 条运行时归属有 140 条指向 `dsh-context`（含 109 个 `mcp__*`）。
+
+**根因**：`dsh-context` 为给自己的上下文面板标注工具来源，包装了宿主
+`tools.register`（`node_modules/dsh-context/lib/index.js` 的 `Xn(e)`：
+`l.attributedOriginal = s; c.register = l`）。宿主调用链因此变成：
+
+```
+tools/change 监听器 → emit(dsh-tools:2784) → ScopedLayers.effect(dsh-scope:214)
+→ 原始 register(dsh-tools:2974) → dsh-context 的包装 → 真实注册插件
+```
+
+§4 建议的「取第一个第三方帧」命中的正是这层包装（它比真实注册方更靠近 registry）。
+全 profile 内只有 `dsh-context` 含 `attributedOriginal`/`cordis.original`（grep 实证）。
+
+**修正信号（已实现，`src/tools/attribution/runtime.ts`）**：
+
+1. **调用方身份（主）**：cordis 在服务解析处（`@deepseek-ai/cordis` 的
+   `ReflectService.handler.get`，`lib/index.js:676`）创建 `new Error(...)`，其栈第一帧
+   就是访问方插件，**拦截器不在其中**；配 `ctx.fiber.name`。`ctx.tools.register(...)`
+   里"读服务 → 注册"是同一段同步代码，故 `tools/change` 触发时刻取"本宏任务内最近
+   一次 `internal/get`"即可配对（`setTimeout(0)` 清除；`ctx.get('tools')` 反射读不触发）。
+2. **注册栈兜底**：取栈里**最后一个**第三方帧（最靠近真实调用方）；N 层包装时
+   "最早安装（最内层）"的拦截器最先出现，最后一帧才是真实注册方。
+3. **拦截器自学习**：身份包与"注册栈第一个第三方帧"不一致累计 ≥2 次 → 记入
+   `interceptors`（缓存持久化），兜底路径跳过。
+4. **`mcp__*` 边界**：永不写工具归属；命名空间仅由身份信号派生。
+
+**复现（宿主同款 cordis 4.0.5，`--preserve-symlinks` 仅夹具需要）**：
+
+- 断言 A（旧启发式）：`tools/change` 监听器栈首个第三方帧 = interceptor，真实注册方
+  在其后一帧；`parsePackagesFromStack = ["interceptor","plugin-a"]`。
+- 断言 B（新信号）：`internal/get` 的 `error.stack` 第 2 帧 = plugin-a，拦截器不在栈里；
+  但**必须取"最近一次"**——拦截器自己在 apply 里读 `ctx.tools` 也会产生记录。
+- 附加：`ctx.fiber.name` 与 error 栈同源同准确度；双层包装时 later-installed 在外层、
+  监听器栈命中最内层；`attributedOriginal` 是包装器自加普通属性（`Symbol.for(
+  'cordis.original')` 只对服务对象级有效，方法上没有）。
+

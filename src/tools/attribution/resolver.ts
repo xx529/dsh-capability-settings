@@ -1,5 +1,6 @@
 /**
- * 归属 resolver：T0 运行时栈 → T1 静态字面量 → T2 MCP namespace → T4 人工表 → T3 相似度。
+ * 归属 resolver：T0 运行时（调用方身份优先）→ T1 静态字面量 → T2 MCP namespace
+ * → T4 人工表 → T3 相似度。
  *
  * 设计：`docs/architecture/plugin-attribution-auto.md` §4（D3/D4）/ §5–§8。
  *
@@ -8,12 +9,16 @@
  *   - 扫描/缓存全部异步后台，绝不阻塞 `tools.list`；未就绪时退化为
  *     T0（已捕获）+ T4 + unknown（最差 = 改造前的表行为）；
  *   - 任一层失败逐层短路，异常只 warn；
- *   - `enableAutoAttribution === false` → 纯 T4（人工表）行为，不挂 T0、不扫描。
+ *   - `enableAutoAttribution === false` → 纯 T4（人工表）行为，不挂 T0、不扫描；
+ *   - **T0 尽早挂**：tools 服务一可用就挂（不等面板首次查询），但扫描/缓存仍
+ *     惰性启动，不拖慢宿主启动；
+ *   - 身份映射：`fiber.name → 包 id`（loader entries）与「包根 realpath → 包 id」
+ *     （解决 `link:`/`@local/*` 帧路径不含 `node_modules` 的老问题）。
  *
  * @module dsh-capability-settings/tools/attribution/resolver
  */
 
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
 
 import { parseMcpToolName } from "../../mcp/usage.js";
@@ -30,7 +35,12 @@ import {
   type PackageRoot,
   type PackageScanResult,
 } from "./scan.js";
-import type { NamespaceAttribution, ResolverSnapshot, ToolAttribution } from "./types.js";
+import type {
+  CachedRuntimeAttribution,
+  NamespaceAttribution,
+  ResolverSnapshot,
+  ToolAttribution,
+} from "./types.js";
 import { canonicalUnitId, displayNameOfPackage, normalizePackageId } from "./unit-id.js";
 import { errMessage } from "../../shared/errors.js";
 
@@ -110,10 +120,16 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
   const enabled = deps.enabled !== false;
   const ctx = deps.ctx;
 
-  /** 运行时捕获（T0）。 */
-  const runtime = new Map<string, { package: string; at: number }>();
-  /** 运行时捕获的 MCP 命名空间（T0'）。 */
+  /** 运行时捕获（T0；**不含** `mcp__*`）。 */
+  const runtime = new Map<string, { package: string; at: number; confidence: "high" | "medium" }>();
+  /** 运行时捕获的插件自注册 MCP 命名空间（T0'；只接受身份信号）。 */
   const runtimeNamespace = new Map<string, string>();
+  /** 交叉校验识别出的注册拦截器包（兜底路径跳过；持久化到缓存）。 */
+  const suspects = new Set<string>();
+  /** fiber 名 → 包 id（loader entries + 已扫描包名/展示名）。 */
+  const fiberToPackage = new Map<string, string>();
+  /** 包根（原路径 + realpath）→ 包 id，按目录长度倒序前缀匹配。 */
+  let dirPackages: Array<{ dir: string; packageId: string }> = [];
   /** 字面量 → 候选包集合（T1）。 */
   const literalOwners = new Map<string, Set<string>>();
   /** 命名空间 → 候选包集合（T2）。 */
@@ -130,6 +146,7 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
   let failures = 0;
   let lastFailure: string | undefined;
   let started = false;
+  let t0Attached = false;
   let disposed = false;
   let hostVersion = deps.hostVersion ?? "unknown";
 
@@ -176,29 +193,154 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
     }
   }
 
-  /** 首次使用前启动（同步挂 T0，异步读缓存/扫描）。 */
-  function ensureStarted(): void {
-    if (started || !enabled) return;
-    started = true;
-    // T0 必须最早挂（覆盖窗口最大）。
+  /** 同步取当前全局工具定义（异常给空数组，绝不抛）。 */
+  function schemasOf(): Array<{ name: string; description?: unknown; parameters?: unknown }> {
+    try {
+      const schemas = ctx?.get?.("tools")?.schemas?.();
+      if (!Array.isArray(schemas)) return [];
+      return schemas as Array<{ name: string; description?: unknown; parameters?: unknown }>;
+    } catch {
+      return [];
+    }
+  }
+
+  /** 重建 fiber 名 → 包 id 映射（同步、零 IO；loader 不可用时只用已扫描包名）。 */
+  function rebuildFiberMap(): void {
+    fiberToPackage.clear();
+    for (const packageId of packages.keys()) {
+      const normalized = normalizePackageId(packageId);
+      fiberToPackage.set(normalized, normalized);
+      const display = displayNameOfPackage(normalized);
+      if (!fiberToPackage.has(display)) fiberToPackage.set(display, normalized);
+    }
+    try {
+      const loader = ctx?.loader ?? ctx?.get?.("loader");
+      const raw = typeof loader?.entries === "function" ? loader.entries() : undefined;
+      const entries =
+        Array.isArray(raw) ? raw : raw !== undefined && raw !== null && typeof raw[Symbol.iterator] === "function" ? [...raw] : [];
+      for (const entry of entries as Array<{ options?: { name?: unknown }; ctx?: { fiber?: { name?: unknown } }; fiber?: { name?: unknown } }>) {
+        const name = typeof entry?.options?.name === "string" ? entry.options.name : "";
+        const packageId = normalizePackageId(name);
+        if (packageId.length === 0 || isHostPackage(packageId)) continue;
+        const fiberName = entry?.ctx?.fiber?.name ?? entry?.fiber?.name;
+        if (typeof fiberName === "string" && fiberName.length > 0) fiberToPackage.set(fiberName, packageId);
+        fiberToPackage.set(packageId, packageId);
+        const display = displayNameOfPackage(packageId);
+        if (!fiberToPackage.has(display)) fiberToPackage.set(display, packageId);
+      }
+    } catch {
+      /* loader 不可用：只用已扫描包名兜底 */
+    }
+  }
+
+  /** 重建「包根 → 包 id」映射（含 realpath，覆盖 `link:`/`@local/*` 真实路径帧）。 */
+  async function rebuildDirMap(roots: PackageRoot[]): Promise<void> {
+    const seen = new Set<string>();
+    const list: Array<{ dir: string; packageId: string }> = [];
+    for (const root of roots) {
+      const packageId = normalizePackageId(root.packageId);
+      if (packageId.length === 0) continue;
+      let real = root.dir;
+      try {
+        real = await realpath(root.dir);
+      } catch {
+        real = root.dir;
+      }
+      for (const dir of [root.dir, real]) {
+        const value = dir.replace(/\\/g, "/").replace(/\/+$/, "");
+        if (value.length === 0) continue;
+        const key = `${value}\u0000${packageId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        list.push({ dir: value, packageId });
+      }
+    }
+    list.sort((left, right) => right.dir.length - left.dir.length);
+    dirPackages = list;
+  }
+
+  /** 栈帧路径 → 包 id（包根前缀匹配；未命中返回 undefined 交给 node_modules 解析）。 */
+  function packageOfPath(filePath: string): string | undefined {
+    const normalized = filePath.replace(/\\/g, "/");
+    for (const entry of dirPackages) {
+      if (normalized === entry.dir || normalized.startsWith(`${entry.dir}/`)) return entry.packageId;
+    }
+    return undefined;
+  }
+
+  /** fiber 名 → 包 id。 */
+  function packageOfFiber(fiberName: string): string | undefined {
+    return fiberToPackage.get(fiberName);
+  }
+
+  /** 登记一个交叉校验识别出的拦截器包（写缓存；幂等）。 */
+  function addSuspect(packageId: string): void {
+    const normalized = normalizePackageId(packageId);
+    if (normalized.length === 0 || suspects.has(normalized) || isHostPackage(normalized)) return;
+    suspects.add(normalized);
+    void cache?.save({ interceptors: [...suspects] });
+  }
+
+  /** 挂 T0（幂等、同步、零文件 IO；tools 服务可用即可挂）。 */
+  function attachT0(): void {
+    if (!enabled || disposed || t0Attached) return;
+    t0Attached = true;
+    rebuildFiberMap();
     runtimeAttributor = createRuntimeAttributor({
       ctx,
       logger,
-      knownSchemas: (): Array<{ name: string; description?: unknown; parameters?: unknown }> => {
-        try {
-          const schemas = ctx?.get?.("tools")?.schemas?.();
-          if (!Array.isArray(schemas)) return [];
-          return schemas as Array<{ name: string; description?: unknown; parameters?: unknown }>;
-        } catch {
-          return [];
-        }
-      },
+      knownSchemas: schemasOf,
+      packageOfFiber,
+      packageOfPath,
+      suspectPackages: () => suspects,
+      onSuspect: addSuspect,
       onCapture: (capture): void => {
-        for (const tool of capture.tools) runtime.set(tool, { package: capture.packageName, at: capture.at });
-        for (const namespace of capture.namespaces) runtimeNamespace.set(namespace, capture.packageName);
+        for (const tool of capture.tools) {
+          runtime.set(tool, { package: capture.packageName, at: capture.at, confidence: capture.confidence });
+        }
+        // T0'：命名空间只认**身份信号**（high）；`mcp__*` 不写工具归属。
+        if (capture.confidence === "high") {
+          for (const namespace of capture.namespaces) runtimeNamespace.set(namespace, capture.packageName);
+        }
         scheduleFlush();
       },
     });
+    runtimeAttributor.attach();
+  }
+
+  /**
+   * 尽早挂 T0（不等面板首次查询）：tools 服务已就绪 → 立即挂；否则等
+   * `ctx.inject(["tools"])` 的就绪回调（cordis 保证依赖可用后才回调）。
+   * 扫描/缓存仍走惰性 {@link ensureStarted}，不拖慢宿主启动。
+   */
+  function attachT0Early(): void {
+    if (!enabled) return;
+    let available = false;
+    try {
+      available = ctx?.get?.("tools", false) !== undefined;
+    } catch {
+      available = false;
+    }
+    if (available) {
+      attachT0();
+      return;
+    }
+    try {
+      const inject = ctx?.inject;
+      if (typeof inject === "function") {
+        inject.call(ctx, ["tools"], () => attachT0());
+      }
+    } catch {
+      /* 旧装配：退回首次查询时挂（ensureStarted） */
+    }
+  }
+
+  /** 首次使用前启动（T0 已尽早挂；这里补缓存/扫描）。 */
+  function ensureStarted(): void {
+    if (!enabled || disposed) return;
+    attachT0();
+    if (started) return;
+    started = true;
     void init();
   }
 
@@ -217,10 +359,11 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
     }
   }
 
-  /** 把缓存内容 hydrate 进内存索引。 */
+  /** 把缓存内容 hydrate 进内存索引（v2：runtime 不含 `mcp__*`，拦截器包先载入）。 */
   function hydrateFromCache(file: {
     packages: Record<string, PackageScanResult>;
-    runtime: Record<string, { package: string; at: number }>;
+    runtime: Record<string, CachedRuntimeAttribution>;
+    interceptors?: string[];
   }): void {
     const scans = new Map<string, PackageScanResult>();
     for (const [packageId, scan] of Object.entries(file.packages)) {
@@ -232,13 +375,21 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
       });
     }
     applyScans(scans);
+    for (const packageId of file.interceptors ?? []) {
+      const normalized = normalizePackageId(packageId);
+      if (normalized.length > 0 && !isHostPackage(normalized)) suspects.add(normalized);
+    }
     for (const [tool, entry] of Object.entries(file.runtime)) {
       if (typeof entry?.package !== "string" || entry.package.length === 0) continue;
-      runtime.set(tool, { package: entry.package, at: typeof entry.at === "number" ? entry.at : 0 });
-      if (tool.startsWith("mcp__")) {
-        const parsed = parseMcpToolName(tool);
-        if (parsed !== undefined) runtimeNamespace.set(parsed.serverName, entry.package);
-      }
+      // `mcp__*` 恒归 MCP 域（命名空间层），不参与工具归属。
+      if (tool.startsWith("mcp__")) continue;
+      // 拦截器污染的历史条目不可信（v1 已被 cache 迁移丢弃，这里防手工/旧版回填）。
+      if (suspects.has(normalizePackageId(entry.package))) continue;
+      runtime.set(tool, {
+        package: entry.package,
+        at: typeof entry.at === "number" ? entry.at : 0,
+        confidence: entry.confidence === "medium" ? "medium" : "high",
+      });
     }
   }
 
@@ -249,7 +400,11 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
       cache = createAttributionCache({ dshHome: deps.dshHome, hostVersion, logger });
       const cached = await cache.load();
       if (cached !== undefined) {
-        hydrateFromCache({ packages: cached.packages, runtime: cached.runtime });
+        hydrateFromCache({
+          packages: cached.packages,
+          runtime: cached.runtime,
+          ...(cached.interceptors !== undefined ? { interceptors: cached.interceptors } : {}),
+        });
         cacheHit = true;
         scanDone = true;
         // 缓存命中也可能缺包根（新装插件）：后台增量补齐（不阻塞）。
@@ -276,6 +431,8 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
     try {
       const discovered = await resolvePackageRoots(ctx);
       roots = discovered;
+      await rebuildDirMap(discovered);
+      rebuildFiberMap();
       const targets = force ? discovered : discovered.filter((root) => !packages.has(normalizePackageId(root.packageId)));
       if (targets.length === 0) {
         scanDone = true;
@@ -323,7 +480,7 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
       flushTimer = undefined;
       if (disposed || cache === undefined) return;
       const runtimeUpdate = Object.fromEntries(runtime);
-      void cache.save({ runtime: runtimeUpdate });
+      void cache.save({ runtime: runtimeUpdate, interceptors: [...suspects] });
     }, 2000);
     if (typeof flushTimer === "object" && flushTimer !== null && "unref" in flushTimer) {
       (flushTimer as { unref?: () => void }).unref?.();
@@ -362,14 +519,15 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
     if (typeof toolName !== "string" || toolName.length === 0) return unknownAttribution();
     if (!enabled) return tableToolAttribution(toolName) ?? unknownAttribution();
     ensureStarted();
-    const captured = runtime.get(toolName);
+    // `mcp__*` 恒归 MCP 域：工具归属只用 runtime 的非 MCP 部分（防御性二次过滤）。
+    const captured = parseMcpToolName(toolName) === undefined ? runtime.get(toolName) : undefined;
     if (captured !== undefined) {
       counters.runtimeHits += 1;
       return {
         packageId: captured.package,
         display: displayNameOfPackage(captured.package),
         matchedBy: "runtime",
-        confidence: "high",
+        confidence: captured.confidence,
       };
     }
     const table = tableToolAttribution(toolName);
@@ -474,6 +632,8 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
       ...(lastFailure !== undefined ? { lastFailure } : {}),
       lastScanMs,
       cacheHit,
+      runtimeAttached: t0Attached,
+      ...(suspects.size > 0 ? { interceptors: [...suspects] } : {}),
     };
   }
 
@@ -483,6 +643,9 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
   }
   // 供测试/诊断读取各层命中（additive 方法，非契约必需）。
   (resolveTool as unknown as { counters?: () => ResolverCounters }).counters = () => countersSnapshot();
+
+  // 组合根：T0 尽早挂（tools 服务可用即挂；扫描/缓存仍惰性）。
+  attachT0Early();
 
   return {
     resolveTool,

@@ -31,7 +31,7 @@
 | **D2** | 迁移 = **读时别名映射（canonicalize）+ 一次性锁内写回 + 旧键镜像双写（可回滚）+ 未知键原样保留**；幂等、崩溃可续；不删任何无法识别的键 | §3 | 推荐 |
 | **D3** | 优先级：**域恒等 → T0 → T1 → T4 → T3 → 未识别**；T1 与 T4 冲突时 **T1 优先 + warn + 标 `conflictsWithTable`**（T0 有值时 T0 静默覆盖）；T3 必须「唯一最佳 + margin ≥0.3」 | §4 | 推荐（[需拍板] 冲突优先级） |
 | **D4** | `matchedBy: "runtime" \| "literal" \| "namespace" \| "table" \| "similarity" \| "unknown"`（**additive**；旧值 `prefix/exact/source` 继续被识别）+ `confidence: "high"\|"medium"\|"low"`；`evidence?` 仅诊断，不作为唯一展示来源 | §4/§9 | 推荐 |
-| **D5** | T0 落点为 resolver 自建的**独立** `ctx.on("tools/change")` 监听（与 `src/mcp/loader.ts:765`、`src/tools/manager.ts` 的现有监听并列，不改它们）；监听器内 `stackTraceLimit=48` + `finally` 恢复；同步 `schemas()` 差集得到新增工具名；异常全吞；连续失败 3 次自动禁用 T0（本进程） | §5 | 推荐 |
+| **D5** | T0 落点为 resolver 自建的**独立**监听（与 `src/mcp/loader.ts:765`、`src/tools/manager.ts` 的现有监听并列，不改它们）：`internal/get` 拿调用方身份（主）+ `tools/change` 记录差集；监听器内 `stackTraceLimit=48` + `finally` 恢复；同步 `schemas()` 差集得到新增工具名；异常全吞；连续失败 3 次自动禁用 T0（本进程） | §5 | 推荐 |
 | **D6** | T1 包根 = `ctx.get("pluginPackages")?.packageOf(name, baseUrl)?.dir`（loader entries 提供 name/baseUrl），兜底 `createRequire(baseUrl).resolve.paths + package.json` 探测；拿不到包根 → 该包跳过静态层（仅 T0/T3 覆盖） | §6 | 推荐（`pluginPackages` 可见性 [待验证 V3]） |
 | **D7** | 缓存 `tool-attribution.json` v1：`{version, generatedAt, hostVersion, packages{version,mtimeMs,literals,namespaceHints}, runtime{tool→pkg,at}, failures}`；失效键 = 包名+version+mtimeMs+host 版本；原子写 + 锁 + 进程内串行；损坏 → 空缓存 + warn | §8 | 推荐 |
 | **D8** | 性能预算：T0 捕获 ≤10µs/次（证据 §4.2 实测 8.18µs）；首次扫描总预算 ≤500ms（本机 0.46s / 26 包，证据 §3.2）；`tools.list` **不 await 扫描**，新增 additive `attributionSettling`；缓存命中 <5ms 且零扫描 | §11 | 推荐 |
@@ -321,94 +321,106 @@ export interface AttributionResolver {
 
 ---
 
-## 5. T0：运行时栈归属（主路径）
+## 5. T0：运行时归属（调用方身份优先，注册栈兜底）
 
-### 5.1 落点与生命周期（D5）
+> v14 修订（bug 修复）：旧版"取 `tools/change` 监听器栈里**第一个**第三方帧"会被
+> 任何包装了 `tools.register` 的插件劫持（本机 `dsh-context` 为给自己的上下文面板
+> 标注工具来源重写了 `register`，导致本插件把 28 个别家工具全判给它，且该单元
+> 开关会连带 `restrict` 掉这些真实工具）。现在主信号改为**调用方身份**。
 
-- **模块**：`src/tools/attribution/runtime.ts` 内的 `createRuntimeAttributor(ctx, deps)`。
-- **监听注册位置**：`src/index.ts` 的 `apply()` **最前段**（在 `createSessionState`/`createToolsGlobalStore` 之前；这些构造是同步的，但监听越早覆盖窗口越大）。请求：`ctx.on("tools/change", handler)`，disposer 收进现有 `disposers` 数组（`src/index.ts` 的 ctx.effect 清理）。
-- **为什么独立监听**：
-  - `src/mcp/loader.ts:765` 的监听只做 MCP 屏蔽刷新（`scheduleRestrictionRefresh`），不改它；
-  - `src/tools/manager.ts` 内的 `tools/change` 监听做 restrict 重算；
-  - resolver 的监听只做归属捕获 —— 三者职责独立，互不 await；cordis `emit` 同步调用所有监听器（证据 §2.3），新增一个监听不影响既有行为。
-- **初始化顺序**（保证不漏 + 不误）：
-  1. 挂监听（从此开始的注册进入 T0 窗口）；
-  2. 同步取一次基线 `schemas()` → `knownNames`（此前已注册的工具交给 T1/T2/T3/T4 回填）；
-  3. 异步：读缓存（§8）→ 若需要则启动惰性扫描（§6/§11）。
-- **卸载**：`dispose()` 移除监听、清定时器/队列；插件热重载不会叠加监听（每条注册一次）。
+### 5.1 落点与生命周期（D5，v14 修订）
+
+- **模块**：`src/tools/attribution/runtime.ts` 的 `createRuntimeAttributor(deps)`；暴露 `attach()` / `dispose()` / `suspects()`。
+- **挂载位置**：`createAttributionResolver()` 末尾调用 `attachT0Early()`：
+  1. `ctx.get("tools", false)` 可用 → 立即 `attach()`；
+  2. 否则 `ctx.inject(["tools"], () => attach())`（cordis 保证服务就绪后才回调）。
+- **为什么不在 `apply()` 裸挂**：`apply()` 时 tools 服务可能尚未就绪，基线 `schemas()` 为空；等首个 `tools/change` 再建基线会把"全部已有工具"误判成一次注册风暴的增量子集。注入回调既保证服务可用（基线可信），又仍早于第三方插件装载（bundles 顺序：base → 本插件 → 其它第三方）。
+- **初始化顺序**：① 同步取基线 `schemas()`；② 挂 `internal/get`（身份）与 `tools/change`（差集）监听；③ 缓存/扫描仍在首次查询时惰性启动（不拖慢宿主启动）。
+- **卸载**：`dispose()` 移除两个监听、清身份定时器；插件热重载不会叠加监听。
 
 ### 5.2 监听器算法（伪代码）
 
 ```
-handler():
-  try:
-    old := Error.stackTraceLimit
-    Error.stackTraceLimit := 48
-    try: stack := new Error().stack
-    finally: Error.stackTraceLimit := old          # 必须 finally
+onInternalGet(ctxOfGet, prop, error, next):          # cordis 瀑布监听，必须原样放行
+  if prop != "tools": return next()
+  value := next()                                    # 服务解析异常继续向上抛
+  recordAccess({ fiber: ctxOfGet?.fiber?.name,
+                 stack: error?.stack,                # cordis 在代理 get trap 里 new Error
+                 at: now })                          #   第一帧就是访问方，无拦截器
+  return value
 
-    pkg := parsePackageFromStack(stack)             # §5.3
-    if pkg == undefined or pkg == SELF or isHostFrame or isBridge(mcp-client): return
-    names := schemasNow()                            # 同步；宿主在 emit 前已 insert（证据 §2.3）
-    added := names - knownNames
-    knownNames := names
+handler():                                           # tools/change（同步 emit）
+  try:
+    defs := schemasNow(); if defs 为空: return
+    added := diff(defs, known); known := defs
+    if 基线为空 or added 为空: return                # 建基线 / 同名同定义 replace → 不归属
+    owner := resolveOwner()
+    if owner == undefined: return                    # 宁缺勿错，交 T1–T4
     for n in added:
-      if runtime[n] == undefined: runtime[n] := { package: pkg, at: now }
-      # 同名被另一插件重新注册（replace）→ 以最后一次为准（证据 §4.3/R5）
-      else if runtime[n].package != pkg: runtime[n] := { package: pkg, at: now }
-    namespaceHints: 若 added 里有 mcp__<ns>__* 且 pkg 不是 bridge → runtimeNamespace[ns] := pkg
-    markDirty(); scheduleCacheFlush()                # §8
+      if n == mcp__<ns>__*:
+        仅在 owner.signal == access 时 runtimeNamespace[ns] := owner.pkg
+        continue                                     # `mcp__*` 永不写工具归属
+      runtime[n] := { package: owner.pkg, confidence: owner.confidence, at: now }
+    scheduleCacheFlush()                             # §8
   catch (e):
-    failures += 1
-    if failures >= 3 and !disabled: disabled := true; warn("T0 连续失败，本进程降级到静态归属")
-  finally:
-    return                                          # 绝不让异常穿出监听器
+    failures += 1; if failures >= 3: disabled := true; warn("T0 连续失败，降级静态归属")
+
+resolveOwner():
+  stack := new Error().stack (stackTraceLimit=48, finally 恢复)
+  if access 记录仍在（本宏任务）:
+    pkg := packageOfFiber(access.fiber) ?? firstPackageInStack(access.stack)
+    if pkg 不可用: return undefined                 # 宿主/自身/bridge 身份 → 不归属
+    交叉校验: 注册栈第一个第三方包 != pkg → 该包计一次 disagreement；>=2 次记入 interceptors
+    return { pkg, confidence: high, signal: access }
+  # 兜底：注册栈（可能被 register 拦截器污染）
+  candidates := 栈内全部第三方包（出现顺序）
+  pkg := candidates[last]                            # 最靠近真实调用方，天然绕过 N 层包装
+  if pkg == undefined or pkg in interceptors: return undefined
+  return { pkg, confidence: medium, signal: register-stack }
 ```
 
 要点：
 
-- **只捕获栈开销，不做 IO**（证据 §4.2：8.18µs/次；30 工具 ≈0.27ms）。
-- **差集**：`tools/change` 无 payload（证据 §2.3），所以在监听器里同步 `schemas()` 与 `knownNames` 求差；`emit` 发生在 insert 之后，所以新工具已在 `schemas()` 里。
-- **注册风暴**：MCP server 一次注册 30 个工具 → 30 次 handler × `schemas()`（214 条）= 6.4k 次比较，忽略不计；且 bridge 帧会**提前 return**（不读 schemas），进一步省。
-- **replace 语义**：同名工具被不同插件重注册 → 以最后一次为准（与宿主 registry 行为一致），记录 `at`。
-- **命名空间**：若捕获到 `mcp__<ns>__*` 的注册来自真实插件包（非 bridge）→ `runtimeNamespace[ns] = pkg`，供 T0' 使用（直接压过 T2）。
-- **失败禁用**：连续 3 次异常（栈不可用/属性不可写等）→ 本进程关闭 T0，warn 一次；后续依赖静态层。
+- **身份记录只在本宏任务内有效**（`setTimeout(0)` 清除）：`ctx.tools.register(...)` 里"读服务 → 注册"是同一段同步代码，所以 change 触发时刻取最近一条即可精确配对；`await` 之后才注册的（如 MCP bridge）身份过期 → 走兜底。
+- **`ctx.get("tools")`（反射读）不触发 `internal/get`**：本插件自己的读取（`schemas()` / `restrict()`）不会污染身份记录。
+- **删除了 v14 的 `lastChanged` 批量重归**：`tools/change` 无 payload，差集为空时**不归属**；同名同定义 replace 不会把上一批工具整批转移给当前注册方。
+- **为什么身份优先**：拦截器位于 registry 与真实注册方之间；`internal/get` 的 `error` 由 cordis 在**服务解析处**创建，栈里没有拦截器。
+- **拦截器自学习**：身份包与"注册栈第一个第三方包"不一致累计 ≥2 次 → 记入 `interceptors`（缓存持久化，`tool-attribution.json`），兜底路径跳过该包；曾作为身份包出现过的包不会被误判。
+- **失败禁用**：连续 3 次异常（栈不可用/监听不可挂）→ 本进程关闭 T0，warn 一次；后续依赖静态层。
 
-### 5.3 栈解析规则（镜像 scout 证据 §4.1，补 pnpm/scope/Windows）
+### 5.3 帧解析规则（v14 修订）
 
 1. 统一分隔符：`stack.replace(/\\/g, "/")`。
-2. 逐帧取形如 `at fn (/abs/path:line:col)` 或 `at /abs/path:line:col` 的文件路径（含 `file://` 时先去 scheme）。
-3. 跳过非文件帧（`node:`、`internal/`、`<anonymous>`）。
-4. **取文件路径**（去掉行号），然后按以下顺序解析包名：
-   - `app.asar` 路径 / `@deepseek-ai/` → **宿主帧**（宿主内建/框架）→ 不作为插件；
-   - 若不是 `node_modules` 路径 → 跳过该帧（可能是入口脚本/HMR loader）。
-   - 将所有 `/node_modules/` 出现位置切分，**取最后一段**（这对 pnpm 嵌套天然有效）：
-     - `x = 最后一段`；取首组件（若首组件以 `@` 开头则取两段）→ `candidate`；
-     - 若 `candidate == ".pnpm"`：把该段剩余部分（`.pnpm/<name>@<ver>/node_modules/...`）再按 `/node_modules/` 切一次，取**最后**一段首组件 → 重算 `candidate`；
-     - 若 candidate 以 `.` 开头 / 为空 / 含非法字符 → 跳过。
-   - `[待验证 V2]`：pnpm 布局的真实栈帧样本（`/profiles/<p>/.pnpm/...` vs `.../node_modules/.pnpm/...`）；验证方式：真机 debug 打印一条注册栈，落 `notes/verify/out-t0-stacks.json`。
-5. **软链**（`@local/*` 多为 `link:`）：栈里可能是真实路径（如仓库工作目录）或 `node_modules/@local/...`；若解析出的 `candidate` 不在「已知包名集合」，再用 **loader entries 的 `options.name` 与 baseUrl 做后缀匹配**（`baseUrl` 以该包目录结尾即命中）；仍不中 → 用 `candidate` 作为临时包 id（`confidence:"high", resolvedBy:"stack-dir"`，展示名 = candidate 去 scope），并记 `unmapped:true` 诊断（也可以等待扫描阶段补映射）。
-6. **解析到"包目录名"而非真实包名**时：resolver 合并阶段用「包名映射表」（loader entries / T1 扫描得到的 `package.json.name`）把目录名换成正式包名；换不到就保留目录名（见上一条）。
-7. `[待验证 V4]`：HMR 重载后栈帧是否仍指向包路径（若指向 HMR 临时文件，T0 降级）。
-
-**误归属防护（必做）**：
+2. 逐帧取形如 `at fn (/abs/path:line:col)` 或 `at /abs/path:line:col` 的文件路径（`file://` 先去 scheme）；跳过 `node:`、`internal/`、`<anonymous>`。
+3. **逐帧 → 包 id** 按顺序尝试：
+   - `packageOfPath`（resolver 注入）：**包根 realpath 前缀映射** —— 覆盖 `link:`/`@local/*` 插件（Node 默认解引用 symlink，帧里是真实路径、不含 `node_modules`）。`rebuildDirMap()` 同时登记原路径与 `realpath`，按目录长度倒序前缀匹配；
+   - 未命中再按 `node_modules/<pkg>` 解析（取**最后一个** `node_modules`，pnpm 嵌套 / scope 规则同 v14）；
+   - 路径含 `app.asar` / `@deepseek-ai/` → 宿主帧丢弃。
+4. **身份映射 `fiber.name → 包 id`**：`ctx.loader.entries()` 的 `entry.ctx.fiber.name → entry.options.name`（本机实测可用）；再加「已扫描包的包名 / 展示名（去 scope）」兜底 —— `dsh-to-figma` 的 fiber 名是 `dsh-figma`，靠访问点栈命中真实包名。
+5. **取帧规则（两条路不同）**：
+   - 身份路径（访问点栈）：取**第一个**第三方帧（栈里没有拦截器）；
+   - 兜底路径（注册栈）：取**最后一个**第三方帧。N 层包装时"最早安装（最内层）"的拦截器最先出现在栈里，最后一帧才是真实注册方。
+6. **误归属防护（必做）**：
 
 | 防护 | 规则 |
 |---|---|
 | 自身包 | `candidate == SELF_PACKAGE` → 丢弃（`SELF_PACKAGE` 与 `package.json.name` 同源，单测断言） |
-| 宿主/框架 | 含 `app.asar`、`@deepseek-ai/*`、`cordis`、`dsh-scope`、`dsh-tools`、`dsh-agent*` → 丢弃（这些是 emit/框架帧） |
-| 桥接层 | `dsh-mcp-client` → 丢弃（异步注册栈只有 bridge；对应工具归 MCP 域，T2 处理） |
-| 非法路径 | 无 `node_modules` / 解析失败 → 跳过该帧（继续看下一帧？**否**：只取"第一个属于插件包的帧"，都失败则放弃本次） |
-| 一次多帧同包 | 取**最靠近注册点**的那帧（栈里第一个非框架帧） |
+| 宿主/框架 | 含 `app.asar`、`@deepseek-ai/*` → 丢弃（这些是 emit/框架帧） |
+| 桥接层 | `dsh-mcp-client` → 丢弃（异步注册栈只剩 bridge；对应工具归 MCP 域 T2） |
+| 拦截器 | 交叉校验识别的包：**兜底路径直接放弃**（身份路径不受影响；拦截器自己注册的工具仍按身份归属） |
+| 基线期 | tools 服务刚就绪 / 基线为空的第一轮差异 → 只建基线不归属 |
+| 同名同定义 replace | 差集为空 → 不归属（不整批重归） |
 
-> 说明：栈里会出现 `emit → ScopedLayers.effect → register` 三帧框架，之后才是注册插件帧（证据 §4.1）；规则按"跳过框架帧后第一个插件帧"即可。
+> 说明：栈里会出现 `emit → ScopedLayers.effect → register → (拦截器包装) → 注册插件`；
+> 身份与兜底两条规则分别取"服务解析点第一帧"与"注册帧里最后一个第三方包"。
 
 ### 5.4 覆盖窗口（必须写进 README/CHANGELOG）
 
-- ✅ 本插件 apply 之后注册的**全部**工具（本机第三方插件大多在 bundles 尾部，推断覆盖绝大多数；`[待验证 V2]` 加载顺序）。
-- ❌ 本插件监听之前注册的工具（启动更早的插件）→ T1/T2/T3/T4 回填。
-- ⚠️ **异步注册**（如 `await listTools()` 后注册）→ 栈只剩 `dsh-mcp-client` 帧 → 归 MCP 域（T2），不影响 Tools。
-- ⚠️ 若宿主未来把 `emit` 改成异步/微任务，T0 栈将不含 register 帧 → **自动降级**（解析失败计数触发禁用），行为等于 T1–T4。
+- ✅ 本插件 `attach()` 之后注册的**全部**工具（现在 tools 服务一可用就挂，早于第三方插件装载；本机 bundles 顺序 base → 本插件 → 其它第三方）。
+- ❌ `attach()` 之前注册的工具（宿主内建 / base bundle）→ T1/T2/T3/T4 回填。
+- ⚠️ **异步注册**（`await` 之后再 register、先存引用后注册）→ 身份记录过期 → 注册栈兜底（`medium`，UI 标「推测」）；bridge 注册身份是宿主 → 丢弃 → T2。
+- ⚠️ 若宿主未来把 `emit` 改成异步 → 差集仍可用但身份配对失效（全部走兜底 `medium`）；再叠加失败计数禁用 → 行为等于 T1–T4。
+- ⚠️ **拦截器**（任何插件包装 `tools.register`）：不再导致误归属；首次出现的拦截器需要 2 次交叉校验才进 suspect 名单，此前的兜底捕获可能落到它 → 置信度 `medium` + UI 标「推测」。
 
 ---
 

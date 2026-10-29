@@ -2,7 +2,11 @@
  * 归属扫描缓存 `<dshHome>/dsh-capability-settings/tool-attribution.json`（D7/§8）。
  *
  * 契约：
- *   - `version: 1`；`hostVersion` / `selfPackage` 作为整体失效键；
+ *   - `version: 2`；`hostVersion` / `selfPackage` 作为整体失效键；
+ *   - **v1 → v2 迁移**：保留 `packages` 扫描结果（省一次全量重扫），丢弃
+ *     `runtime` 与 `interceptors` —— v1 的运行时归属可能被 `register` 拦截器
+ *     污染（本机 `dsh-context` 案例），不能跨进程复用；`interceptors` 是 v2
+ *     新增的交叉校验结果；
  *   - 单包失效键 = 包名 + version + mtimeMs（宿主版本变化时整份失效）；
  *   - 原子写（0600 / 目录 0700）+ `withFileLock` 锁内**读盘合并**（多实例/多次
  *     写入不丢别人的包结果）+ 进程内串行队列；
@@ -11,7 +15,7 @@
  *
  * @module dsh-capability-settings/tools/attribution/cache
  */
-import { type CachedPackageScan, type ToolAttributionCacheFile } from "./types.js";
+import { type CachedPackageScan, type CachedRuntimeAttribution, type ToolAttributionCacheFile } from "./types.js";
 /** 缓存文件路径：`<dshHome>/dsh-capability-settings/tool-attribution.json`。 */
 export declare function attributionCacheFile(dshHome?: string): string;
 /** 缓存读写器。 */
@@ -29,14 +33,13 @@ export interface AttributionCache {
 /** 一次缓存更新（可选字段；缺省 = 不更新该部分）。 */
 export interface CacheUpdate {
     packages?: Record<string, CachedPackageScan>;
-    runtime?: Record<string, {
-        package: string;
-        at: number;
-    }>;
+    runtime?: Record<string, CachedRuntimeAttribution>;
     failures?: Record<string, {
         reason: string;
         at: number;
     }>;
+    /** 交叉校验识别出的拦截器包（并集合并，最多 50 个）。 */
+    interceptors?: string[];
     /** 是否**替换** packages（默认合并）。 */
     replacePackages?: boolean;
 }

@@ -1,5 +1,6 @@
 /**
- * 归属 resolver：T0 运行时栈 → T1 静态字面量 → T2 MCP namespace → T4 人工表 → T3 相似度。
+ * 归属 resolver：T0 运行时（调用方身份优先）→ T1 静态字面量 → T2 MCP namespace
+ * → T4 人工表 → T3 相似度。
  *
  * 设计：`docs/architecture/plugin-attribution-auto.md` §4（D3/D4）/ §5–§8。
  *
@@ -8,7 +9,11 @@
  *   - 扫描/缓存全部异步后台，绝不阻塞 `tools.list`；未就绪时退化为
  *     T0（已捕获）+ T4 + unknown（最差 = 改造前的表行为）；
  *   - 任一层失败逐层短路，异常只 warn；
- *   - `enableAutoAttribution === false` → 纯 T4（人工表）行为，不挂 T0、不扫描。
+ *   - `enableAutoAttribution === false` → 纯 T4（人工表）行为，不挂 T0、不扫描；
+ *   - **T0 尽早挂**：tools 服务一可用就挂（不等面板首次查询），但扫描/缓存仍
+ *     惰性启动，不拖慢宿主启动；
+ *   - 身份映射：`fiber.name → 包 id`（loader entries）与「包根 realpath → 包 id」
+ *     （解决 `link:`/`@local/*` 帧路径不含 `node_modules` 的老问题）。
  *
  * @module dsh-capability-settings/tools/attribution/resolver
  */

@@ -80,8 +80,13 @@ function attributionLabel(unit: ClientToolsUnit): string {
 /** true = 来源含推测成分（UI 加琥珀「推测」标识与核对提示）。 */
 function attributionIsSpeculative(unit: ClientToolsUnit): boolean {
   const attribution = unit.attribution;
+  // 「运行时捕获」分两档：调用方身份（高置信）与注册栈兜底（中置信，标推测）。
+  const runtimeFallback = attribution.matchedBy === "runtime" && attribution.confidence === "medium";
   return (
-    attribution.matchedBy === "similarity" || attribution.ambiguous === true || attribution.conflictsWithTable === true
+    attribution.matchedBy === "similarity" ||
+    runtimeFallback ||
+    attribution.ambiguous === true ||
+    attribution.conflictsWithTable === true
   );
 }
 
@@ -96,6 +101,7 @@ function attributionDetail(unit: ClientToolsUnit): string | undefined {
   if (attribution.conflictsWithTable === true) parts.push("与人工映射冲突");
   if (attribution.ambiguous === true) parts.push("存在多个候选");
   if (attribution.mixed === true) parts.push("多来源合并");
+  if (attribution.matchedBy === "runtime" && attribution.confidence === "medium") parts.push("注册栈兜底");
   const confidence = attribution.confidence;
   if (typeof confidence === "number" && Number.isFinite(confidence)) {
     // 旧数字口径：0–1 → 百分比（adapter 已归一到 0–1）。

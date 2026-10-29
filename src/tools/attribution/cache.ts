@@ -2,7 +2,11 @@
  * 归属扫描缓存 `<dshHome>/dsh-capability-settings/tool-attribution.json`（D7/§8）。
  *
  * 契约：
- *   - `version: 1`；`hostVersion` / `selfPackage` 作为整体失效键；
+ *   - `version: 2`；`hostVersion` / `selfPackage` 作为整体失效键；
+ *   - **v1 → v2 迁移**：保留 `packages` 扫描结果（省一次全量重扫），丢弃
+ *     `runtime` 与 `interceptors` —— v1 的运行时归属可能被 `register` 拦截器
+ *     污染（本机 `dsh-context` 案例），不能跨进程复用；`interceptors` 是 v2
+ *     新增的交叉校验结果；
  *   - 单包失效键 = 包名 + version + mtimeMs（宿主版本变化时整份失效）；
  *   - 原子写（0600 / 目录 0700）+ `withFileLock` 锁内**读盘合并**（多实例/多次
  *     写入不丢别人的包结果）+ 进程内串行队列；
@@ -26,6 +30,7 @@ import {
   TOOL_ATTRIBUTION_CACHE_FILE,
   TOOL_ATTRIBUTION_CACHE_VERSION,
   type CachedPackageScan,
+  type CachedRuntimeAttribution,
   type ToolAttributionCacheFile,
 } from "./types.js";
 import { SELF_PACKAGE } from "./unit-id.js";
@@ -55,8 +60,10 @@ export interface AttributionCache {
 /** 一次缓存更新（可选字段；缺省 = 不更新该部分）。 */
 export interface CacheUpdate {
   packages?: Record<string, CachedPackageScan>;
-  runtime?: Record<string, { package: string; at: number }>;
+  runtime?: Record<string, CachedRuntimeAttribution>;
   failures?: Record<string, { reason: string; at: number }>;
+  /** 交叉校验识别出的拦截器包（并集合并，最多 50 个）。 */
+  interceptors?: string[];
   /** 是否**替换** packages（默认合并）。 */
   replacePackages?: boolean;
 }
@@ -88,9 +95,29 @@ function sanitizePackage(raw: unknown): CachedPackageScan | undefined {
   };
 }
 
-/** 整体校验缓存文件。 */
+/** 清洗拦截器包名单（只接受包名形态，去重、最多 50 个）。 */
+function sanitizeInterceptors(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const found: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    const value = item.trim().toLowerCase();
+    if (value.length === 0 || value.length > 214 || found.includes(value)) continue;
+    found.push(value);
+  }
+  return found.slice(0, 50);
+}
+
+/**
+ * 整体校验缓存文件。
+ *
+ * v1 兼容：`version: 1` 的 `packages` 继续可用（省一次全量扫描），但 v1 的
+ * `runtime` 可能被注册拦截器污染，**一律丢弃**；`interceptors` 为 v2 新增。
+ */
 function sanitizeCache(raw: Record<string, unknown>, deps: AttributionCacheDeps): ToolAttributionCacheFile | undefined {
-  if (raw.version !== TOOL_ATTRIBUTION_CACHE_VERSION) return undefined;
+  const rawVersion = typeof raw.version === "number" ? raw.version : undefined;
+  const legacy = rawVersion === 1;
+  if (rawVersion !== TOOL_ATTRIBUTION_CACHE_VERSION && !legacy) return undefined;
   if (typeof raw.selfPackage === "string" && raw.selfPackage !== SELF_PACKAGE) return undefined;
   const hostVersion = typeof raw.hostVersion === "string" ? raw.hostVersion : "unknown";
   if (hostVersion !== "unknown" && deps.hostVersion !== "unknown" && hostVersion !== deps.hostVersion) return undefined;
@@ -101,12 +128,20 @@ function sanitizeCache(raw: Record<string, unknown>, deps: AttributionCacheDeps)
     if (scan !== undefined) packages[key] = scan;
   }
   const runtime: ToolAttributionCacheFile["runtime"] = {};
-  const rawRuntime = raw.runtime !== null && typeof raw.runtime === "object" ? (raw.runtime as Record<string, unknown>) : {};
+  const rawRuntime =
+    !legacy && raw.runtime !== null && typeof raw.runtime === "object" ? (raw.runtime as Record<string, unknown>) : {};
   for (const [tool, value] of Object.entries(rawRuntime)) {
+    // `mcp__*` 恒归 MCP 域（命名空间层），v2 起不再把工具归属写进 runtime。
+    if (tool.startsWith("mcp__")) continue;
     if (value === null || typeof value !== "object") continue;
     const entry = value as Record<string, unknown>;
     if (typeof entry.package !== "string" || entry.package.length === 0) continue;
-    runtime[tool] = { package: entry.package, at: typeof entry.at === "number" ? entry.at : 0 };
+    const confidence = entry.confidence === "medium" ? "medium" : "high";
+    runtime[tool] = {
+      package: entry.package,
+      at: typeof entry.at === "number" ? entry.at : 0,
+      confidence,
+    };
   }
   const failures: ToolAttributionCacheFile["failures"] = {};
   const rawFailures = raw.failures !== null && typeof raw.failures === "object" ? (raw.failures as Record<string, unknown>) : {};
@@ -124,6 +159,7 @@ function sanitizeCache(raw: Record<string, unknown>, deps: AttributionCacheDeps)
     packages,
     runtime,
     failures,
+    interceptors: legacy ? [] : sanitizeInterceptors(raw.interceptors),
   };
 }
 
@@ -177,6 +213,10 @@ export function createAttributionCache(deps: AttributionCacheDeps): AttributionC
             const failureEntries = Object.entries(failures)
               .sort((left, right) => right[1].at - left[1].at)
               .slice(0, 50);
+            const interceptors = sanitizeInterceptors([
+              ...(disk?.interceptors ?? []),
+              ...(update.interceptors ?? []),
+            ]);
             const body: ToolAttributionCacheFile = {
               version: TOOL_ATTRIBUTION_CACHE_VERSION,
               generatedAt: now(),
@@ -185,6 +225,7 @@ export function createAttributionCache(deps: AttributionCacheDeps): AttributionC
               packages,
               runtime: Object.fromEntries(runtimeEntries),
               failures: Object.fromEntries(failureEntries),
+              interceptors,
             };
             const dir = join(resolveDshHome(deps.dshHome), SESSION_STATE_DIR_NAME);
             await mkdir(dir, { recursive: true, mode: DIR_MODE });
