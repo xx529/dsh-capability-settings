@@ -7,6 +7,16 @@
 
 ### 修复
 
+- **MCP「插件自注册的 MCP 命名空间」来源不可识别**：插件直接
+  `ctx.tools.register(createMcpToolDefinition(...))` 注册 `mcp__<ns>__*` 时没有
+  mcp-client 实例，`mcp.runtime` 原先只能把它当「无来源外部行」——本机 `figma`
+  因此显示 `外部`、详情写「来源不可识别」。现在新增第三条发现路径
+  `scanInjectedMcpNamespaces`（全局工具视图里 `mcp__<ns>__*` 无实例 → 合成
+  `origin:"namespace"` + `synthesized:true`、无配置），来源走映射表归一
+  （`figma` → `dsh-to-figma`），列表行与详情显示「插件 + 插件名」两枚标签；
+  未命中映射表的命名空间标「未识别」（不猜成宿主内置）。真实例（fiber / loader
+  条目）优先，命名空间行不覆盖已有实例；工具注册表反推的兜底行也改为
+  `origin:"namespace"`（原先写死 `"fiber"`，来源语义是错的）。
 - **会话能力卡片来源标签被截断**：注入技能卡片底部的渠道名原先受
   `.skp-dock-tag-channel` 的固定 `max-width:92px` 限制，`DSH 内置（Office）`
   （实测 105px）、`DSH 内置（随包技能目录）`（128px）、`dsh-diff-approval`
@@ -29,8 +39,79 @@
 
 ### 新增
 
+- **第三个能力域 Tools（插件级会话开关）**：新增宿主 `src/tools/{types,manager,restrict}.ts`
+  与归属单一事实源 `src/shared/plugin-attribution.ts`。枚举源唯一 =
+  `ctx.root.get("tools").schemas()`（全局视图，天然只含可继承层）；按序归类：
+  `mcp__*` 恒归 **MCP 域**、宿主内建工具**不入任何域**（排除清单在插件侧自维护，
+  因为宿主 `ToolSchema` 无来源/危险等级字段）、命中插件映射表 → Tools 插件单元、
+  其余合并成唯一「来源未识别」单元（`unit = "__unattributed__"`）。
+  - **一个插件 = 一个开关单元**（无单工具开关）：关闭 = 在该 agent 作用域
+    `tools.restrict({ deny: 该插件当前全部可继承工具名 })`；deny 名**每次重算**，
+    持久化只存 `plugin:<unit>`（插件升级增减工具后自动跟随）；
+  - 幂等：名单与上一代等价时直接返回（`tools.restrict` 自身也会触发
+    `tools/change`，这条短路是刷新不形成循环的关键）；监听 `tools/change`
+    微任务合并后重算，懒加载后才注册的工具因此不会漏网；
+  - 降级：agent 作用域没有 `restrict`（旧外壳）→ `tools.list` 提前给
+    `lockedReason`、开关置灰；名单为空（工具尚未注册）→ 不调用 restrict、
+    状态记 `skipped`；restrict 抛错 → 状态 `failed` + warning，不影响其它开关。
+  - **枚举不到就不显示**：注册在 agent 自身层的插件工具不可 restrict、也无法从
+    全局视图枚举，因此**不出现**在 Tools 域（不是显示后置灰）——这是相对早期
+    UX 稿的规格修正。
+- **RPC `tools.list` / `tools.setSessionEnabled`**：前者返回 `units`
+  （`unit/name/kind/tools/toolCount/attribution/enabledInSession/explicit/
+  lockedReason/restriction`）+ 诊断字段 `totalGlobalTools` /
+  `excludedBuiltinCount` / `errors`；后者 **batch-first**（单条 = 长度 1 的数组），
+  入参只接受**单元 id**、宿主自己重算工具名（客户端无法注入任意 deny 名单），
+  `enabled: true|false|undefined` 分别表示写显式开 / 显式关 / 清除覆盖。
+  `tools` 服务缺失或 `schemas()` 失败时返回空列表 + `errors`，不阻断另两域。
+- **R1 批量端点 `session.setBulk`**：`{sessionId, action:"enable"|"disable"|"reset",
+  domains?, cwd?, dryRun?}`，宿主自己枚举目标（不信客户端列表）：
+  - 幂等（同一 action 重放 → `applied:0` + `unchanged:N`）、**同会话串行**（排队
+    而非拒绝，不同会话互不影响）、**部分失败不回滚**（失败项进
+    `failed[{domain,target,kind,error}]`，已成功项保留；重试 = 重放同一 action）；
+  - 返回 `applied/unchanged/skipped/failed/byDomain` + `coldSession?` + `elapsedMs`；
+  - 写盘批量化：mcp / tools 各一次落盘（`state.setToggles`）+ restrict 只重算一次；
+    skills 逐条（shadow 注册本来就必须逐条，但同一 tick 全部发起）；
+  - mcp 域新增内部方法 `loader.setSessionEnabledMany`：一次 hydrate → 写全部
+    toggle → **一次**重挂（逐条调用会排队 N 次重挂）；「全部开启」对 MCP 写**显式
+    true**（不是清覆盖，否则会被项目默认重新关掉）；
+  - 冷会话：skills 项记 `skipped`（`setEnabled` 需要 live agent），mcp / tools 仍
+    落盘并返回 `coldSession:true`。
+- **会话首屏行 3「本会话控制条」**：`全部开启` / `全部关闭` + `已启用 n / m` +
+  `仅当前会话 · 不改项目默认`；**无二次确认**、无提醒条；全开 / 全关时对应按钮禁用；
+  执行中按域串行调用 `session.setBulk` 并显示域级进度（`正在关闭 2 / 3 个域…`，
+  不再有逐条进度）；部分失败显示 `n 项失败 · 重试`，点重试只重放失败所在域。
+  底栏「恢复默认」也改走 `session.setBulk({action:"reset"})`（只清显式会话覆盖，
+  不动项目默认）。
+- **MCP 来源两枚标签（R4 客户端）**：外部行按三态渲染——有插件展示名 → `插件` +
+  插件名（第二枚等宽小标签、悬停全名）；命名空间合成且无映射 → `未识别`（琥珀）；
+  其余 → `外部注入`。详情新增「来源判定」（`前缀 mcp__{ns}__ → {channel}
+  （插件清单映射表）` / `运行时注入来源：{source} → {channel}` / `来源未识别
+  （不是宿主内置）`）与「注入方式」（`工具命名空间合成（不落盘、无 mcp-client
+  实例）` 等）。组内排序：有 channel 的按展示名升序，无 channel 的排后面。
+  `mcp.runtime` 纯 additive 扩展 `channel?` / `attribution?` / `synthesized?` 与
+  `origin:"namespace"`，旧字段（`source` 原文、`origin:"entry"|"fiber"`）语义不变。
+- **Jev 能力决策纳入 Tools（插件级计分与应用）**：一个插件 = 一个评分/应用单元
+  （`kind:"tool"`、`id = cap_<sha256("tool:plugin:<unit>")>`、additive 字段
+  `toolCount`）。候选 name = 插件展示名、description = `N 个工具 · 插件注入`；
+  请求只带工具名 + 一句话说明（截断 8 个 / 500 码点，**不带参数 schema**）；
+  「来源未识别」单元**不进候选**（可能混入未来宿主内建工具，让模型推荐关闭风险高，
+  但仍可手动开关、计入分母）。应用 = 选中插件整插件开、未选中且当前开 → 整插件关；
+  不可开关（locked）项一律不动；**只收窄不扩权**；沿用既有批量两阶段写入、
+  失败按前态逆序回滚、冷会话排队；Tools 写入单列并发组（≤4，写入会触发 restrict
+  重算）。`JevCapabilityWrite` / `JevPrevState` 增加 `tools` 分支，
+  `compareRankItems` 由「skill 先于 mcp」改为三档全序 skill → mcp → tool。
+- **能力面板第四个域 Tab `Tools`**：两栏（插件列表 + 详情），**无左导航、无项目 /
+  工作区下拉**（全局工具注册没有项目维度），header `全局工具注册 · 不区分项目 /
+  工作区`；列表行 = 插件名 + `插件` / `未识别` 标签 + `N 个工具` + 「启用」开关
+  （本会话生效；详情里标「本会话」）；
+  详情 = 来源判定 / 注入方式 / 工具数 / **只读工具清单**（无逐工具开关、无参数表）/
+  关闭影响（`关闭该插件后，本会话模型看不到它的全部 N 个工具…`）。开关写
+  `tools.setSessionEnabled`；解析不到当前会话时置灰并提示「请在对话首屏设置本会话
+  开关」。
 - **会话级开关持久化**（`src/session-state.ts`）：`<dshHome>/dsh-capability-settings/
-  session-capabilities.json`，按 sessionId 记录 Skills / MCP 显式覆盖；目录 0700 /
+  session-capabilities.json`，按 sessionId 记录 Skills / MCP / Tools 显式覆盖
+  （`tools` 域为 v13 additive，见「内部」）；目录 0700 /
   文件 0600；原子写 + 文件锁 + 懒加载；损坏 / 未知版本降级为空表（跟随项目默认）。
   记录带 `headerCreatedAt` 防 sessionId 复用（不一致 ⇒ 旧记录作废；fork 是新 id，
   不继承父会话开关）。
@@ -42,6 +123,33 @@
 
 ### 变更
 
+- **能力面板 / 会话面板改为三域 + 全站命名统一**：用户可见文案 `技能` → `Skills`、
+  `MCP 服务器` → `MCP`、`插件工具` → `Tools`（注释与内部标识不动）。主面板 Tab 行
+  变为四域 `Skills / MCP / Tools / Jev 模型`（`Jev 模型` 仍是配置页、无计数）；
+  会话面板三 Tab `Skills / MCP / Tools`，卡片计数按域（Tools 按**插件数**，
+  Tab 形如 `3 / 6`）。面板与会话两处的 DomainTab 顺序固定。
+- **会话计数口径改为三域相加**：控制条 `已启用 n / m`、底栏 `n / m 项已启用`、
+  收起态能力条 chips 与「决策估算总数」都含 Tools（m = Skills 条数 + MCP 行数 +
+  Tools 插件单元数；「来源未识别」单元也计入分母）。
+- **Jev 评分范围从两域扩到三域**：`capabilitiesTotal` = Skills + MCP + Tools 插件
+  单元（未识别单元不计）；结果面板 `已选 x / N` 的 N 含 Tools（一个插件算 1 个
+  单元）；同分排序由「Skills 先于 MCP」改为三档全序 `Skills → MCP → Tools`，
+  再按名称 / id。结果行：Tools = 插件名（等宽）+ `插件` 标签 + `N 个工具` 灰标签 +
+  描述 + 分数条，**不逐工具出行、不挂来源小标签**（名称即插件名，避免重复）；
+  结果列表下方补一行弱说明（`Tools 以插件整体计分与启用…Jev 只收窄…`）。
+  `empty-capabilities` 文案同步为「当前会话没有可评分的 Skills / MCP / Tools」。
+- **R5 文案收口**：Jev 配置页删除独立 callout（原说明含密钥路径 `~/.dsh/...` 与
+  `目录 700 / 文件 600`），说明并入标题下副标题两行（含 Tools 隐私说明）；
+  密钥安全承诺收进 API Key 标签右侧 `ⓘ`（`密钥仅存宿主，不下发浏览器`）；
+  「能力决策」区内的成本 / 隐私说明保留，其余配置项语义与字段不变。
+- **⚠️ R2 派生继承本版未实现（重要）**：派生继承（`继承 / 不继承` 布尔开关、
+  subagent / teammate 共用、三域整体、默认「继承」）**只有交互设计
+  （`docs/ux/capability-v13.md` §4 / D3），零代码**：本版不写入任何 policy /
+  继承字段、不新增 RPC、首屏行 3 右侧**不渲染任何继承控件或弱提示**。
+  派生 agent（subagent / teammate）的能力仍按现有规则（项目默认 / 项目级声明）
+  取得，**不是**「跟随父会话生效集合」——不要把设计稿里的默认「继承」当成现状。
+  实现属后续版本（第一批只为它预留了 Tools restrict 可按任意 agent 作用域重复
+  应用的纯函数入口 `applyForAgent`）。
 - **会话能力面板 Tab 文案 `MCP 服务器` → `MCP`**：与主能力面板的域 Tab（`MCP`）和
   Figma v12 基线一致，去掉「服务器」后缀；只是文案，Tab 切换与计数不变。
 - **移除自动触发等待期的倒计时弱提示**：能力条 / 面板标题行原先在等待停顿期间显示
@@ -70,6 +178,34 @@
 
 ### 内部
 
+- **`session-capabilities.json` v1 追加 `tools` 域（additive，版本号不变）**：
+  记录级 `sessions.<id>.tools`（键 `plugin:<unit>` → boolean，
+  未识别单元为 `plugin:__unattributed__`）。`version` 仍为 **1**，旧版插件读本文件
+  时忽略该字段（旧版写回**只保留已知字段** ⇒ 用旧版改过任意开关后 Tools 会话开关
+  会丢失、回到默认全部开启，这是已知降级，不承诺降级保状态）。同步修改
+  `SessionStateEntry` / `sanitizeEntry`（只收 boolean）/ `isEmptyEntry` /
+  `writeToggle`（`field` 联合加 `"tools"`），新增 `tools()` / `setTool()` /
+  `setToggles()`（批量一次落盘；空表 = 不改，不是"清空全部"）。
+- **新增宿主模块**：`src/shared/plugin-attribution.ts`（映射表 / 内建清单 /
+  `run_code` 防御的单一事实源）、`src/tools/{types,manager,restrict}.ts`、
+  `src/session-bulk.ts`（三域批量）。`tools/manager.ts` 导出 R2 预留纯函数
+  `applyForAgent(agent, sessionId, toggles)`（本版不调用它实现继承）。
+- **接线**：`src/index.ts` 装配 `tools` 服务与延迟构造的 `session.setBulk`，
+  把 Tools 服务注入 Jev 枚举（缺省时 Jev 跳过 Tools 段并 warn 一次）；
+  `src/remote.ts` 新增三个 endpoint 并扩展 `PanelRpcService`（传输层信封恒
+  `{ok:true,value}`，业务失败仍在 value 内）；`src/mcp/loader.ts` 只新增
+  `setSessionEnabledMany`（不改现有 `setSessionEnabled` 语义）；`src/jev/**`
+  扩 `kind:"tool"` / `write:{type:"tools"}` / `JevPrevState` tools 分支 /
+  `toolCount`。公开 API 增加对应 re-export。
+- **归属规则的已知边界**：真机插件基础工具名是 `univer`（不带 `_`），因此映射表
+  除 `univer_` 前缀外另加一条 exact `univer`；`dsh-diff-approval-` 前缀作为未来
+  多工具的防御规则（exact 优先、同层最长前缀、前缀必须以 `_`/`-` 结尾）；
+  宿主内建排除清单含 `job_` / `schedule_` / `session_` / `terminal_` /
+  `team_task_` / `cordis_inspect_` 前缀与 `run_code`（版本敏感，升级宿主需复核）。
+- **验证**：`pnpm typecheck` 通过；宿主段临时自测（未入库，脚本在 `/tmp`）覆盖
+  方案 §10 的 TH-01..12 / B-01..11 / R4-01..08 / J-01..09 共 168 断言 0 失败，
+  另有真实 `apply()` 组合根装配冒烟 11 断言。正式回归套件由 tester 落
+  `notes/verify/v13-*.mjs`（按方案 §10 用例编号）。
 - `skills/session.ts`：`applyProjectDefaults` 早退条件纳入显式开关；新增
   `restoreExplicit`（list 路径覆盖磁盘 + 注入技能，并清理已删除技能的覆盖记录）。
 - `mcp/loader.ts`：`setSessionEnabled` 先 hydrate 再改内存并落盘；`remount` 前

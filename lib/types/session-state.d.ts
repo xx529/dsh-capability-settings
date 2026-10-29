@@ -15,8 +15,11 @@
  *     不阻断 MCP 挂载与会话开关（等价于"没有显式覆盖"，跟随项目默认）；
  *   - 写：内存镜像权威，串行队列 + 文件锁内"读盘合并（保留其它实例写入的
  *     会话）→ 原子写"；写失败只 `warn`，**本次运行内仍生效**；
- *   - **不存密钥、不存会话内容**：只有 sessionId、两个域的开关键、诊断用
+ *   - **不存密钥、不存会话内容**：只有 sessionId、三个域的开关键、诊断用
  *     cwd / headerCreatedAt。
+ *
+ * 三个域共用同一记录（`skills` / `mcp` / `tools`），互不影响；`tools` 域为
+ * v13 additive 新增（键 `plugin:<unit>`，`version` 仍为 1，旧版读忽略该字段）。
  *
  * 记录形状（`version: 1`）：
  *
@@ -30,6 +33,8 @@
  *       "cwd": "/path/to/project",
  *       "skills": { "figma-workbench": false },
  *       "mcp": { "project:github": false, "server:figma": true },
+ *       // v13 additive（version 不变）：插件级 Tools 开关，键 = 开关单元 id
+ *       "tools": { "plugin:dsh-univer-office": false, "plugin:__unattributed__": false },
  *       "missingSince": 1761328800000
  *     }
  *   }
@@ -72,6 +77,15 @@ export interface SessionStateEntry {
     skills?: Record<string, boolean>;
     /** MCP 显式开关（`project:<key>` / `server:<serverName>` → 是否启用）。 */
     mcp?: Record<string, boolean>;
+    /**
+     * Tools 显式开关（`plugin:<unit>` → 是否启用；`plugin:__unattributed__` =
+     * 「来源未识别」单元）。
+     *
+     * v13 additive：`version` 仍为 1；旧版插件读本文件时忽略该字段（降级 =
+     * 回到默认全开，见 CHANGELOG）。键只存**单元 id**，不存工具名——插件升级
+     * 增减工具后 deny 名单自动跟随（见 `tools/manager.ts`）。
+     */
+    tools?: Record<string, boolean>;
     /** 两阶段对账的"首次发现不存在"时间戳；确认存在后清除。 */
     missingSince?: number;
 }
@@ -128,6 +142,8 @@ export interface SessionStateStore {
     skills(sessionId: string): Readonly<Record<string, boolean>>;
     /** 某会话的 MCP 显式开关（同步；调用方需先 `await ready()`）。 */
     mcp(sessionId: string): Readonly<Record<string, boolean>>;
+    /** 某会话的 Tools 显式开关（同步；调用方先 `await ready()`）。 */
+    tools(sessionId: string): Readonly<Record<string, boolean>>;
     /**
      * 校验记录是否仍属于"当前这个会话"。
      *
@@ -139,6 +155,16 @@ export interface SessionStateStore {
     setSkill(sessionId: string, name: string, enabled: boolean | undefined, meta?: SessionStateMeta): Promise<void>;
     /** 写 / 清除一个 MCP 显式开关（`enabled === undefined` = 清除）。 */
     setMcp(sessionId: string, toggleKey: string, enabled: boolean | undefined, meta?: SessionStateMeta): Promise<void>;
+    /** 写 / 清除一个 Tools 显式开关（`enabled === undefined` = 清除覆盖）。 */
+    setTool(sessionId: string, unitKey: string, enabled: boolean | undefined, meta?: SessionStateMeta): Promise<void>;
+    /**
+     * 批量写 / 清除同一域的多个键（**一次落盘**）。
+     *
+     * 供 R1 批量端点与 MCP 批量写使用：`entries` 里的 `undefined` = 清除该键，
+     * **空表 = 不改任何键**（不是"清空全部"）。批量 QPS 下避免逐条
+     * "读盘-合并-原子写"。
+     */
+    setToggles(sessionId: string, domain: "skills" | "mcp" | "tools", entries: Readonly<Record<string, boolean | undefined>>, meta?: SessionStateMeta): Promise<void>;
     /** 删除某会话的全部记录（对账确认删除 / 显式清理时用）。 */
     forget(sessionId: string): Promise<void>;
     /** 两阶段对账：见 {@link SessionStateReconcileInput}。 */

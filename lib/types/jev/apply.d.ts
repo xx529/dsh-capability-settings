@@ -27,6 +27,7 @@
 import type { McpOpResult } from "../mcp/manager.js";
 import type { McpListResult, McpRuntimeView } from "../mcp/types.js";
 import type { SessionSkillOpResult, SessionSkillView } from "../skills/session.js";
+import type { ToolsListView, ToolsSetSessionResult } from "../tools/types.js";
 import type { JevApplyResult, JevApplySkipped, JevCapability, JevHostContext, JevLogger, JevPendingOutcome } from "./types.js";
 /**
  * 枚举/写入依赖的宿主服务（结构子集）。
@@ -56,6 +57,22 @@ export interface JevCapabilityService {
             kind: "project" | "server";
             enabled: boolean | undefined;
         }): Promise<McpOpResult>;
+    };
+    /**
+     * 可选：Tools 域服务（v13；插件级会话开关）。
+     *
+     * 缺省（旧装配 / 半升级）时枚举**跳过 Tools 段**并 warn 一次，skills/mcp 的
+     * 评分与应用不受影响（方案 §8.1 的降级口径）。
+     */
+    tools?: {
+        list(input: {
+            sessionId?: string;
+        }): Promise<ToolsListView>;
+        setSessionEnabled(input: {
+            sessionId: string;
+            units: string[];
+            enabled: boolean | undefined;
+        }): Promise<ToolsSetSessionResult>;
     };
     /**
      * 可选：从全局工具注册表反推某个 MCP server 的工具（name + description）。

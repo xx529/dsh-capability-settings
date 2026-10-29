@@ -136,8 +136,8 @@ export function ComposerMcpButton({ api }: { api: CapabilityPanelApi }) {
     <button
       type="button"
       className={className}
-      title="MCP 服务器"
-      aria-label="MCP 服务器"
+      title="MCP"
+      aria-label="MCP"
       aria-expanded={state.open}
       onClick={(event) => {
         // 以整个能力工具组为锚（右下角贴按钮组右上角），三个弹层共用同一锚点。
@@ -367,11 +367,11 @@ export function ComposerMcpOverlay({ api }: { api: CapabilityPanelApi }) {
       ref={popRef}
       className="skp-composer-pop"
       role="dialog"
-      aria-label="MCP 服务器"
+      aria-label="MCP"
       style={composerPopStyle(state.anchor)}
     >
       <div className="skp-composer-head">
-        <span className="skp-composer-title">MCP 服务器</span>
+        <span className="skp-composer-title">MCP</span>
       </div>
 
       {error !== undefined && <div className="skp-composer-banner">{error}</div>}
@@ -380,7 +380,7 @@ export function ComposerMcpOverlay({ api }: { api: CapabilityPanelApi }) {
         <div className="skp-composer-empty">加载中…</div>
       ) : servers.length === 0 && externals.length === 0 ? (
         <div className="skp-composer-empty">
-          未发现 MCP 服务器配置。
+          未发现 MCP 配置。
           <br />
           在项目 <code>.mcp.json</code> 或全局 <code>~/.agents/mcp.json</code> 中添加 mcpServers 配置，或在能力面板中新增。
         </div>

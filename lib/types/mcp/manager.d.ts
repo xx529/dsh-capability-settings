@@ -32,14 +32,14 @@ export interface McpManagerDeps {
      */
     tools?: () => any;
     /**
-     * 「运行时注入」实例的发现器（由 index.ts 提供：cordis 插件注册表 + loader 条目）。
-     * 返回 serverName / 来源插件名 / 桥接层配置；缺省时外部清单只靠工具注册表与
-     * 使用记录反推（来源未知）。
+     * 「运行时注入」实例的发现器（由 index.ts 提供：cordis 插件注册表 + loader
+     * 条目 + 工具命名空间合成）。返回 serverName / 来源插件名 / 桥接层配置；
+     * 缺省时外部清单只靠工具注册表与使用记录反推（来源未知）。
      */
     scanInjected?: () => Array<{
         serverName: string;
         source?: string;
-        origin: "entry" | "fiber";
+        origin: "entry" | "fiber" | "namespace";
         config?: Record<string, unknown>;
     }>;
 }

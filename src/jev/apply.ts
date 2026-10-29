@@ -30,6 +30,7 @@ import { performance } from "node:perf_hooks";
 import type { McpOpResult } from "../mcp/manager.js";
 import type { McpListResult, McpRuntimeView } from "../mcp/types.js";
 import type { SessionSkillOpResult, SessionSkillView } from "../skills/session.js";
+import type { ToolsListView, ToolsSetSessionResult } from "../tools/types.js";
 import { errMessage } from "../shared/errors.js";
 import { redact } from "./config-file.js";
 import { capabilityId, DESCRIPTION_LIMIT, truncateCodepoints, WHEN_TO_USE_LIMIT } from "./rank.js";
@@ -71,6 +72,20 @@ export interface JevCapabilityService {
       kind: "project" | "server";
       enabled: boolean | undefined;
     }): Promise<McpOpResult>;
+  };
+  /**
+   * 可选：Tools 域服务（v13；插件级会话开关）。
+   *
+   * 缺省（旧装配 / 半升级）时枚举**跳过 Tools 段**并 warn 一次，skills/mcp 的
+   * 评分与应用不受影响（方案 §8.1 的降级口径）。
+   */
+  tools?: {
+    list(input: { sessionId?: string }): Promise<ToolsListView>;
+    setSessionEnabled(input: {
+      sessionId: string;
+      units: string[];
+      enabled: boolean | undefined;
+    }): Promise<ToolsSetSessionResult>;
   };
   /**
    * 可选：从全局工具注册表反推某个 MCP server 的工具（name + description）。
@@ -145,6 +160,14 @@ const MAX_APPLY_PLAN_ITEMS = 500;
  * manager/loader 自身串行队列处理，这里只限流避免一次打爆子进程/连接。
  */
 const MCP_WRITE_CONCURRENCY = 4;
+
+/**
+ * Tools 写入并发度上限（v13）。
+ *
+ * Tools 写入会触发 `tools.restrict` 重算，不宜与 MCP 同一 tick 全发；单列一个
+ * 组便于日志区分（方案 §8.3-4 推荐）。
+ */
+const TOOLS_WRITE_CONCURRENCY = 4;
 
 // ---------------------------------------------------------------------------
 // 判活
@@ -347,10 +370,64 @@ export async function enumerateCapabilities(options: {
     logger?.warn?.(`capability-panel: Jev 外部 MCP 实例枚举失败（${redact(errMessage(error), [])}）`);
   }
 
+  // —— 4. Tools 插件单元（v13）——
+  // 一个插件 = 一个评分/应用单元；「来源未识别」单元不进候选（A4：可能混入未来
+  // 宿主内建工具，让模型去"推荐关闭"风险高）。
+  const toolsService = service.tools;
+  if (toolsService === undefined) {
+    warnToolsUnavailable(logger);
+  } else {
+    let toolsView: ToolsListView | undefined;
+    try {
+      // 冷会话可枚举（读磁盘 + 内存 hydrate，不需要 live agent）。
+      toolsView = await toolsService.list({ sessionId });
+    } catch (error) {
+      logger?.warn?.(`capability-panel: Jev Tools 单元枚举失败（${redact(errMessage(error), [])}）`);
+    }
+    for (const unit of toolsView?.units ?? []) {
+      if (unit.kind === "unattributed") continue;
+      const applicable = unit.lockedReason === undefined;
+      const capability: JevCapability = {
+        id: capabilityId(`tool:plugin:${unit.unit}`),
+        kind: "tool",
+        name: unit.name,
+        description: truncateCodepoints(`${unit.toolCount} 个工具 · 插件注入`, DESCRIPTION_LIMIT),
+        // 不在项目 / 全局配置文件里；语义与"外部注入"一致。
+        source: "external",
+        origin: "plugin",
+        channel: unit.name,
+        toolCount: unit.toolCount,
+        // 只发工具名与一句话说明（不下发 parameters；隐私口径见方案 §8.2）。
+        tools: unit.tools.map((tool) => ({ ...tool })),
+        applicable,
+        enabledInSession: unit.enabledInSession,
+        // 回滚前态：显式覆盖才记值，跟随默认记 undefined。
+        toolsExplicitToggle: unit.explicit ? unit.enabledInSession : undefined,
+        write: { type: "tools", unit: unit.unit, unitName: unit.name },
+      };
+      if (!applicable) capability.reason = "not-restrictable";
+      add(capability);
+    }
+  }
+
+  /** 固定序 skill → mcp → tool（与 `compareRankItems` 同步）。 */
+  const KIND_ORDER: Record<JevCapability["kind"], number> = { skill: 0, mcp: 1, tool: 2 };
   return [...byId.values()].sort((a, b) => {
-    if (a.kind !== b.kind) return a.kind === "skill" ? -1 : 1;
+    if (a.kind !== b.kind) return KIND_ORDER[a.kind] - KIND_ORDER[b.kind];
     return a.name.localeCompare(b.name);
   });
+}
+
+/**
+ * 旧装配 / 半升级（没有 tools 服务）时 warn 一次：枚举跳过 Tools 段，不报错。
+ *
+ * 模块级只打一次，避免每次 rank/apply 刷屏。
+ */
+let toolsUnavailableWarned = false;
+function warnToolsUnavailable(logger?: JevLogger): void {
+  if (toolsUnavailableWarned) return;
+  toolsUnavailableWarned = true;
+  logger?.warn?.("capability-panel: 未注入 Tools 服务，Jev 枚举跳过 Tools 段（skills/mcp 不受影响）");
 }
 
 // ---------------------------------------------------------------------------
@@ -361,9 +438,9 @@ type WriteResult = { ok: true } | { ok: false; errors: string[] };
 
 /** 写回前态快照（回滚用）。 */
 function snapshotPrev(capability: JevCapability): JevPrevState {
-  return capability.write.type === "skills"
-    ? { type: "skills", enabled: capability.enabledInSession }
-    : { type: "mcp", enabled: capability.mcpExplicitToggle };
+  if (capability.write.type === "skills") return { type: "skills", enabled: capability.enabledInSession };
+  if (capability.write.type === "tools") return { type: "tools", enabled: capability.toolsExplicitToggle };
+  return { type: "mcp", enabled: capability.mcpExplicitToggle };
 }
 
 /** 是否属于「服务未就绪」类错误（激活后短重试的判定）。 */
@@ -392,6 +469,17 @@ async function writeOne(
   try {
     if (capability.write.type === "skills") {
       const result = await service.skills.setSessionEnabled({ sessionId, name: capability.write.name, enabled: desired });
+      return result?.ok === false ? { ok: false, errors: result.errors ?? [] } : { ok: true };
+    }
+    if (capability.write.type === "tools") {
+      // 插件级：一个 unit 一次调用（`units` 长度 1；宿主按 unit 重算 deny 名单）。
+      const toolsService = service.tools;
+      if (toolsService === undefined) return { ok: false, errors: ["tools service unavailable"] };
+      const result = await toolsService.setSessionEnabled({
+        sessionId,
+        units: [capability.write.unit],
+        enabled: desired,
+      });
       return result?.ok === false ? { ok: false, errors: result.errors ?? [] } : { ok: true };
     }
     const result = await service.mcp.setSessionEnabled({
@@ -449,6 +537,15 @@ async function restoreOne(
         name: capability.write.name,
         enabled: prev.type === "skills" ? prev.enabled : true,
       });
+    } else if (capability.write.type === "tools") {
+      const toolsService = service.tools;
+      if (toolsService === undefined) return `rollback ${capability.name}: tools service unavailable`;
+      // `prev.type !== "tools"` 时按"清除显式覆盖"兜底（回到默认开启）。
+      await toolsService.setSessionEnabled({
+        sessionId,
+        units: [capability.write.unit],
+        enabled: prev.type === "tools" ? prev.enabled : undefined,
+      });
     } else {
       await service.mcp.setSessionEnabled({
         sessionId,
@@ -467,8 +564,9 @@ async function restoreOne(
 /**
  * 写入失败后按前态**逆序**恢复（§7.5）。
  *
- * 与写入侧同样批量执行：skills 回滚整批同步发起（不逐条 await），MCP 回滚
- * 并发限流 {@link MCP_WRITE_CONCURRENCY}；整体按已写列表的相反顺序组织。
+ * 与写入侧同样批量执行：skills 回滚整批同步发起（不逐条 await），MCP / Tools
+ * 各自并发限流（{@link MCP_WRITE_CONCURRENCY} / {@link TOOLS_WRITE_CONCURRENCY}）；
+ * 整体按已写列表的相反顺序组织。
  */
 async function rollback(
   deps: Pick<JevApplyEngineDeps, "service">,
@@ -479,18 +577,26 @@ async function rollback(
   const reversed = [...applied].reverse();
   const skills = reversed.filter((entry) => entry.cap.write.type === "skills");
   const mcps = reversed.filter((entry) => entry.cap.write.type === "mcp");
+  const tools = reversed.filter((entry) => entry.cap.write.type === "tools");
   // 关键优化：skills 回滚调用也在同一 tick 全部发起，注册表 effect 只刷新一次。
   const skillPromises = skills.map((entry) => restoreOne(deps, sessionId, cwd, entry.cap, entry.prev));
   const mcpPromise = runWithConcurrency(mcps, MCP_WRITE_CONCURRENCY, (entry) =>
     restoreOne(deps, sessionId, cwd, entry.cap, entry.prev),
   );
-  const [skillSettled, mcpResults] = await Promise.all([Promise.allSettled(skillPromises), mcpPromise]);
+  const toolsPromise = runWithConcurrency(tools, TOOLS_WRITE_CONCURRENCY, (entry) =>
+    restoreOne(deps, sessionId, cwd, entry.cap, entry.prev),
+  );
+  const [skillSettled, mcpResults, toolsResults] = await Promise.all([
+    Promise.allSettled(skillPromises),
+    mcpPromise,
+    toolsPromise,
+  ]);
   const errors: string[] = [];
   for (const settled of skillSettled) {
     if (settled.status === "rejected") errors.push(`rollback: ${redact(errMessage(settled.reason), [])}`);
     else if (settled.value !== undefined) errors.push(settled.value);
   }
-  for (const message of mcpResults) {
+  for (const message of [...mcpResults, ...toolsResults]) {
     if (message !== undefined) errors.push(message);
   }
   return errors;
@@ -676,8 +782,10 @@ export function createJevApplyEngine(deps: JevApplyEngineDeps): JevApplyEngine {
     const results = new Array<WriteResult>(phaseOps.length);
     const skillIndexes: number[] = [];
     const mcpIndexes: number[] = [];
+    const toolsIndexes: number[] = [];
     phaseOps.forEach((op, index) => {
       if (op.cap.write.type === "skills") skillIndexes.push(index);
+      else if (op.cap.write.type === "tools") toolsIndexes.push(index);
       else mcpIndexes.push(index);
     });
     // skills：同步发起全部调用（同一 tick），不 await 单条。
@@ -685,7 +793,15 @@ export function createJevApplyEngine(deps: JevApplyEngineDeps): JevApplyEngine {
     const mcpPromise = runWithConcurrency(mcpIndexes, MCP_WRITE_CONCURRENCY, (index) =>
       write(phaseOps[index]!.cap, phaseOps[index]!.desired),
     );
-    const [skillSettled, mcpResults] = await Promise.all([Promise.allSettled(skillPromises), mcpPromise]);
+    // Tools 单列一组：写入会触发 restrict 重算，不与 MCP 抢同一 tick。
+    const toolsPromise = runWithConcurrency(toolsIndexes, TOOLS_WRITE_CONCURRENCY, (index) =>
+      write(phaseOps[index]!.cap, phaseOps[index]!.desired),
+    );
+    const [skillSettled, mcpResults, toolsResults] = await Promise.all([
+      Promise.allSettled(skillPromises),
+      mcpPromise,
+      toolsPromise,
+    ]);
     skillIndexes.forEach((opIndex, resultIndex) => {
       const settled = skillSettled[resultIndex]!;
       results[opIndex] =
@@ -695,6 +811,9 @@ export function createJevApplyEngine(deps: JevApplyEngineDeps): JevApplyEngine {
     });
     mcpIndexes.forEach((opIndex, resultIndex) => {
       results[opIndex] = mcpResults[resultIndex]!;
+    });
+    toolsIndexes.forEach((opIndex, resultIndex) => {
+      results[opIndex] = toolsResults[resultIndex]!;
     });
     return results;
   }

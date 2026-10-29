@@ -424,3 +424,64 @@ v12 是**提案页 + 补丁并入**，不新建基线页。执行链（脚本都
   `scenes/v8-02-skills-global.scene.json`（278）、`scenes/v11-04-results.scene.json`（170）；
   预览 `preview/v8-01-skills-project.png`（152633 B）、`v8-02-skills-global.png`（165194 B）、
   `v11-04-results.png`（159880 B）。
+
+## 10. v13 三域 Skills / MCP / Tools · 全局开关 · 派生继承 · MCP 来源 · Jev 文案
+
+**页面**：`Capability Panel · 全局开关与派生 v13`（page id `106:2`，新建页，不改 v8/v11/v12 既有页面）。
+
+> ⚠️ **R2 派生继承为设计提案、本版零渲染**：帧 01–05 的「派生 agent 整体继承三域 / 继承|不继承」只作后续设计参照；
+> 实现 UI 不出现该控件，验收按「R2 零渲染」执行，不按帧反推为缺陷。
+
+| 帧 | frame id | 预览 | 内容 |
+|---|---|---|---|
+| 01 · 首屏 hero · 本会话能力（Skills） | `106:5` | `preview/v13-01-hero-skills.png` | 三域 Tab（`Skills 8/15` / `MCP 5/9` / `Tools 3/6`）+ 行 3 控制条（全部开启/全部关闭、「已启用 16/30」、`派生 agent 整体继承三域` + 派生继承 继承/不继承，**无分型策略**；派生控件 ⚠️R2 提案未实现）+ Skills 卡片 |
+| 02 · 首屏 hero · MCP（插件来源） | `106:229` | `preview/v13-02-hero-mcp.png` | `figma`（`插件`+`dsh-to-figma` 两枚标签，17 工具，命名空间合成行）/ `AnySearch` / `context7` / `tavily`（`全局`，tavily 关闭）；派生控件 ⚠️R2 提案未实现 |
+| 03 · 首屏 hero · Tools（插件级） | `106:453` | `preview/v13-03-hero-tools.png` | **6 张已知插件卡片（4 + 2 两行，仅非 MCP 插件工具）**：`dsh-univer-office 13` / `dsh-remote 19` / `dsh-im 8`（开）、`dsh-better-sidebar 1` / `dsh-popout-window 1` / `dsh-diff-approval 1`（关）；卡片 = 插件名 + `13 个工具 · 插件注入` + `插件` 标签 + 整插件开关；派生控件 ⚠️R2 提案未实现 |
+| 04 · 首屏 hero · 全部关闭后状态 | `106:677` | `preview/v13-04-hero-closed.png` | `0/15` `0/9` `0/6`、控制条 `已启用 0/30`（全部关闭禁用 / 全部开启可用）、三域卡片全关、底栏 `0 / 30`；**无二次确认、无提醒条 / 快捷按钮**；派生控件 ⚠️R2 提案未实现 |
+| 05 · 会话「能力」Tab 整页（宽屏） | `106:901` | `preview/v13-05-session-tab.png` | 1080 宽：三域 Tab + 同一控制条（16/30）+ **固定 4 列**卡片（250 宽 × 两行）；帧注含「1080 固定 4 列 + R2 零渲染」约束 |
+| 06 · 能力面板 · Tools（全局） | `106:1085` | `preview/v13-06-panel-tools.png` | 四 Tab（`Skills` / `MCP` / `Tools` / `Jev 模型`，Tools 激活）+ **两栏**：6 个已知插件行（插件名 / `插件` 标签 / 工具数 / 整插件开关）+ 右侧详情 `dsh-univer-office`（`univer_` 前缀、13 工具只读清单 / 关闭影响）；**无左导航** |
+| 07 · 能力面板 · Jev 配置 | `106:1485` | `preview/v13-07-jev-config.png` | 删 callout、副标题两行按**实现口径**（发送输入框草稿 + 能力名称/描述；草稿仅用于评分、不落盘）、Base URL 起上移；保留删密钥路径行 + API Key ⓘ；四 Tab（Jev 高亮）；卡片 672 为 740 宽示意值（1184 宽实测 1077，不校验固定高度） |
+| 08 · 能力决策 · 结果（含 Tools） | `113:7053` | `preview/v13-08-decision-results.png` | 阈值 0.50 + **4 行完整 + 第 5 行底部渐隐 + 滚动提示**（6 行仅展开示意；真实 900px 窗口约 3 行可见）+ `已选 4 / 30` + Tools 插件行（`dsh-univer-office` 13 工具选中 / `dsh-remote` 19 工具未选中）+ 底部 Tools 说明 |
+
+**建稿脚本**（`prototype/v13/`，均幂等：先删 `base-*` / `v13/` 再从基线帧克隆后重绘，不修改基线页节点）：
+
+```
+00-init.js         建页 + 8 帧 1440×900 + 克隆底座（88:8797 / 88:9375 / 42:3433 / 56:7890 / 56:7679）
+01-hero-skills.js  02-hero-mcp.js  03-hero-tools.js  04-hero-closed.js
+05-session-tab.js  06-panel-tools.js  07-jev-config.js  08-decision-results.js
+```
+
+**口径要点**（详见 [`../ux/capability-v13.md`](../ux/capability-v13.md) v1.9）：
+
+- **命名统一**：`Skills` / `MCP` / `Tools`（旧 `MCP 服务器` / `插件工具` / `技能` 不再出现）；主面板四 Tab 含 `Jev 模型`，会话面板三 Tab。
+- **计数 = 可开关单元**：Skills 8/15 + MCP 5/9 + Tools 3/6 ⇒ `已启用 16 / 30`；帧 04 全关 `0 / 30`。
+  Tools Tab 分母是**插件数**（6），卡片描述显示插件内工具数；计数为示例口径，以运行时枚举为准。
+- **Tools 插件级开关**：hero 6 张已知插件卡片（4 + 2 两行；标题 / 工具数描述 / `插件` 标签 / 整插件开关），关闭插件 = 该插件全部工具本会话不可见；空态文案统一为 `尚未发现 Tools` / `无法列出 Tools`；
+  面板两栏插件列表 + 插件详情（只读工具清单），**不提供单工具开关、不做参数表**。
+- **无二次确认、无提醒条**：全部关闭 / 全部开启一步生效；全关态只体现控件与卡片状态，恢复入口是控制条「全部开启」。
+- **派生继承为布尔开关（⚠️设计提案，本版零渲染）**：只有一个 `继承 | 不继承` 分段（无分型链接 / 弹层 / 第三态），subagent 与 teammate 共用，整体作用于 Skills · MCP · Tools；首屏弱提示 `派生 agent 整体继承三域`，只影响之后派生。实现验收不要求该控件。
+- **MCP 来源（R4 不变）**：两枚标签（`插件` + 插件名，第二枚 96px 省略）；配置来源保留 `全局` / `项目`；
+  插件自注册 `mcp__*` 无 mcp-client 实例，需「工具命名空间合成来源行」才能显示。
+- **域边界（MCP vs Tools）**：MCP 收 mcp-client 实例 + 插件自注册 `mcp__<server>__*` 命名空间（figma 合成行只在 02）；Tools 只收插件直接注册的非 `mcp__` 工具（`univer_*` / `rw_*` / `dsh_im_*` / `sidebar_open` / `open_in_popout` / `dsh-diff-approval-annotate`），两域互斥不重复收录。
+- **插件归属启发式**：宿主 `tools.schemas()` 无来源字段，按前缀 + 插件清单映射；识别不到显示「来源未识别」（当前 6 张卡均为已知插件，无未识别卡）。
+- **能力决策含 Tools（插件级）**：候选单元 = Skills 15 + MCP 9 + Tools 6（插件）= 30；Tools 以**插件**为评分/应用单元，选中即启用该插件全部工具、未选中即整插件关闭；Jev **只收窄不扩权**；结果行 `已选 x / 30` 与选中数一致。
+- **实现约束（验收口径）**：① 会话「能力」Tab 1080 容器**固定 4 列**（5 列仅容器 >1180 时可选）；② 能力决策结果面板 **约 3 行可见 + 可滚动 + 底部 20px 渐隐 + 末行可达**（**不要求 6 行全显**，6 行仅展开示意）；③ Jev 卡片高度不做固定断言（设计 672 是 740 宽示意，实现 1184 宽实测 1077，验收以「无 callout + Base URL 上移」为准）；④ **R2 零渲染**。
+- **真实外壳 / 数据备注**：帧 01/03/04/05 的 920 宽是**桌面 1440 外壳示意值**；真实 web 测试外壳 hero 面板宽 ≈774，卡片为 **3 列**（验收以真实外壳 3 列为准，不回改帧）。web 测试 profile 实际 Tools 仅 **2 个单元**（`dsh-im` 1 + `__unattributed__` 40），univer/popout/diff 未安装、dsh-remote 版本不兼容被跳过、figma 未安装（R4 合成行由单测 8/8 + entry/fiber 两枚标签验证）；帧 03/06 的 **6 插件为示例**。
+- Jev 页副标题两行（实现口径）：「用 Jev 模型给 Skills、MCP 与 Tools 打分，自动选出与本轮草稿最相关的能力。」+「一次请求完成；发送输入框草稿与能力名称、描述（Tools 为插件名与工具说明摘要）；草稿仅用于本次评分、不落盘，结果只写当前会话。」；页面正文无目录路径 / 700 / 600。
+
+**可重导入 scene JSON（已导出，8/8）**：
+
+| 文件 | nodes | bytes |
+|---|---|---|
+| `scenes/v13-01-hero-skills.scene.json` | 194 | 57899 |
+| `scenes/v13-02-hero-mcp.scene.json` | 157 | 46390 |
+| `scenes/v13-03-hero-tools.scene.json` | 171 | 50496 |
+| `scenes/v13-04-hero-closed.scene.json` | 194 | 56566 |
+| `scenes/v13-05-session-tab.scene.json` | 170 | 53154 |
+| `scenes/v13-06-panel-tools.scene.json` | 150 | 48976 |
+| `scenes/v13-07-jev-config.scene.json` | 333 | 102815 |
+| `scenes/v13-08-decision-results.scene.json` | 166 | 48955 |
+
+- 契约 `{ nodes: [FRAME] }`，单帧均 < 500 节点；已校验 `JSON.parse` 通过、`nodes.length === 1`、根节点 FRAME、节点数与画布可见节点一致。
+- 导出链：`prototype/v13/export-scene.js`（紧凑序列化，短键 + 十六进制色值，规避单次工具输出上限）→
+  `prototype/v13/decode-scene.py`（本地还原为 scene 契约）。**scripts 仍是建稿唯一事实源**，scene 为快照。

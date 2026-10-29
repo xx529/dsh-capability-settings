@@ -1,7 +1,7 @@
 /**
  * 运行时探测：**不是本插件配置文件**里的 MCP 实例（其它插件 / profile 注入）。
  *
- * 这类实例有两种存在形态，本模块都尝试识别：
+ * 这类实例有三种存在形态，本模块都尝试识别：
  *
  *  1. **loader 条目**：profile 的 `cordis.patch.yml` 里 `insert:` 的
  *     `@deepseek-ai/dsh-mcp-client` 条目（cordis loader 的 entry tree）。可直接读
@@ -13,12 +13,20 @@
  *     （每个 `Plugin.Runtime` 有 `name` 与 `fibers`），而 `Fiber.name` 的语义是
  *     「inherited from the nearest named ancestor」——因此该 fiber 的 `name`
  *     就是**注入它的插件**，这正是"来源插件"。
+ *  3. **工具命名空间（R4 新增）**：插件**直接** `ctx.tools.register` 注册
+ *     `mcp__<ns>__*`、却没有 mcp-client 实例（本机活例 `dsh-to-figma` 的
+ *     `figma`）。两条实例发现路径都看不到它，只能从**全局工具视图**反推：
+ *     `mcp__<ns>__*` 出现但没有任何实例 ⇒ 合成一条 `origin:"namespace"` 的
+ *     外部行（无 `config`、`synthesized:true`）。
  *
- * 两条路都是**只读**的：不修改任何注册表、不挂载/卸载任何东西。任何一步失败都
+ * 三条路都是**只读**的：不修改任何注册表、不挂载/卸载任何东西。任何一步失败都
  * 静默降级（识别不到就少一条信息），绝不影响面板其它功能。
  *
  * @module dsh-capability-settings/mcp/runtime
  */
+
+import { attributeMcpNamespace } from "../shared/plugin-attribution.js";
+import { parseMcpToolName } from "./usage.js";
 
 /** 桥接层包名（loader 条目 name / fiber runtime name 都按它匹配）。 */
 const BRIDGE_PACKAGE = "dsh-mcp-client";
@@ -29,8 +37,12 @@ export interface InjectedMcpInstance {
   serverName: string;
   /** 来源：注入它的插件显示名 / loader 条目 id；识别不到时缺省。 */
   source?: string;
-  /** 发现路径：loader 条目 or 动态 fiber（仅用于文案/诊断）。 */
-  origin: "entry" | "fiber";
+  /**
+   * 发现路径：loader 条目 / 动态 fiber / 工具命名空间合成。
+   *
+   * `"namespace"` = 没有 mcp-client 实例、由全局工具视图合成的行（R4）。
+   */
+  origin: "entry" | "fiber" | "namespace";
   /** 桥接层配置原样（`{transport, serverName, command, args, env, url, headers…}`）。 */
   config?: Record<string, unknown>;
 }
@@ -128,10 +140,58 @@ export function scanInjectedMcpEntries(ctx: any): InjectedMcpInstance[] {
   return found;
 }
 
-/** 两条发现路径的并集（同一 serverName 优先保留 loader 条目那条，带来源 id）。 */
+/**
+ * 扫全局工具视图，找出**没有 mcp-client 实例**的 `mcp__<ns>__*` 命名空间（R4）。
+ *
+ * 这是第三条发现路径：插件可以自己 `ctx.tools.register(createMcpToolDefinition(...))`
+ * 注册 `mcp__<ns>__*`（本机 `dsh-to-figma` 的 `figma`），此时没有实例、没有配置，
+ * 前两条路径都看不到它，但它的工具确实在全局视图里。
+ *
+ * 只读：`ctx.root.get("tools").schemas()`（与 `mcp/loader.ts` 的取数口径一致）；
+ * 任何异常静默降级为空数组。
+ *
+ * @param ctx 宿主插件上下文
+ * @param exclude 已被 fiber / loader 条目 / 本插件配置占用的 serverName（不重复合成）
+ */
+export function scanInjectedMcpNamespaces(ctx: any, exclude: ReadonlySet<string>): InjectedMcpInstance[] {
+  const found: InjectedMcpInstance[] = [];
+  let schemas: unknown;
+  try {
+    const tools = ctx?.root?.get?.("tools") ?? ctx?.get?.("tools");
+    schemas = tools?.schemas?.();
+  } catch {
+    return found;
+  }
+  if (!Array.isArray(schemas)) return found;
+  const namespaces = new Set<string>();
+  for (const schema of schemas) {
+    const name = (schema as { name?: unknown } | null | undefined)?.name;
+    const parsed = parseMcpToolName(typeof name === "string" ? name : "");
+    if (parsed === undefined) continue;
+    if (exclude.has(parsed.serverName)) continue;
+    namespaces.add(parsed.serverName);
+  }
+  for (const serverName of [...namespaces].sort((left, right) => left.localeCompare(right))) {
+    const rule = attributeMcpNamespace(serverName);
+    // 命中映射表 → source 直接放展示名（视图层据此出「插件 + 名称」两枚标签）；
+    // 未命中 → 不带 source（视图层标「未识别」，不猜）。
+    found.push({ serverName, origin: "namespace", ...(rule !== undefined ? { source: rule.display } : {}) });
+  }
+  return found;
+}
+
+/**
+ * 三条发现路径的并集：fiber → loader 条目 → namespace（仅缺失名字）。
+ *
+ * 合并顺序保证「已有实例的命名空间不会被 namespace 路径覆盖」（方案 §7.2-5）。
+ * 同一 serverName 优先保留 loader 条目那条（带来源 id）。
+ */
 export function scanInjectedMcpInstances(ctx: any): Map<string, InjectedMcpInstance> {
   const merged = new Map<string, InjectedMcpInstance>();
   for (const instance of scanInjectedMcpFibers(ctx)) merged.set(instance.serverName, instance);
   for (const instance of scanInjectedMcpEntries(ctx)) merged.set(instance.serverName, instance);
+  for (const instance of scanInjectedMcpNamespaces(ctx, new Set(merged.keys()))) {
+    merged.set(instance.serverName, instance);
+  }
   return merged;
 }

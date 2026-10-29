@@ -9,6 +9,7 @@
  */
 
 import { findProjectRoot } from "../shared/project-root.js";
+import { displayNameOfSource } from "../shared/plugin-attribution.js";
 import { MCP_USAGE_VIEW_LIMIT, type McpRuntimeServerView, type McpRuntimeView, type McpUsageView } from "./types.js";
 import { parseMcpToolName, type McpUsageLog } from "./usage.js";
 import { withFileLock } from "../shared/file-lock.js";
@@ -40,11 +41,16 @@ export interface McpManagerDeps {
    */
   tools?: () => any;
   /**
-   * 「运行时注入」实例的发现器（由 index.ts 提供：cordis 插件注册表 + loader 条目）。
-   * 返回 serverName / 来源插件名 / 桥接层配置；缺省时外部清单只靠工具注册表与
-   * 使用记录反推（来源未知）。
+   * 「运行时注入」实例的发现器（由 index.ts 提供：cordis 插件注册表 + loader
+   * 条目 + 工具命名空间合成）。返回 serverName / 来源插件名 / 桥接层配置；
+   * 缺省时外部清单只靠工具注册表与使用记录反推（来源未知）。
    */
-  scanInjected?: () => Array<{ serverName: string; source?: string; origin: "entry" | "fiber"; config?: Record<string, unknown> }>;
+  scanInjected?: () => Array<{
+    serverName: string;
+    source?: string;
+    origin: "entry" | "fiber" | "namespace";
+    config?: Record<string, unknown>;
+  }>;
 }
 
 /** 一次写操作的最小入参（scope + 目标文件定位）。 */
@@ -409,7 +415,7 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
     const disabledByProject = new Set<string>((await overrides?.sets(input?.cwd))?.mcp ?? []);
     // serverName → 视图（先放发现器给的来源/配置，随后用工具注册表补工具）。
     const groups = new Map<string, McpRuntimeServerView>();
-    const ensure = (serverName: string, origin: "entry" | "fiber"): McpRuntimeServerView => {
+    const ensure = (serverName: string, origin: McpRuntimeServerView["origin"]): McpRuntimeServerView => {
       const existing = groups.get(serverName);
       if (existing !== undefined) return existing;
       const created: McpRuntimeServerView = { serverName, origin, restrictable: false, tools: [], calls: 0 };
@@ -419,8 +425,25 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
     try {
       for (const injected of deps.scanInjected?.() ?? []) {
         if (owned.has(injected.serverName)) continue;
+        // 先到先得：真实例（fiber / loader 条目）优先，命名空间合成行**不覆盖**
+        // 已有实例（方案 §7.2-5；发现器已按此顺序合并，这里再防一次乱序）。
+        if (groups.has(injected.serverName)) continue;
         const view = ensure(injected.serverName, injected.origin);
-        if (injected.source !== undefined) view.source = injected.source;
+        // R4：命名空间合成行 = 无实例、无配置（详情文案据此标「工具命名空间合成」）。
+        if (injected.origin === "namespace") view.synthesized = true;
+        if (injected.source !== undefined) {
+          // source 保留原文，channel 是映射表归一后的展示名（两者都放视图里）。
+          view.source = injected.source;
+          const channel = displayNameOfSource(injected.source);
+          view.channel = channel;
+          view.attribution =
+            injected.origin === "namespace"
+              ? { matchedBy: "namespace", pattern: injected.serverName }
+              : { matchedBy: "source", pattern: injected.source };
+        } else {
+          // 无来源：不猜（面板标「来源未识别」）。
+          view.attribution = { matchedBy: "unknown" };
+        }
         const config = injected.config as McpServerEntry | undefined;
         if (config !== undefined) {
           try {
@@ -439,7 +462,14 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
       for (const schema of Array.isArray(schemas) ? schemas : []) {
         const parsed = parseMcpToolName(typeof schema?.name === "string" ? schema.name : "");
         if (parsed === undefined || owned.has(parsed.serverName)) continue;
-        const view = ensure(parsed.serverName, "fiber");
+        const existing = groups.get(parsed.serverName);
+        // R4：没有任何发现记录（fiber / 条目 / namespace）时，工具注册表反推路径
+        // 产出的就是「工具命名空间合成」行（现状写死 "fiber" 是错的）。
+        const view = existing ?? ensure(parsed.serverName, "namespace");
+        if (existing === undefined) {
+          view.synthesized = true;
+          view.attribution = { matchedBy: "unknown" };
+        }
         view.tools.push({
           name: parsed.tool,
           ...(typeof schema?.description === "string" && schema.description.length > 0 ? { description: schema.description } : {}),

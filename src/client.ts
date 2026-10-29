@@ -38,7 +38,7 @@ const NS = "capabilityPanel";
  */
 const zh = {
   "panel.title": "能力面板",
-  "panel.domain.skills": "技能",
+  "panel.domain.skills": "Skills",
   "panel.domain.mcp": "MCP",
   "panel.scope.all": "全部",
   "panel.scope.project": "项目",
@@ -115,6 +115,9 @@ export function apply(ctx: any) {
       notifyWorkspaceListeners();
     },
     sessionTitle: (sessionId) => sessionTitleOf(ctx, sessionId),
+    // v13 A5：能力面板的 Tools 页要按会话写开关，但主面板自身没有 sessionId；
+    // 这里把客户端快照解析出的「当前会话」暴露给面板 api（解析不到 → 只读）。
+    currentSessionId: () => resolveCurrentSessionId(ctx),
   });
 
   // composer（输入框工具行：Skills / MCP 按钮与弹层）专用
@@ -291,6 +294,34 @@ export function apply(ctx: any) {
  * 依次尝试 `displayTitle`（侧栏用的就是它）→ `title` → `summary`；都拿不到时
  * 返回 undefined，面板退化为显示会话 id 尾部。
  */
+/**
+ * 解析「当前会话」id（v13 A5：能力面板 Tools 页要按会话写开关）。
+ *
+ * 优先 `sessions.list` 快照的 `current`；该外壳（0.2.0-rc.2）没有 `current` 时
+ * 退而用「被主视图保留且唯一」的会话（`byId[id].retainedBy.mainView > 0`），
+ * 再退而用唯一 id。多会话同时保留且无 current 时返回 undefined——宁可只读，
+ * 也不写错会话。
+ */
+function resolveCurrentSessionId(ctx: any): string | undefined {
+  try {
+    const snapshot = ctx.get("sessions")?.list?.getSnapshot?.();
+    if (typeof snapshot?.current === "string" && snapshot.current.length > 0) return snapshot.current;
+    const byId = snapshot?.byId;
+    if (byId !== null && typeof byId === "object") {
+      const mainViewIds = Object.keys(byId).filter((id) => {
+        const retained = (byId as Record<string, { retainedBy?: Record<string, number> }>)[id]?.retainedBy;
+        return typeof retained?.mainView === "number" && retained.mainView > 0;
+      });
+      if (mainViewIds.length === 1) return mainViewIds[0];
+    }
+    const ids = Array.isArray(snapshot?.ids) ? snapshot.ids : [];
+    if (ids.length === 1 && typeof ids[0] === "string") return ids[0];
+  } catch {
+    /* sessions 服务缺失：按解析不到处理（面板降级只读） */
+  }
+  return undefined;
+}
+
 /**
  * 解析 `conversation.view` 条目的当前会话 id：优先用标准 props，其次用
  * sessions 快照的 current / 唯一 ids 兜底（0.2.0-rc.2 的 sessions 快照没有

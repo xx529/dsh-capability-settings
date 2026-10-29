@@ -20,17 +20,19 @@
  * @module dsh-capability-settings/client/composer-capability
  */
 import type { ReactNode } from "react";
-import type { CapabilityPanelApi, ClientMcpRuntimeServer, ClientMcpServer, ClientSkillSummary } from "./api.js";
+import type { CapabilityPanelApi, ClientMcpRuntimeServer, ClientMcpServer, ClientSkillSummary, ClientToolsUnit, SessionBulkAction, SessionBulkDomain, SessionBulkFailure } from "./api.js";
 import { type MountInfo } from "./mcp-common.js";
 export interface CapabilitySnapshot {
     skills: ClientSkillSummary[];
     servers: ClientMcpServer[];
     externals: ClientMcpRuntimeServer[];
+    /** Tools 域（v13）：插件级开关单元；tools 服务不可用时降级为空数组。 */
+    tools: ClientToolsUnit[];
     mounts: Record<string, MountInfo>;
     settling: boolean;
 }
-/** 卡片底部的来源标签配色（项目蓝 / 全局绿 / 内置琥珀 / 插件紫 / 预设灰 / 外部橙）。 */
-type TagTone = "project" | "global" | "bundled" | "plugin" | "preset" | "external";
+/** 卡片底部的来源标签配色（项目蓝 / 全局绿 / 内置琥珀 / 插件紫 / 预设灰 / 外部橙 / 未识别琥珀）。 */
+type TagTone = "project" | "global" | "bundled" | "plugin" | "preset" | "external" | "unattributed";
 export interface SkillRow {
     id: string;
     kind: "skill";
@@ -62,8 +64,35 @@ export interface McpRow {
     writeKind: "project" | "server";
     /** restrict 无法生效的外部实例（按会话注入）。 */
     locked: boolean;
+    /** 插件展示名（v13 R4：第二枚标签；缺省 = 无插件来源）。 */
+    channel?: string;
+    /** true = 命名空间合成行（详情/卡片可加「合成」说明）。 */
+    synthesized?: boolean;
 }
-export type Row = SkillRow | McpRow;
+/**
+ * Tools 域的一行（v13 R3）：一个插件 = 一个开关单元，无单工具开关。
+ *
+ * `unit` 是宿主给的开关单元 id（写 `tools.setSessionEnabled` 用），
+ * `toolCount` 只用于描述与详情，**Tab 分母是插件数**。
+ */
+export interface ToolRow {
+    id: string;
+    kind: "tool";
+    name: string;
+    tag: string;
+    tone: TagTone;
+    /** 卡片描述（如 `13 个工具 · 插件注入`）。 */
+    description: string;
+    /** 行内工具数标签（如 `13 个工具`）。 */
+    meta: string;
+    enabled: boolean;
+    disabled: boolean;
+    /** 开关单元 id（`__unattributed__` = 来源未识别）。 */
+    unit: string;
+    /** 不可开关原因（正常缺省）。 */
+    lockedReason?: string;
+}
+export type Row = SkillRow | McpRow | ToolRow;
 /** 能力面板域 Tab（`onManage` 可指定打开哪个 Tab，由 src/client.ts 接线）。 */
 export type PanelDomain = "skills" | "mcp" | "jev";
 /**
@@ -92,12 +121,33 @@ export interface ComposerCapabilityHeroProps {
 }
 export declare function buildSkillRows(snapshot: CapabilitySnapshot, pending: Record<string, boolean>): SkillRow[];
 export declare function buildMcpRows(snapshot: CapabilitySnapshot, pending: Record<string, boolean>): McpRow[];
+/**
+ * Tools 域行（v13 R3）：一个插件 = 一行；来源未识别合并成一个单元排最后。
+ * `pending` 覆盖会话态（乐观回显 / 批量执行中）。
+ */
+export declare function buildToolRows(snapshot: CapabilitySnapshot, pending: Record<string, boolean>): ToolRow[];
 export declare function CapabilityCard({ row, busy, onToggle }: {
     row: Row;
     busy: boolean;
     onToggle: () => void;
 }): import("react").JSX.Element;
-type TabId = "skills" | "mcp";
+type TabId = "skills" | "mcp" | "tools";
+/** 行 3 控制条的批量态（idle / 执行中 / 部分失败）。 */
+export interface BulkState {
+    phase: "idle" | "running" | "partial";
+    /** 本次 / 上次动作；idle 且从未执行时缺省。 */
+    action?: SessionBulkAction;
+    /** 已完成的域数（进度文案用）。 */
+    doneDomains: number;
+    /** 本次要跑的域总数（重试时只含失败域）。 */
+    totalDomains: number;
+    /** 聚合的逐项失败（`{n} 项失败 · 重试`）。 */
+    failed: SessionBulkFailure[];
+    /** 含失败的域（重试只重放这些域）。 */
+    failedDomains: SessionBulkDomain[];
+    /** 传输层 / 业务失败的一次性文案。 */
+    error?: string;
+}
 interface PanelProps {
     mode: "dock" | "hero" | "overlay" | "view";
     loading: boolean;
@@ -105,6 +155,8 @@ interface PanelProps {
     snapshot: CapabilitySnapshot;
     skillRows: SkillRow[];
     mcpRows: McpRow[];
+    /** Tools 域行（v13 R3）：一个插件一行。 */
+    toolRows: ToolRow[];
     pending: Record<string, boolean>;
     busy: Record<string, boolean>;
     onToggle: (row: Row) => void;
@@ -113,6 +165,11 @@ interface PanelProps {
     onCollapse: () => void;
     onManage?: () => void;
     onRetry?: () => void;
+    /** 行 3 控制条：三域批量开关（R1）。 */
+    onBulk: (action: SessionBulkAction) => void;
+    /** 重试只重放失败域。 */
+    onRetryBulk: () => void;
+    bulkState: BulkState;
     /** 入口「✦ 能力决策」（展开态在 tabs 行右侧；仅 hero 传入）。 */
     decisionEntry?: ReactNode;
     /** 自动触发默认关闭的弱提示（与入口同排，窄容器隐藏）。 */
@@ -121,9 +178,11 @@ interface PanelProps {
 export declare function CapabilityPanel(props: PanelProps & {
     initialTab?: TabId;
 }): import("react").JSX.Element;
-export declare function CapabilityBar({ skillRows, mcpRows, loading, onExpand, decisionEntry, }: {
+export declare function CapabilityBar({ skillRows, mcpRows, toolRows, loading, onExpand, decisionEntry, }: {
     skillRows: SkillRow[];
     mcpRows: McpRow[];
+    /** Tools 域行（v13）：chips 与计数含第三域。 */
+    toolRows: ToolRow[];
     loading: boolean;
     onExpand: () => void;
     /** 入口「✦ 能力决策」（紧邻「配置」左侧；仅 hero 传入）。 */

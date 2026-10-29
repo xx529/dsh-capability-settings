@@ -221,8 +221,28 @@ export interface McpRuntimeServerView {
    * loader 条目 id；识别不到时缺省（面板显示「运行时注入」）。
    */
   source?: string;
-  /** 发现路径：loader 条目 / 动态 fiber。仅用于文案与诊断。 */
-  origin: "entry" | "fiber";
+  /**
+   * 发现路径：loader 条目 / 动态 fiber / 工具命名空间合成（R4 additive）。
+   *
+   * `"namespace"` = 没有 mcp-client 实例，由全局工具视图 `mcp__<ns>__*` 合成
+   * （插件直接 `ctx.tools.register` 注册 MCP 工具的情况，本机 `figma`）。
+   */
+  origin: "entry" | "fiber" | "namespace";
+  /**
+   * R4 新增：注入方展示名（映射表归一后的插件名；无来源缺省）。
+   *
+   * 与 `source` 并存：`source` 是原文（fiber name / 条目 id），`channel` 是展示名
+   * （如 `dsh-figma` → `dsh-to-figma`）。卡片第二枚标签用它。
+   */
+  channel?: string;
+  /** R4 新增：来源判定（详情「来源判定」文案与诊断）。 */
+  attribution?: {
+    matchedBy: "namespace" | "source" | "unknown";
+    /** 命中的命名空间 / source 原文。 */
+    pattern?: string;
+  };
+  /** R4 新增：true = 由工具命名空间合成（没有 mcp-client 实例，无 `config`）。 */
+  synthesized?: boolean;
   /** 桥接层配置里能读到的传输方式（与配置条目同形；读不到时缺省）。 */
   transport?: "stdio" | "http";
   /** 与配置条目同款的摘要（命令/URL）。 */

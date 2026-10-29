@@ -58,13 +58,11 @@ function notifyJevConfigChanged(): void {
 /** UX §5.8 的完整中文文案（可直抄副本，集中放这里便于对照）。 */
 const COPY = {
   title: "Jev 模型",
-  subtitle: "配置 TypeSafe Jev 后，可在对话开始首屏停止输入时自动为本会话能力做决策，也可手动触发。",
-  batch: "一次请求给全部能力打分",
-  scope: "全局配置 · 所有项目和会话共享",
-  securityLead: "API Key 只保存在宿主",
-  securityPath: "~/.dsh/dsh-capability-settings/jev.json",
-  securityTail: "（目录 700 / 文件 600），不会下发到浏览器；评分请求由宿主发起。",
-  privacy: "评分时会把输入框草稿与能力名称、描述发送到你填写的 Jev 服务。",
+  /** R5：删除独立 callout，说明并入副标题两行（A10 已拍板文案）。 */
+  subtitle: "用 Jev 模型给 Skills、MCP 与 Tools 打分，自动选出与本轮草稿最相关的能力。",
+  subtitle2: "一次请求完成；发送输入框草稿与能力名称、描述（Tools 为插件名与工具说明摘要）；草稿仅用于本次评分、不落盘，结果只写当前会话。",
+  /** 密钥安全承诺收进 API Key ⓘ（R5）。 */
+  keySafety: "密钥仅存宿主，不下发浏览器",
   baseUrl: "Base URL",
   baseUrlHint: "留空使用默认值 https://api.typesafe.ai",
   model: "模型名",
@@ -594,16 +592,7 @@ export function JevPanel({ api, active }: { api: CapabilityPanelApi; active: boo
         <div className="skp-jev-card">
           <h3 className="skp-jev-title">{COPY.title}</h3>
           <p className="skp-jev-subtitle">{COPY.subtitle}</p>
-
-          <div className="skp-jev-note">
-            <span className="skp-jev-note-strong">{COPY.batch}</span>
-            <span>{COPY.scope}</span>
-            <span>
-              {COPY.securityLead} <code>{COPY.securityPath}</code>
-              {COPY.securityTail}
-            </span>
-            <span>{COPY.privacy}</span>
-          </div>
+          <p className="skp-jev-subtitle skp-jev-subtitle-sub">{COPY.subtitle2}</p>
 
           {phase === "loading" && <div className="skp-jev-loading">{COPY.loading}</div>}
 
@@ -706,17 +695,34 @@ export function JevPanel({ api, active }: { api: CapabilityPanelApi; active: boo
           </div>
 
           {form.keyMode === "direct" ? (
-            <div className="skp-jev-field">
-              <label className="skp-jev-label" htmlFor="skp-jev-apikey">
-                {COPY.apiKey}
-              </label>
+            /* FINDING-05：password 输入必须在 form 内（Chrome「Password field is not
+               contained in a form」VERBOSE）。这里只包住 API Key 字段本身，提交被阻止，
+               不影响其它表单交互。 */
+            <form className="skp-jev-field" onSubmit={(event) => event.preventDefault()} noValidate>
+              <span className="skp-jev-label-row">
+                <label className="skp-jev-label" htmlFor="skp-jev-apikey">
+                  {COPY.apiKey}
+                </label>
+                <button
+                  type="button"
+                  className="skp-jev-info"
+                  title={COPY.keySafety}
+                  aria-label="密钥存储说明"
+                  aria-describedby="skp-jev-apikey-safety"
+                >
+                  <span aria-hidden="true">ⓘ</span>
+                </button>
+                <span className="skp-jev-key-safety" id="skp-jev-apikey-safety">
+                  {COPY.keySafety}
+                </span>
+              </span>
               <div className="skp-jev-input-row">
                 <input
                   id="skp-jev-apikey"
                   ref={apiKeyRef}
                   className={inputClass(errors.apiKey !== undefined)}
                   type={form.showKey ? "text" : "password"}
-                  autoComplete="off"
+                  autoComplete="new-password"
                   spellCheck={false}
                   value={form.apiKeyDraft}
                   placeholder={hasSavedFileKey && !form.replacingKey ? `已保存 · 尾号 ${savedLast4}` : COPY.apiKeyPlaceholder}
@@ -758,7 +764,7 @@ export function JevPanel({ api, active }: { api: CapabilityPanelApi; active: boo
                   {keyMeta !== undefined && <span className="skp-jev-key-meta">{keyMeta}</span>}
                 </span>
               )}
-            </div>
+            </form>
           ) : (
             <div className="skp-jev-field">
               <label className="skp-jev-label" htmlFor="skp-jev-envname">

@@ -41,6 +41,10 @@ import { createImportsManager } from "./imports/manager.js";
 import { createJevManager } from "./jev/manager.js";
 import { createSessionState } from "./session-state.js";
 import { createSessionStateReconciler } from "./session-state-reconcile.js";
+import { createToolsManager } from "./tools/manager.js";
+import type { ToolsManager } from "./tools/manager.js";
+import { createSessionBulk } from "./session-bulk.js";
+import type { SessionBulk } from "./session-bulk.js";
 import { findProjectRoot } from "./shared/project-root.js";
 import { mountRpcChannel } from "./remote.js";
 
@@ -83,6 +87,21 @@ export interface CapabilityPanelService {
   /** Jev 能力决策（配置 / 打分 / 应用；见 `jev/manager.ts`）。 */
   jev: ReturnType<typeof createJevManager>;
   /**
+   * Tools 域（插件级会话开关，v13；见 `tools/manager.ts`）。
+   *
+   * 一个插件 = 一个开关单元；关闭 = 对该插件在本会话的全部可继承工具调
+   * `tools.restrict({deny})`。主面板 `/tools.list` 只读；开关只作用于会话。
+   */
+  tools: ToolsManager;
+  /**
+   * R1 批量端点（三域一次开 / 关 / 恢复默认；见 `session-bulk.ts`）。
+   *
+   * 业务失败收在返回值里（`{ok:false,errors}`），通道层信封恒 `{ok:true,value}`。
+   */
+  session: {
+    setBulk(input: unknown): Promise<unknown>;
+  };
+  /**
    * 可选：按 serverName 从全局工具注册表反推 MCP 工具清单（只读）。
    *
    * 只给 Jev rank 的逐能力 question 用（让模型知道 server 实际能做什么）；
@@ -116,6 +135,11 @@ export function apply(ctx: any, config: Config = {}) {
   // 在组合根建一次、注入下去；无 dshHome 的 headless 环境仍可工作（落盘到
   // 默认 dsh home，写入失败只 warn）。
   const sessionState = createSessionState({ dshHome: config.dshHome, logger: ctx.logger });
+  // Tools 域（v13）：枚举全局工具注册表 → 按插件聚合成开关单元 → 按会话
+  // restrict 该插件全部可继承工具。与会话存储共用同一实例（`tools` 域）。
+  const tools = createToolsManager(ctx, { state: sessionState, logger: ctx.logger });
+  // R1 批量端点：延迟构造（依赖最终 service），同 session 串行由模块内部保证。
+  const sessionBulkRef: { current?: SessionBulk } = {};
   // 项目级「全局能力引用」存储：MCP 管理器与 MCP loader 共用同一实例
   // （「导入到本项目」= 登记引用，启停是引用上的项目级标记）。
   // skills 域不走引用——skill 的启停由宿主原生读 frontmatter，引用存储
@@ -242,6 +266,19 @@ export function apply(ctx: any, config: Config = {}) {
     ),
     overrides,
     jev,
+    tools,
+    session: {
+      setBulk: (input: unknown) => {
+        sessionBulkRef.current ??= createSessionBulk({
+          ctx,
+          state: sessionState,
+          loader,
+          service: () => serviceRef.current,
+          logger: ctx.logger,
+        });
+        return sessionBulkRef.current.setBulk(input);
+      },
+    },
     // Jev rank 的 question 需要「这个 MCP server 能做什么」：从全局工具注册表
     // 反推 `mcp__<serverName>__*`（name 取后缀、description 取 schema 描述）。
     // 只读；tools 服务缺失或任何异常都静默降级为 []（评分照常，只是缺 tools）。
@@ -281,6 +318,7 @@ export function apply(ctx: any, config: Config = {}) {
     disposeUsageGuard,
     () => skillsRegistry.dispose(),
     () => skillSessions.dispose(),
+    () => tools.dispose(),
     () => jev.dispose(),
     () => reconciler.dispose(),
     () => sessionState.dispose(),
@@ -326,6 +364,50 @@ export type {
 } from "./skills/registry.js";
 export { createMcpLoader } from "./mcp/loader.js";
 export { createMcpManager } from "./mcp/manager.js";
+export { scanInjectedMcpInstances, scanInjectedMcpEntries, scanInjectedMcpFibers, scanInjectedMcpNamespaces } from "./mcp/runtime.js";
+export type { InjectedMcpInstance } from "./mcp/runtime.js";
+export { createToolsManager, applyForAgent, TOOL_DESCRIPTION_LIMIT, LOCKED_RESTRICT_UNAVAILABLE } from "./tools/manager.js";
+export type { ToolsManager, ToolsManagerDeps, ToolsLogger, ApplyForAgentResult } from "./tools/manager.js";
+export { computeDenyNames, applyRestrict, sameDenyNames, TOOLS_RESTRICT_UNAVAILABLE, TOOLS_RESTRICT_NO_TOOLS } from "./tools/restrict.js";
+export type { RestrictOutcome, ToolsRestrictionState } from "./tools/restrict.js";
+export {
+  UNATTRIBUTED_UNIT,
+  UNATTRIBUTED_DISPLAY,
+  PLUGIN_UNIT_KEY_PREFIX,
+  TOOLS_DEFAULT_ENABLED,
+  unitKeyOf,
+  unitOfKey,
+} from "./tools/types.js";
+export type {
+  HostToolBrief,
+  ToolsUnitView,
+  ToolsListView,
+  ToolsSetSessionInput,
+  ToolsSetSessionResult,
+} from "./tools/types.js";
+export { createSessionBulk } from "./session-bulk.js";
+export type {
+  SessionBulk,
+  SessionBulkAction,
+  SessionBulkDeps,
+  SessionBulkDomain,
+  SessionBulkDomainStat,
+  SessionBulkFailure,
+  SessionBulkInput,
+  SessionBulkResult,
+  SessionBulkServices,
+} from "./session-bulk.js";
+export {
+  TOOL_RULES,
+  MCP_NAMESPACE_RULES,
+  RESTRICT_FORBIDDEN_TOOL_NAMES,
+  attributeTool,
+  attributeMcpNamespace,
+  displayNameOfSource,
+  isHostBuiltinTool,
+  isRestrictForbiddenToolName,
+} from "./shared/plugin-attribution.js";
+export type { ToolRule, McpNamespaceRule } from "./shared/plugin-attribution.js";
 export {
   createSessionState,
   sessionStateDir,

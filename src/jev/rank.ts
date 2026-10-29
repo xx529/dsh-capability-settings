@@ -61,6 +61,7 @@ export const SYSTEM_ONE_GUIDANCE = [
   "A capability that can directly perform an action the request asks for is highly relevant, even if the request does not name it.",
   "A capability that is only topically related but cannot execute the request is not relevant.",
   "For MCP servers, use the listed tools to judge what the server can actually do.",
+  'For plugin tool groups (kind "tool"), use the listed tools to judge what the plugin can actually do; a plugin is enabled or disabled as a whole.',
   "Answer with a probability from 0 to 1: 1 = definitely useful now, 0 = definitely not.",
 ].join(" ");
 
@@ -87,11 +88,11 @@ export interface SystemOneTool {
  * question 里描述的能力定义（**不再放 state**；每题内嵌一份，保证题目唯一）。
  */
 export interface SystemOneCapability {
-  kind: "skill" | "mcp";
+  kind: "skill" | "mcp" | "tool";
   name: string;
   description: string;
   whenToUse?: string;
-  /** 仅 MCP：工具名 + 简述；技能不带。 */
+  /** MCP / Tools：工具名 + 简述；技能不带。 */
   tools?: SystemOneTool[];
 }
 
@@ -320,15 +321,22 @@ export function toRankItem(capability: JevCapability, noul: number | null): JevR
   if (capability.channel !== undefined) item.channel = capability.channel;
   if (capability.provider !== undefined) item.provider = capability.provider;
   if (capability.contentReadOnly === true) item.contentReadOnly = true;
+  // Tools 单元的工具数（additive；卡片/决策行的「N 个工具」标签用）。
+  if (capability.toolCount !== undefined) item.toolCount = capability.toolCount;
   return item;
 }
 
+/** 同分时的种类顺序（v13 三档全序）：skill → mcp → tool。 */
+const KIND_ORDER: Record<JevRankItem["kind"], number> = { skill: 0, mcp: 1, tool: 2 };
+
 /**
- * 严格全序排序（架构 §6.7）：score 降序 → skill 先于 mcp → name → id。
+ * 严格全序排序（架构 §6.7）：score 降序 → skill → mcp → tool → name → id。
+ *
+ * 三档全序保证"同分排序稳定"仍成立（v13 新增 Tools 单元后不能再用二分）。
  */
 export function compareRankItems(a: JevRankItem, b: JevRankItem): number {
   if (a.score !== b.score) return b.score - a.score;
-  if (a.kind !== b.kind) return a.kind === "skill" ? -1 : 1;
+  if (a.kind !== b.kind) return KIND_ORDER[a.kind] - KIND_ORDER[b.kind];
   const byName = a.name.localeCompare(b.name);
   if (byName !== 0) return byName;
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;

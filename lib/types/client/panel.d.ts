@@ -40,11 +40,12 @@
  */
 import type { CapabilityPanelApi } from "./api.js";
 /**
- * 域 Tab 的取值（快捷消息域已下线，现有技能 / MCP / Jev 模型三域）。
- * `jev` 是配置页而不是条目域：无计数、无搜索、无左导航（见 UX v1.5 §5.1）。
+ * 域 Tab 的取值（v13：Skills / MCP / Tools / Jev 模型四域）。
+ * `jev` 是配置页而不是条目域：无计数、无搜索、无左导航（见 UX v1.8 §7.1）；
+ * `tools` 是全局工具注册：无项目 / 工作区维度、无左导航（见 UX v1.8 §2.5）。
  * 导出给 client.ts 的 `openCapabilityPanel(domain?)` 复用。
  */
-export type DomainTab = "skills" | "mcp" | "jev";
+export type DomainTab = "skills" | "mcp" | "tools" | "jev";
 /**
  * 请求能力面板切到指定域（由 client.ts 的 `openCapabilityPanel(domain?)` 在
  * `layout.selectPanel("capability-panel")` 之前调用）。

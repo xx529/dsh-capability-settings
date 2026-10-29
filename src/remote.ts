@@ -10,7 +10,9 @@
  *   - 客户端：  ctx.get("connection").rpc.call("/capability-panel", endpoint, payload, signal)
  *
  * handler 签名是 `(endpoint, payload, signal) -> value`。endpoint 按域前缀
- * 命名：`skills.*` 路由到 skills 管理器，`mcp.*` 路由到 MCP 管理器。
+ * 命名：`skills.*` 路由到 skills 管理器，`mcp.*` 路由到 MCP 管理器，
+ * `overrides.*` 走项目级默认声明，`jev.*` 走能力决策，`tools.*` 走 Tools 域
+ * （插件级会话开关），`session.setBulk` 走三域批量端点（R1）。
  * 所有返回值统一包一层 {@link RpcResult} 信封，错误信息收敛进 `errors` 数组，
  * 客户端据此展示而不抛原始异常。
  *
@@ -110,6 +112,23 @@ export interface PanelRpcService {
     toggle(input: unknown): Promise<unknown>;
   };
   /**
+   * Tools 域（插件级会话开关，v13）：只读枚举 + 批量写会话开关。
+   *
+   * 见 `src/tools/manager.ts`；`setSessionEnabled` 的 `units` 只接受单元 id
+   * （不是工具名），宿主自己重算 `tools.restrict` 的 deny 名单。
+   */
+  tools: {
+    list(input: { sessionId?: string }): Promise<unknown>;
+    setSessionEnabled(input: unknown): Promise<unknown>;
+  };
+  /**
+   * R1 批量端点：三域一次开关（Skills / MCP / Tools），幂等、按会话串行、
+   * 部分失败不回滚（见 `src/session-bulk.ts`）。
+   */
+  session: {
+    setBulk(input: unknown): Promise<unknown>;
+  };
+  /**
    * Jev 能力决策（配置 / 连通性 / 批量打分 / 批量应用）。
    *
    * 业务失败一律走 `value.ok=false`（信封仍恒 `ok:true`）；`rank` / `apply`
@@ -193,6 +212,15 @@ export async function handleEndpoint(service: PanelRpcService, endpoint: string,
         return { ok: true, value: await service.overrides.get(cwd) };
       case "overrides.toggle":
         return { ok: true, value: await service.overrides.toggle(p) };
+      case "tools.list":
+        // sessionId 缺省 = 主面板的只读视图（enabledInSession 恒为默认值）。
+        return { ok: true, value: await service.tools.list(sessionId !== undefined ? { sessionId } : {}) };
+      case "tools.setSessionEnabled":
+        // batch-first（单条 = 长度 1 的数组）；业务失败收在 value.ok=false。
+        return { ok: true, value: await service.tools.setSessionEnabled(p) };
+      case "session.setBulk":
+        // 三域批量：业务失败（缺 sessionId / 非法 action / 未知域名）也在 value 内。
+        return { ok: true, value: await service.session.setBulk(p) };
       case "jev.getConfig":
         // 只回掩码视图（hasApiKey / apiKeySource / apiKeyLast4），绝无明文 key。
         return { ok: true, value: await service.jev.getConfig() };

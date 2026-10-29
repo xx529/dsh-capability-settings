@@ -178,7 +178,12 @@ export interface JevCapabilitySourceFields {
 export interface JevRankItem extends JevCapabilitySourceFields {
   /** `cap_<36 位小写 hex>`。 */
   id: string;
-  kind: "skill" | "mcp";
+  /**
+   * 能力种类：skill / MCP server / Tools 插件单元。
+   *
+   * v13 additive：`"tool"` = 一个插件（插件级开关，一个插件 = 一个评分/应用单元）。
+   */
+  kind: "skill" | "mcp" | "tool";
   name: string;
   /**
    * 能力作用域（additive）：项目 / 全局 / 注入（external）。
@@ -196,6 +201,8 @@ export interface JevRankItem extends JevCapabilitySourceFields {
   reason?: string;
   /** 当前会话启用态（前端勾选初值/回显）。 */
   enabledInSession: boolean;
+  /** Tools 单元的工具数（additive；`kind==="tool"` 时必有）。 */
+  toolCount?: number;
 }
 
 export type JevRankResult =
@@ -238,7 +245,7 @@ export interface JevApplyInput {
  */
 export interface JevApplyPlanItem {
   id: string;
-  kind: "skill" | "mcp";
+  kind: "skill" | "mcp" | "tool";
   name: string;
   target?: string;
   /** 本期客户端只提交勾选项，恒为 true。 */
@@ -319,7 +326,7 @@ export type JevSetConfigResult =
  */
 export interface JevCapability extends JevCapabilitySourceFields {
   id: string;
-  kind: "skill" | "mcp";
+  kind: "skill" | "mcp" | "tool";
   name: string;
   /** 已按 200 码点截断（发模型用）。 */
   description: string;
@@ -334,7 +341,15 @@ export interface JevCapability extends JevCapabilitySourceFields {
   /** 仅 MCP：是否存在显式会话覆盖；undefined = 跟随项目默认。 */
   mcpExplicitToggle?: boolean;
   /**
-   * 仅 MCP：从全局工具注册表反推出的工具（name + description）。
+   * 仅 Tools：是否存在显式会话覆盖；undefined = 跟随默认（开启）。
+   *
+   * 与 `mcpExplicitToggle` 同构，回滚前态用（`JevPrevState` tools 分支）。
+   */
+  toolsExplicitToggle?: boolean;
+  /** 仅 Tools：插件单元的工具数（Diagnostics / rank 结果 `toolCount` 来源）。 */
+  toolCount?: number;
+  /**
+   * MCP / Tools：工具名 + 简述（Tools 为插件单元的工具清单）。
    *
    * 用于 `jev.rank` 让模型知道该 server 实际能做什么（配置条目走宿主
    * `mcpTools(serverName)`，外部注入实例取 `mcp.runtime` 的 `view.tools`）。
@@ -345,13 +360,20 @@ export interface JevCapability extends JevCapabilitySourceFields {
   write: JevCapabilityWrite;
 }
 
-/** 写回目标：skills 按 name；MCP 按 config key / serverName。 */
+/**
+ * 写回目标：skills 按 name；MCP 按 config key / serverName；Tools 按插件单元 id
+ * （**插件级**：选中 = 该插件全部工具在本会话开启）。
+ */
 export type JevCapabilityWrite =
   | { type: "skills"; name: string }
-  | { type: "mcp"; target: string; targetKind: "project" | "server"; serverName: string };
+  | { type: "mcp"; target: string; targetKind: "project" | "server"; serverName: string }
+  | { type: "tools"; unit: string; unitName: string };
 
 /** 写入前的状态快照（回滚用）。 */
-export type JevPrevState = { type: "skills"; enabled: boolean } | { type: "mcp"; enabled: boolean | undefined };
+export type JevPrevState =
+  | { type: "skills"; enabled: boolean }
+  | { type: "mcp"; enabled: boolean | undefined }
+  | { type: "tools"; enabled: boolean | undefined };
 
 /** 宿主日志接口（`ctx.logger` 的结构子集；缺省时静默）。 */
 export interface JevLogger {

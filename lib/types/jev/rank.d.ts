@@ -58,11 +58,11 @@ export interface SystemOneTool {
  * question 里描述的能力定义（**不再放 state**；每题内嵌一份，保证题目唯一）。
  */
 export interface SystemOneCapability {
-    kind: "skill" | "mcp";
+    kind: "skill" | "mcp" | "tool";
     name: string;
     description: string;
     whenToUse?: string;
-    /** 仅 MCP：工具名 + 简述；技能不带。 */
+    /** MCP / Tools：工具名 + 简述；技能不带。 */
     tools?: SystemOneTool[];
 }
 /** 逐能力的结构化 instructions（题目唯一性靠这里的 `capability`）。 */
@@ -151,7 +151,9 @@ export declare function pickUsage(json: unknown): JevUsage;
 /** 把能力 + noul 映射成 rank 结果行。 */
 export declare function toRankItem(capability: JevCapability, noul: number | null): JevRankItem;
 /**
- * 严格全序排序（架构 §6.7）：score 降序 → skill 先于 mcp → name → id。
+ * 严格全序排序（架构 §6.7）：score 降序 → skill → mcp → tool → name → id。
+ *
+ * 三档全序保证"同分排序稳定"仍成立（v13 新增 Tools 单元后不能再用二分）。
  */
 export declare function compareRankItems(a: JevRankItem, b: JevRankItem): number;
 /** 已映射为业务码的 HTTP/网络错误（message 已脱敏，可直接进 `errors`）。 */

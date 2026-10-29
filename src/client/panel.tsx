@@ -42,6 +42,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { CapabilityPanelApi, ClientSkillSummary, SkillFilePayload, SkillsApi } from "./api.js";
 import { McpView } from "./mcp-panel.js";
+import { ToolsView } from "./tools-panel.js";
 import { JevPanel } from "./jev-panel.js";
 import { Modal } from "./modal.js";
 import { SkpSelect } from "./select.js";
@@ -53,11 +54,12 @@ import { unzip } from "./unzip.js";
 import { base64ToBytes, buildZip, downloadBytes } from "./zip.js";
 
 /**
- * 域 Tab 的取值（快捷消息域已下线，现有技能 / MCP / Jev 模型三域）。
- * `jev` 是配置页而不是条目域：无计数、无搜索、无左导航（见 UX v1.5 §5.1）。
+ * 域 Tab 的取值（v13：Skills / MCP / Tools / Jev 模型四域）。
+ * `jev` 是配置页而不是条目域：无计数、无搜索、无左导航（见 UX v1.8 §7.1）；
+ * `tools` 是全局工具注册：无项目 / 工作区维度、无左导航（见 UX v1.8 §2.5）。
  * 导出给 client.ts 的 `openCapabilityPanel(domain?)` 复用。
  */
-export type DomainTab = "skills" | "mcp" | "jev";
+export type DomainTab = "skills" | "mcp" | "tools" | "jev";
 
 /** 外部（client.ts）请求面板切域时派发的 window 自定义事件名。 */
 const PANEL_DOMAIN_EVENT = "capability-panel:set-domain";
@@ -92,20 +94,23 @@ export function setPanelDomain(domain?: DomainTab): void {
 
 /** 域 Tab 的展示文案（当前硬编码中文，见 client.ts 的 locale 说明）。 */
 const DOMAIN_LABEL: Record<DomainTab, string> = {
-  skills: "技能",
+  // 全站命名统一（UX v1.8 §2.1）：技能 → Skills、MCP 服务器 → MCP、插件工具 → Tools。
+  skills: "Skills",
   mcp: "MCP",
+  tools: "Tools",
   jev: "Jev 模型",
 };
 
-const DOMAIN_ORDER: DomainTab[] = ["skills", "mcp", "jev"];
+const DOMAIN_ORDER: DomainTab[] = ["skills", "mcp", "tools", "jev"];
 
 /**
  * 各域的搜索占位符（搜索框在根组件头部，切换域时切换文案）。
  * `jev` 域没有搜索框，故不在此表内（渲染处按 `domain !== "jev"` 隐藏）。
  */
 const DOMAIN_SEARCH_PLACEHOLDER: Record<Exclude<DomainTab, "jev">, string> = {
-  skills: "搜索技能…",
-  mcp: "搜索 MCP 服务器…",
+  skills: "搜索 Skills…",
+  mcp: "搜索 MCP…",
+  tools: "搜索插件或工具…",
 };
 
 /**
@@ -136,6 +141,7 @@ export function CapabilityPanel({ api }: { api: CapabilityPanelApi }) {
   // 搜索不改变 Tab 计数（Tab 计数是总量）。
   const [skillsCount, setSkillsCount] = useState<number | undefined>(undefined);
   const [mcpCount, setMcpCount] = useState<number | undefined>(undefined);
+  const [toolsCount, setToolsCount] = useState<number | undefined>(undefined);
   /**
    * Jev 配置页在首次进入该 Tab 时挂载，之后**常驻**（用 active 控制显隐）：
    * 这样在同一面板会话内切到技能/MCP 再切回来，未保存的表单草稿仍在
@@ -151,7 +157,7 @@ export function CapabilityPanel({ api }: { api: CapabilityPanelApi }) {
     const onSetDomain = (event: Event) => {
       pendingPanelDomain = undefined;
       const detail = (event as CustomEvent<unknown>).detail;
-      if (detail !== "skills" && detail !== "mcp" && detail !== "jev") return;
+      if (detail !== "skills" && detail !== "mcp" && detail !== "tools" && detail !== "jev") return;
       setDomain(detail);
       setQuery("");
       if (detail === "jev") setJevMounted(true);
@@ -180,7 +186,12 @@ export function CapabilityPanel({ api }: { api: CapabilityPanelApi }) {
   }, [api]);
 
   // Jev 域无条目计数（不是条目域，无「总数」语义），恒为 undefined。
-  const counts: Record<DomainTab, number | undefined> = { skills: skillsCount, mcp: mcpCount, jev: undefined };
+  const counts: Record<DomainTab, number | undefined> = {
+    skills: skillsCount,
+    mcp: mcpCount,
+    tools: toolsCount,
+    jev: undefined,
+  };
 
   // 页面 chrome 由主区域提供（侧栏切换主面板 = 关闭）；这里只渲染
   // 标题行 + 域 Tab 与当前域视图。
@@ -188,20 +199,41 @@ export function CapabilityPanel({ api }: { api: CapabilityPanelApi }) {
   // Jev 配置页没有「项目作用域」语义：选中该 Tab 时隐藏工作区路径、项目下拉框
   // 与搜索框（UX v1.5 §5.1 / AC-CFG-2），切回条目域后全部恢复。
   const jevActive = domain === "jev";
+  /** Tools 是全局工具注册：不显示项目作用域 / 工作区列表（UX v1.8 §2.5）。 */
+  const toolsActive = domain === "tools";
   return (
     <section className="skp-panel" aria-label="能力面板">
       <header className="skp-header">
         <div className="skp-title-row">
           <div className="skp-title-main">
             <h2>能力面板</h2>
-            {/* 当前作用域的工作区路径（跟随 session 或钉选的项目）。 */}
-            {!jevActive && workspace !== undefined && (
-              <span className="skp-workspace" title={workspace}>
-                {workspace}
+            {/* 当前作用域的工作区路径（跟随 session 或钉选的项目）；Tools 无项目维度。 */}
+            {jevActive ? null : toolsActive ? (
+              <span className="skp-workspace" title="全局工具注册 · 不区分项目 / 工作区">
+                全局工具注册 · 不区分项目 / 工作区
               </span>
+            ) : (
+              workspace !== undefined && (
+                <span className="skp-workspace" title={workspace}>
+                  {workspace}
+                </span>
+              )
             )}
           </div>
-          {!jevActive && (
+          {!jevActive && (toolsActive ? (
+            <div className="skp-title-tools">
+              {/* Tools 只有「全局工具」一个作用域：下拉框是禁用态占位（UX v1.8 §2.5）。 */}
+              <SkpSelect
+                className="skp-dd-scope"
+                value=""
+                disabled
+                ariaLabel="工具作用域"
+                title="全局工具注册 · 不区分项目 / 工作区"
+                options={[{ value: "", label: "全局工具" }]}
+                onChange={() => undefined}
+              />
+            </div>
+          ) : (
             <div className="skp-title-tools">
               {/* 项目作用域下拉框："" = 跟随当前 session；钉选才固定。 */}
               <SkpSelect
@@ -218,7 +250,7 @@ export function CapabilityPanel({ api }: { api: CapabilityPanelApi }) {
                 onChange={(value) => api.selectProject(value === "" ? undefined : value)}
               />
             </div>
-          )}
+          ))}
         </div>
         {/* 第二行：域 Tab 在左，搜索框右对齐（同一个 input，按域切 placeholder）。 */}
         <div className="skp-header-row">
@@ -264,6 +296,15 @@ export function CapabilityPanel({ api }: { api: CapabilityPanelApi }) {
 
       {jevActive
         ? null
+        : domain === "tools"
+          ? (
+              <ToolsView
+                api={api}
+                workspace={workspace}
+                query={query}
+                onCount={setToolsCount}
+              />
+            )
         : domain === "skills"
           ? (
               <SkillsView
@@ -331,7 +372,7 @@ function injectedOriginText(item: Pick<ClientSkillSummary, "origin" | "channel" 
 function injectedReadonlyNote(item: ClientSkillSummary): string {
   const channel = item.channel !== undefined && item.channel.length > 0 ? item.channel : "插件";
   if (item.origin === "bundled") {
-    return "内容只读 · DSH 内置技能（无磁盘副本）；可在列表 / 会话中启用或禁用，不可编辑或删除。";
+    return "内容只读 · DSH 内置 Skills（无磁盘副本）；可在列表 / 会话中启用或禁用，不可编辑或删除。";
   }
   if (item.origin === "preset") {
     return `内容只读 · 由 Agent 预设「${channel}」提供（无磁盘副本，仅该预设的会话可见）；只能在会话中启用或禁用，不可编辑或删除。`;
@@ -350,16 +391,16 @@ function skillTags(item: ClientSkillSummary, hasGlobal: boolean): Array<{ key: s
       className: originTagClass(item),
       title:
         item.origin === "bundled"
-          ? "DSH 随包提供的技能（只读）"
+          ? "DSH 随包提供的 Skills（只读）"
           : item.origin === "preset"
             ? "由当前 Agent 预设渠道提供，只在绑定该预设的会话里可见"
-            : "由插件在运行时注册的技能（只读）",
+            : "由插件在运行时注册的 Skills（只读）",
     });
     tags.push({
       key: "format",
       label: item.format === "directory" ? "目录" : ".md",
       className: "skp-tag skp-tag-flat",
-      title: item.format === "directory" ? "目录型技能（SKILL.md + 其他文件）" : "单文件技能",
+      title: item.format === "directory" ? "目录型 Skills（SKILL.md + 其他文件）" : "单文件 Skills",
     });
     if (item.channel !== undefined && item.channel.length > 0) {
       tags.push({
@@ -377,13 +418,13 @@ function skillTags(item: ClientSkillSummary, hasGlobal: boolean): Array<{ key: s
       key: "scope",
       label: isProject ? "项目" : "全局",
       className: isProject ? "skp-tag skp-tag-project" : "skp-tag skp-tag-global",
-      title: isProject ? "本项目内的技能，只在本项目生效" : "全局技能，对所有项目生效",
+      title: isProject ? "本项目内的 Skills，只在本项目生效" : "全局 Skills，对所有项目生效",
     },
     {
       key: "format",
       label: item.format === "directory" ? "目录" : ".md",
       className: "skp-tag skp-tag-flat",
-      title: item.format === "directory" ? "目录型技能（SKILL.md + 其他文件）" : "单文件技能",
+      title: item.format === "directory" ? "目录型 Skills（SKILL.md + 其他文件）" : "单文件 Skills",
     },
   );
   if (item.readOnly) {
@@ -393,23 +434,23 @@ function skillTags(item: ClientSkillSummary, hasGlobal: boolean): Array<{ key: s
       key: "stub",
       label: "屏蔽占位",
       className: "skp-tag skp-tag-warn",
-      title: "已生成屏蔽占位，使同名全局技能在本项目不可用；删除占位即恢复",
+      title: "已生成屏蔽占位，使同名全局 Skills 在本项目不可用；删除占位即恢复",
     });
   } else if (isProject && hasGlobal) {
-    tags.push({ key: "override", label: "覆盖全局", className: "skp-tag skp-tag-relation", title: "本项目生效的是这份项目副本；同名全局技能被遮蔽" });
+    tags.push({ key: "override", label: "覆盖全局", className: "skp-tag skp-tag-relation", title: "本项目生效的是这份项目副本；同名全局 Skills 被遮蔽" });
   } else if (!isProject && item.projectShadow === "stub") {
     tags.push({
       key: "disabled-in-project",
       label: "本项目已禁用",
       className: "skp-tag skp-tag-warn",
-      title: "本项目内已放置屏蔽占位，此技能在本项目不可用（不影响其它项目）",
+      title: "本项目内已放置屏蔽占位，此 Skills 在本项目不可用（不影响其它项目）",
     });
   } else if (!isProject && item.projectShadow === "skill") {
     tags.push({
       key: "project-copy",
       label: "项目副本生效中",
       className: "skp-tag skp-tag-readonly",
-      title: "本项目内已有同名技能，按优先级本项目中生效的是项目副本",
+      title: "本项目内已有同名 Skills，按优先级本项目中生效的是项目副本",
     });
   }
   return tags;
@@ -435,25 +476,25 @@ function skillSwitchChecked(item: ClientSkillSummary): boolean {
 function skillSwitchDisabled(item: ClientSkillSummary, hasWorkspace: boolean): { disabled: boolean; title: string } {
   if (item.injected === true) {
     if (!hasWorkspace) {
-      return { disabled: true, title: "先选择工作区，才能设置此注入技能在本项目的默认启停" };
+      return { disabled: true, title: "先选择工作区，才能设置此注入 Skills 在本项目的默认启停" };
     }
     return {
       disabled: false,
       title: skillSwitchChecked(item)
-        ? "关闭：在本项目默认禁用此注入技能（写入 .agents/capability-overrides.json，不影响其它项目与其它会话）"
-        : "打开：恢复此注入技能在本项目默认可用",
+        ? "关闭：在本项目默认禁用此注入 Skills（写入 .agents/capability-overrides.json，不影响其它项目与其它会话）"
+        : "打开：恢复此注入 Skills 在本项目默认可用",
     };
   }
   if (item.readOnly) {
     return { disabled: true, title: "只读来源（.claude 兼容目录），无法修改或删除" };
   }
   if (!hasWorkspace) {
-    return { disabled: true, title: "需要可写的工作区才能修改技能" };
+    return { disabled: true, title: "需要可写的工作区才能修改 Skills" };
   }
   const isProject = isProjectSource(item.source);
   if (isProject) {
     if (item.shadowStub === true) {
-      return { disabled: false, title: "打开：删除屏蔽占位，恢复同名全局技能在本项目可用" };
+      return { disabled: false, title: "打开：删除屏蔽占位，恢复同名全局 Skills 在本项目可用" };
     }
     return {
       disabled: false,
@@ -463,16 +504,16 @@ function skillSwitchDisabled(item: ClientSkillSummary, hasWorkspace: boolean): {
     };
   }
   if (item.projectShadow === "skill") {
-    return { disabled: true, title: "本项目已有同名技能（项目副本生效中），请在项目副本上操作" };
+    return { disabled: true, title: "本项目已有同名 Skills（项目副本生效中），请在项目副本上操作" };
   }
   if (item.projectShadow === "stub") {
-    return { disabled: false, title: "打开：删除本项目内的屏蔽占位，恢复此全局技能在本项目可用" };
+    return { disabled: false, title: "打开：删除本项目内的屏蔽占位，恢复此全局 Skills 在本项目可用" };
   }
   return {
     disabled: false,
     title: skillSwitchChecked(item)
-      ? "关闭：在本项目内禁用此全局技能（生成屏蔽占位，不影响其它项目）"
-      : "打开：恢复此全局技能在本项目可用",
+      ? "关闭：在本项目内禁用此全局 Skills（生成屏蔽占位，不影响其它项目）"
+      : "打开：恢复此全局 Skills 在本项目可用",
   };
 }
 
@@ -751,7 +792,7 @@ function SkillsView({
   /** ScopeNav 一行：作用域名 + 计数 + 右侧「+」安装入口。 */
   const renderScopeItem = (target: "global" | "project", label: string, count: number | string) => {
     const addDisabled = target === "project" && pinned === undefined;
-    const addTitle = addDisabled ? "先选择工作区" : target === "global" ? "安装技能到全局" : "安装技能到本项目";
+    const addTitle = addDisabled ? "先选择工作区" : target === "global" ? "安装 Skills 到全局" : "安装 Skills 到本项目";
     return (
       <div className={scope === target ? "skp-scope-item skp-scope-item-active" : "skp-scope-item"}>
         <button type="button" className="skp-scope-main" aria-pressed={scope === target} onClick={() => switchScope(target)}>
@@ -769,11 +810,11 @@ function SkillsView({
   const renderSkillList = (list: ClientSkillSummary[], group: "global" | "project") => {
     if (list.length === 0) {
       if (q.length > 0) {
-        return <div className="skp-empty">没有匹配「{query.trim()}」的技能。</div>;
+        return <div className="skp-empty">没有匹配「{query.trim()}」的 Skills。</div>;
       }
       return (
         <div className="skp-empty">
-          <div>{group === "global" ? "还没有全局技能。" : "本项目还没有技能。"}</div>
+          <div>{group === "global" ? "还没有全局 Skills。" : "本项目还没有 Skills。"}</div>
           <button type="button" className="skp-btn" style={{ marginTop: 10 }} onClick={() => openInstall(group)}>
             {group === "global" ? "安装到全局" : "安装到本项目"}
           </button>
@@ -782,7 +823,7 @@ function SkillsView({
     }
     return (
       <div className="skp-group-scroll">
-        <ul className="skp-list" role="listbox" aria-label={group === "global" ? "全局技能" : "本项目技能"}>
+        <ul className="skp-list" role="listbox" aria-label={group === "global" ? "全局 Skills" : "本项目 Skills"}>
           {list.map((item) => (
             <li key={skillRowKey(item)} role="presentation">
               {renderRow(item)}
@@ -815,15 +856,15 @@ function SkillsView({
     }
     return (
       <div className="skp-group-scroll">
-        {diskGlobalVisible.length > 0 && renderRows(diskGlobalVisible, "全局技能")}
+        {diskGlobalVisible.length > 0 && renderRows(diskGlobalVisible, "全局 Skills")}
         {injectedVisible.length > 0 && (
           <>
             <div className="skp-list-group-head">
-              <span className="skp-list-group-title">注入技能</span>
+              <span className="skp-list-group-title">注入 Skills</span>
               <span className="skp-group-count">{injectedItems.length}</span>
               <span className="skp-list-group-note">内容只读 · 可启停</span>
             </div>
-            {renderRows(injectedVisible, "注入技能")}
+            {renderRows(injectedVisible, "注入 Skills")}
           </>
         )}
       </div>
@@ -976,7 +1017,7 @@ function SkillsView({
       {allItems !== undefined && error === undefined && (
         <div className="skp-body">
           {/* 左侧作用域导航：全局 / 项目 + 工作区列表（两种 scope 都保留）。 */}
-          <nav className="skp-scope-nav" aria-label="技能作用域">
+          <nav className="skp-scope-nav" aria-label="Skills 作用域">
             {renderScopeItem("global", "全局", globalItems.length)}
             {renderScopeItem("project", "项目", pinned === undefined ? "—" : projectItems.length)}
             {renderScopeWorkspaces()}
@@ -987,7 +1028,7 @@ function SkillsView({
             <div className="skp-pane-title">
               {scope === "global" ? (
                 <>
-                  <span className="skp-pane-title-text">全局技能</span>
+                  <span className="skp-pane-title-text">全局 Skills</span>
                   <span className="skp-group-count">{globalVisible.length}</span>
                 </>
               ) : pinned === undefined ? (
@@ -1031,10 +1072,10 @@ function SkillsView({
             ) : (
               <div className="skp-detail-empty">
                 {items.length === 0
-                  ? "还没有任何技能。技能让 agent 在特定任务上按固定做法工作。"
+                  ? "还没有任何 Skills。Skills 让 agent 在特定任务上按固定做法工作。"
                   : scope === "project" && showWorkspacePicker
-                    ? "请选择左侧工作区，再查看或安装本项目技能。"
-                    : "选择一个技能查看说明与全部文件内容。"}
+                    ? "请选择左侧工作区，再查看或安装本项目 Skills。"
+                    : "选择一个条目查看说明与全部文件内容。"}
               </div>
             )}
           </div>
@@ -1257,10 +1298,10 @@ function SkillDetail({
 
   const deleteBody =
     summary.shadowStub === true
-      ? "将删除本项目内的屏蔽占位，同名全局技能在本项目恢复可用。"
+      ? "将删除本项目内的屏蔽占位，同名全局 Skills 在本项目恢复可用。"
       : isGlobal
-        ? "将删除全局技能，所有项目都将不再可用。此操作不可撤销。"
-        : "将删除本项目中的这份技能（含目录下的所有文件）。此操作不可撤销。";
+        ? "将删除全局 Skills，所有项目都将不再可用。此操作不可撤销。"
+        : "将删除本项目中的这份 Skills（含目录下的所有文件）。此操作不可撤销。";
 
   return (
     <div className="skp-detail-card">
@@ -1283,7 +1324,7 @@ function SkillDetail({
           <>
             <span
               className={isGlobal ? "skp-tag skp-tag-global" : "skp-tag skp-tag-project"}
-              title={isGlobal ? "全局技能（对所有项目生效）" : "本项目内的技能"}
+              title={isGlobal ? "全局 Skills（对所有项目生效）" : "本项目内的 Skills"}
             >
               {isGlobal ? "全局" : "项目"}
             </span>
@@ -1292,17 +1333,17 @@ function SkillDetail({
           </>
         )}
         {!injected && summary.shadowStub === true && (
-          <span className="skp-badge" title="屏蔽占位：使同名全局技能在本项目不可用；删除本条目即可恢复">
+          <span className="skp-badge" title="屏蔽占位：使同名全局 Skills 在本项目不可用；删除本条目即可恢复">
             屏蔽占位
           </span>
         )}
         {isGlobal && summary.projectShadow === "stub" && (
-          <span className="skp-badge" title="本项目内已放置屏蔽占位，此技能在本项目不可用（不影响其它项目）">
+          <span className="skp-badge" title="本项目内已放置屏蔽占位，此 Skills 在本项目不可用（不影响其它项目）">
             本项目已禁用
           </span>
         )}
         {isGlobal && summary.projectShadow === "skill" && (
-          <span className="skp-badge" title="项目区有同名技能，按宿主优先级在本项目生效的是项目副本">
+          <span className="skp-badge" title="项目区有同名 Skills，按宿主优先级在本项目生效的是项目副本">
             项目副本生效中
           </span>
         )}
@@ -1341,7 +1382,7 @@ function SkillDetail({
               type="button"
               className="skp-btn skp-state-off"
               disabled={busy}
-              title="此全局技能当前为禁用状态；点击恢复启用（对所有项目生效）"
+              title="此全局 Skills 当前为禁用状态；点击恢复启用（对所有项目生效）"
               onClick={() => void doSetEnabled(true)}
             >
               已禁用
@@ -1354,12 +1395,12 @@ function SkillDetail({
               disabled={busy}
               title={
                 confirmImport
-                  ? "项目内已有同名技能，再次点击将覆盖为全局副本"
+                  ? "项目内已有同名 Skills，再次点击将覆盖为全局副本"
                   : "复制到本项目（.agents/skills），此后可在本项目内独立启停"
               }
               onClick={() => void doImport(confirmImport)}
             >
-              {confirmImport ? "确认覆盖项目内的同名技能？" : "导入到本项目"}
+              {confirmImport ? "确认覆盖项目内的同名 Skills？" : "导入到本项目"}
             </button>
           )}
           {hasWorkspace && isGlobal && summary.projectShadow === undefined && (
@@ -1367,7 +1408,7 @@ function SkillDetail({
               type="button"
               className="skp-btn"
               disabled={busy}
-              title="在本项目内禁用此全局技能（生成屏蔽占位，模型与用户调用都被宿主原生拒绝；不影响其它项目，可随时恢复）"
+              title="在本项目内禁用此全局 Skills（生成屏蔽占位，模型与用户调用都被宿主原生拒绝；不影响其它项目，可随时恢复）"
               onClick={() => void doDisableInProject()}
             >
               在本项目禁用
@@ -1378,7 +1419,7 @@ function SkillDetail({
               type="button"
               className="skp-btn"
               disabled={busy}
-              title="删除本项目内的屏蔽占位，恢复此全局技能在本项目可用"
+              title="删除本项目内的屏蔽占位，恢复此全局 Skills 在本项目可用"
               onClick={() => void doEnableInProject()}
             >
               在本项目恢复
@@ -1453,8 +1494,8 @@ function SkillDetail({
                   disabled={busy}
                   title={
                     summary.userInvocable
-                      ? "点击关闭用户调用（输入框 /name 不再注入此技能；模型仍可自动触发）"
-                      : "点击开启用户调用（输入框 /name 可注入此技能）"
+                      ? "点击关闭用户调用（输入框 /name 不再注入此 Skills；模型仍可自动触发）"
+                      : "点击开启用户调用（输入框 /name 可注入此 Skills）"
                   }
                   onClick={() => void doSetInvocation(summary.modelInvocable, !summary.userInvocable)}
                 >
@@ -1478,7 +1519,7 @@ function SkillDetail({
 
       {exportPathOpen && <ExportToPathDialog summary={summary} api={api} onClose={() => setExportPathOpen(false)} />}
       {deleteOpen && (
-        <Modal title={`删除技能「${summary.name}」？`} onClose={() => setDeleteOpen(false)}>
+        <Modal title={`删除 Skills 「${summary.name}」？`} onClose={() => setDeleteOpen(false)}>
           <p className="skp-modal-text">{deleteBody}</p>
           <div className="skp-modal-actions">
             <button type="button" className="skp-btn" autoFocus onClick={() => setDeleteOpen(false)}>
@@ -1645,7 +1686,7 @@ function InstallDialog({
     (mode === "upload" ? picked !== undefined : mode === "path" ? sourcePath.trim().length > 0 : url.trim().length > 0);
 
   return (
-    <Modal title="安装技能" onClose={onClose}>
+    <Modal title="安装 Skills" onClose={onClose}>
       <div className="skp-form">
         <div className="skp-tabs" role="tablist">
           {(Object.keys(INSTALL_MODE) as InstallMode[]).map((m) => (
@@ -1731,7 +1772,7 @@ function InstallDialog({
 
         <label className="skp-field skp-field-inline">
           <input type="checkbox" checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} />
-          同名技能已存在时覆盖
+          同名 Skills 已存在时覆盖
         </label>
 
         {errors.length > 0 && <div className="skp-error">{errors.join("\n")}</div>}

@@ -365,8 +365,27 @@ export interface ClientMcpRuntimeServer {
     serverName: string;
     /** 来源：注入它的插件显示名 / loader 条目 id；识别不到时缺省。 */
     source?: string;
-    /** 发现路径：loader 条目 / 动态 fiber（用于文案与诊断）。 */
-    origin: "entry" | "fiber";
+    /**
+     * 发现路径：loader 条目 / 动态 fiber / 工具命名空间合成
+     * （v13 R4；旧宿主只回 entry / fiber，按 `!=="entry"` 回落即可）。
+     */
+    origin: "entry" | "fiber" | "namespace";
+    /**
+     * 注入方**展示名**（v13 R4 additive）：映射表归一后的插件名
+     * （如 fiber `dsh-figma` → `dsh-to-figma`）。卡片第二枚标签用它；无来源缺省。
+     */
+    channel?: string;
+    /**
+     * 来源判定（v13 R4 additive）：详情「来源判定」文案与诊断。
+     * `matchedBy` = 命中命名空间 / source / 未识别。
+     */
+    attribution?: {
+        matchedBy: "namespace" | "source" | "unknown";
+        /** 命中的命名空间 / source 原文。 */
+        pattern?: string;
+    };
+    /** v13 R4 additive：true = 由工具命名空间合成（没有 mcp-client 实例，无 config）。 */
+    synthesized?: boolean;
     /** 桥接层配置里读到的传输方式（与配置条目同形）。 */
     transport?: "stdio" | "http";
     /** 与配置条目同款的命令/URL 摘要。 */
@@ -490,6 +509,137 @@ export interface McpApi {
         kind: "project" | "server";
         enabled: boolean | undefined;
     }): Promise<void>;
+}
+/** 一个插件单元里的一个工具（只读展示；不带 parameters，避免界面/传输冗余）。 */
+export interface ClientToolBrief {
+    /** 完整工具名（restrict 用这个名字；UI 只读展示）。 */
+    name: string;
+    /** 一句话说明（宿主已截断到 200 码点）。 */
+    description?: string;
+}
+/** 一个 Tools 开关单元（一个插件 = 一个单元；来源未识别合并成一个单元）。 */
+export interface ClientToolsUnit {
+    /** 开关单元 id（持久化键 = `plugin:<unit>`；未识别 = `__unattributed__`）。 */
+    unit: string;
+    /** 展示名（卡片 / 列表 / 详情标题）。 */
+    name: string;
+    /** plugin = 已识别插件；unattributed = 来源未识别。 */
+    kind: "plugin" | "unattributed";
+    /** 该单元当前可见的全部工具。 */
+    tools: ClientToolBrief[];
+    /** 工具数（卡片描述与 Jev toolCount 用）。 */
+    toolCount: number;
+    /** 归属判定（详情「来源判定」文案）。 */
+    attribution: {
+        matchedBy: "prefix" | "exact" | "unknown";
+        /** 命中的模式原文（未识别缺省）。 */
+        pattern?: string;
+        /** 包名（已识别才有）。 */
+        packageName?: string;
+    };
+    /** 本会话生效开关（显式覆盖 > 默认 true）。 */
+    enabledInSession: boolean;
+    /** 是否有显式会话覆盖（「恢复默认」是否可点）。 */
+    explicit: boolean;
+    /** 不可开关原因（正常缺省）。 */
+    lockedReason?: string;
+    /** 上一次 restrict 的降级状态（仅传了 sessionId 时）。 */
+    restriction?: {
+        state: "applied" | "skipped" | "failed";
+        error?: string;
+    };
+}
+/** `tools.list` 的返回。 */
+export interface ClientToolsList {
+    units: ClientToolsUnit[];
+    /** 全局工具总数（诊断）。 */
+    totalGlobalTools: number;
+    /** 被判定为宿主内建而排除的条数（诊断；不下发名单）。 */
+    excludedBuiltinCount: number;
+    /** 服务缺失/异常时的原因（不阻断其它域）。 */
+    errors: string[];
+    /** 本次查询绑定的会话（没传 sessionId 时缺省）。 */
+    sessionId?: string;
+}
+/** Tools 域的面板 API。 */
+export interface ToolsApi {
+    /**
+     * 列出插件单元。传 `sessionId` 时宿主投影 `enabledInSession` /
+     * `explicit` / `restriction`；不传则恒按默认值（主面板据此渲染）。
+     * 服务缺失 / `schemas()` 失败时返回 `{units:[],errors:[...]}`，不抛。
+     */
+    list(input?: {
+        sessionId?: string;
+    }): Promise<ClientToolsList>;
+    /**
+     * 设置一个或多个插件在**指定会话**的开关（batch-first：单条 = 长度 1 的数组）。
+     * `enabled: undefined` = 清除显式覆盖（恢复默认开启）。
+     * 业务失败抛 `Error(errors.join("; "))`（与 skills/mcp 单条一致）。
+     */
+    setSessionEnabled(input: {
+        units: string[];
+        enabled: boolean | undefined;
+        sessionId?: string;
+    }): Promise<{
+        ok: true;
+        applied: number;
+    }>;
+}
+/** 三域名称（批量端点的 `domains` 取值）。 */
+export type SessionBulkDomain = "skills" | "mcp" | "tools";
+/** 批量动作：全部打开 / 全部关闭 / 清除显式会话覆盖。 */
+export type SessionBulkAction = "enable" | "disable" | "reset";
+/** `session.setBulk` 的入参。 */
+export interface SessionBulkInput {
+    /** 必填；空 → 业务失败。 */
+    sessionId?: string;
+    action: SessionBulkAction;
+    /** 缺省 = 三域全部；客户端按域串行调用以取得粗粒度进度。 */
+    domains?: SessionBulkDomain[];
+    /** 项目作用域（skills 列表 / mcp 项目条目需要）；缺省由宿主从 session header.cwd 解析。 */
+    cwd?: string;
+    /** 仅测试/诊断：只计算不写入。 */
+    dryRun?: boolean;
+}
+/** 批量里的一条逐项失败（不阻断其它项）。 */
+export interface SessionBulkFailure {
+    domain: SessionBulkDomain;
+    /** skills = skill 名；mcp = target；tools = unit id。 */
+    target: string;
+    kind: "skill" | "mcp-project" | "mcp-server" | "plugin";
+    error: string;
+}
+/** 一个域的批量计数。 */
+export interface SessionBulkDomainCount {
+    changed: number;
+    unchanged: number;
+    skipped: number;
+    failed: number;
+}
+/** `session.setBulk` 的成功 value。 */
+export interface SessionBulkSuccess {
+    ok: true;
+    action: SessionBulkAction;
+    applied: number;
+    unchanged: number;
+    skipped: number;
+    failed: SessionBulkFailure[];
+    byDomain: Record<SessionBulkDomain, SessionBulkDomainCount>;
+    /** 非 live 会话里仍有写入只落盘的域时的提示位。 */
+    coldSession?: boolean;
+    elapsedMs: number;
+}
+/** `session.setBulk` 的业务失败（transport 失败仍抛错）。 */
+export interface SessionBulkFailureResult {
+    ok: false;
+    errors: string[];
+}
+/** `session.setBulk` 的返回。 */
+export type SessionBulkResult = SessionBulkSuccess | SessionBulkFailureResult;
+/** 会话级批量开关 API。 */
+export interface SessionApi {
+    /** 批量打开/关闭/恢复默认；`failed[]` 不抛错（页面级用失败计数 + 重试）。 */
+    setBulk(input: SessionBulkInput): Promise<SessionBulkResult>;
 }
 /** 面板视角的完整禁用状态（各域的禁用清单 + 统一存储路径）。 */
 export interface ClientOverrides {
@@ -617,7 +767,8 @@ export type JevTestResult = {
 export interface JevRankItem {
     /** 稳定能力 id：`cap_<36 位小写 hex>`；apply 只认这个 id。 */
     id: string;
-    kind: "skill" | "mcp";
+    /** v13：新增 `tool`（Tools 域 = 整插件一个评分单元）。 */
+    kind: "skill" | "mcp" | "tool";
     name: string;
     description: string;
     /**
@@ -641,6 +792,11 @@ export interface JevRankItem {
     reason?: string;
     /** 当前会话启用态（前端勾选初值 / 回显）。 */
     enabledInSession: boolean;
+    /**
+     * Tools 单元的工具数（v13 additive；`kind==="tool"` 时必有）。
+     * 结果行的 `N 个工具` 灰标签用它。
+     */
+    toolCount?: number;
 }
 /** 冷会话排队应用的结果回执（宿主 additive 返回，读取即消费）。 */
 export interface JevPendingOutcome {
@@ -671,7 +827,8 @@ export type JevApplySkipReason = "unknown-id" | "hard-disabled" | "not-restricta
 /** 一条应用计划项（宿主按 id 重解析，不信任 name/target）。 */
 export interface JevApplyPlanItem {
     id: string;
-    kind: "skill" | "mcp";
+    /** v13：`tool` = Tools 插件单元（选中即启用该插件全部工具）。 */
+    kind: "skill" | "mcp" | "tool";
     name: string;
     target?: string;
     /** 本期只支持「启用」。 */
@@ -762,10 +919,14 @@ export interface WorkspaceOption {
     path: string;
     title?: string;
 }
-/** 面板需要的全部宿主能力（skills + mcp + overrides + jev + 工作区选择），传输无关。 */
+/** 面板需要的全部宿主能力（skills + mcp + tools + overrides + jev + 工作区选择），传输无关。 */
 export interface CapabilityPanelApi {
     skills: SkillsApi;
     mcp: McpApi;
+    /** Tools 域（v13）：插件单元列表 + 按会话开关。 */
+    tools: ToolsApi;
+    /** 会话级批量开关（v13 R1：`session.setBulk`）。 */
+    session: SessionApi;
     overrides: OverridesApi;
     /**
      * Jev 能力决策域。配置页只用 `getConfig/setConfig/test`；`rank/apply` 需要
@@ -774,6 +935,13 @@ export interface CapabilityPanelApi {
     jev: JevApi;
     /** 面板头部的"项目作用域"目录标签。 */
     workspaceLabel(): string;
+    /**
+     * 解析当前会话 id（v13 A5：主面板 Tools 页要写会话开关，但主面板自身没有
+     * sessionId）。读客户端 `sessions.list` 快照，同步、不产生 RPC；解析不到时
+     * 返回 undefined（UI 降级为只读 + 提示「请在对话首屏设置本会话开关」）。
+     * 旧装配缺省时按 undefined 处理。
+     */
+    currentSessionId?(): string | undefined;
     /**
      * 当前显式钉选的项目目录；`undefined` 表示面板自动跟随
      * 当前 session / 最近工作区。

@@ -26,6 +26,7 @@ import type { SessionSkillView, SkillSessionRegistry } from "./skills/session.js
 import { createMcpManager } from "./mcp/manager.js";
 import { createOverridesManager } from "./overrides/manager.js";
 import { createJevManager } from "./jev/manager.js";
+import type { ToolsManager } from "./tools/manager.js";
 /** Cordis 插件名（对应 cordis.patch.yml 里的插件 id）。 */
 export declare const name = "capability-panel";
 /** 宿主插件强依赖的服务（connection/webServer 是惰性解析的，不在这里声明）。 */
@@ -61,6 +62,21 @@ export interface CapabilityPanelService {
     /** Jev 能力决策（配置 / 打分 / 应用；见 `jev/manager.ts`）。 */
     jev: ReturnType<typeof createJevManager>;
     /**
+     * Tools 域（插件级会话开关，v13；见 `tools/manager.ts`）。
+     *
+     * 一个插件 = 一个开关单元；关闭 = 对该插件在本会话的全部可继承工具调
+     * `tools.restrict({deny})`。主面板 `/tools.list` 只读；开关只作用于会话。
+     */
+    tools: ToolsManager;
+    /**
+     * R1 批量端点（三域一次开 / 关 / 恢复默认；见 `session-bulk.ts`）。
+     *
+     * 业务失败收在返回值里（`{ok:false,errors}`），通道层信封恒 `{ok:true,value}`。
+     */
+    session: {
+        setBulk(input: unknown): Promise<unknown>;
+    };
+    /**
      * 可选：按 serverName 从全局工具注册表反推 MCP 工具清单（只读）。
      *
      * 只给 Jev rank 的逐能力 question 用（让模型知道 server 实际能做什么）；
@@ -91,6 +107,18 @@ export { createSkillRegistryBridge, isOwnShadow, SHADOW_DESCRIPTION, SHADOW_META
 export type { ClassifiedInjectedRow, HostSkillCatalogSnapshot, HostSkillDefinition, HostSkillSummary, HostSkillsService, InjectedMergeInput, RegistryNameVerdict, RegistryReadResult, SkillRegistryBridge, SkillRegistryBridgeDeps, SkillResourceResult, } from "./skills/registry.js";
 export { createMcpLoader } from "./mcp/loader.js";
 export { createMcpManager } from "./mcp/manager.js";
+export { scanInjectedMcpInstances, scanInjectedMcpEntries, scanInjectedMcpFibers, scanInjectedMcpNamespaces } from "./mcp/runtime.js";
+export type { InjectedMcpInstance } from "./mcp/runtime.js";
+export { createToolsManager, applyForAgent, TOOL_DESCRIPTION_LIMIT, LOCKED_RESTRICT_UNAVAILABLE } from "./tools/manager.js";
+export type { ToolsManager, ToolsManagerDeps, ToolsLogger, ApplyForAgentResult } from "./tools/manager.js";
+export { computeDenyNames, applyRestrict, sameDenyNames, TOOLS_RESTRICT_UNAVAILABLE, TOOLS_RESTRICT_NO_TOOLS } from "./tools/restrict.js";
+export type { RestrictOutcome, ToolsRestrictionState } from "./tools/restrict.js";
+export { UNATTRIBUTED_UNIT, UNATTRIBUTED_DISPLAY, PLUGIN_UNIT_KEY_PREFIX, TOOLS_DEFAULT_ENABLED, unitKeyOf, unitOfKey, } from "./tools/types.js";
+export type { HostToolBrief, ToolsUnitView, ToolsListView, ToolsSetSessionInput, ToolsSetSessionResult, } from "./tools/types.js";
+export { createSessionBulk } from "./session-bulk.js";
+export type { SessionBulk, SessionBulkAction, SessionBulkDeps, SessionBulkDomain, SessionBulkDomainStat, SessionBulkFailure, SessionBulkInput, SessionBulkResult, SessionBulkServices, } from "./session-bulk.js";
+export { TOOL_RULES, MCP_NAMESPACE_RULES, RESTRICT_FORBIDDEN_TOOL_NAMES, attributeTool, attributeMcpNamespace, displayNameOfSource, isHostBuiltinTool, isRestrictForbiddenToolName, } from "./shared/plugin-attribution.js";
+export type { ToolRule, McpNamespaceRule } from "./shared/plugin-attribution.js";
 export { createSessionState, sessionStateDir, sessionStateFile, SESSION_STATE_FILE_NAME, SESSION_STATE_GRACE_MS, } from "./session-state.js";
 export { createSessionStateReconciler } from "./session-state-reconcile.js";
 export type { SessionStateEntry, SessionStateReconcileInput, SessionStateReconcileResult, SessionStateStore, } from "./session-state.js";

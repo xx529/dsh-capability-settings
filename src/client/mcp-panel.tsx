@@ -214,6 +214,69 @@ function McpServerRow({
   );
 }
 
+/** 注入方展示名（R4）：优先 `channel`，没有则 undefined（不猜）。 */
+function externalChannelOf(server: ClientMcpRuntimeServer): string | undefined {
+  return typeof server.channel === "string" && server.channel.length > 0 ? server.channel : undefined;
+}
+
+/** true = 命名空间合成行（没有 mcp-client 实例，工具来自 `mcp__<ns>__*` 命名空间）。 */
+function isSynthesized(server: ClientMcpRuntimeServer): boolean {
+  return server.synthesized === true || server.origin === "namespace";
+}
+
+/**
+ * 外部实例的来源标签（v13 R4 两枚标签规则）：
+ *   - 有 channel → `插件` + 插件名（第二枚等宽小标签）；
+ *   - 命名空间合成且无映射 → `未识别`（琥珀，只此一枚）；
+ *   - 其余 → `外部注入`（只此一枚）。
+ */
+function ExternalSourceTags({ server }: { server: ClientMcpRuntimeServer }) {
+  const channel = externalChannelOf(server);
+  if (channel !== undefined) {
+    return (
+      <>
+        <span className="skp-tag skp-tag-plugin" title="插件注入的 MCP（来源由插件运行时注册）">
+          插件
+        </span>
+        <span className="skp-tag skp-tag-channel" title={channel}>
+          {channel}
+        </span>
+      </>
+    );
+  }
+  if (isSynthesized(server)) {
+    return (
+      <span className="skp-tag skp-tag-warn" title="工具命名空间合成：来源未识别（不是宿主内置）">
+        未识别
+      </span>
+    );
+  }
+  return (
+    <span className="skp-tag skp-tag-readonly" title="运行时注入 · 未注册插件名">
+      外部注入
+    </span>
+  );
+}
+
+/** 详情「来源判定」文案（方案 §7.6，frontend 直抄）。 */
+function externalAttributionText(server: ClientMcpRuntimeServer): string {
+  const channel = externalChannelOf(server);
+  const matchedBy = server.attribution?.matchedBy;
+  if (channel !== undefined) {
+    if (matchedBy === "namespace") {
+      return `前缀 mcp__${server.attribution?.pattern ?? server.serverName}__ → ${channel}（插件清单映射表）`;
+    }
+    return `运行时注入来源：${server.attribution?.pattern ?? server.source ?? server.serverName} → ${channel}`;
+  }
+  return "来源未识别（不是宿主内置）";
+}
+
+/** 详情「注入方式」文案（R4：命名空间合成单独说明）。 */
+function externalInjectionText(server: ClientMcpRuntimeServer): string {
+  if (server.origin === "namespace") return "工具命名空间合成（不落盘、无 mcp-client 实例）";
+  return server.origin === "entry" ? "loader 条目（profile patch insert）" : "动态 fiber（其它插件在 apply 中挂载）";
+}
+
 /**
  * 一条「外部注入」实例行：只读，同样有行尾「默认」开关（能否按项目屏蔽由
  * `restrictable` 决定；不可屏蔽时置灰 + tooltip 说明原因）。
@@ -233,7 +296,9 @@ function McpExternalRow({
   const dot = defaultOff ? { className: "skp-dot", style: { background: "var(--skp-warn)" } } : { className: "skp-dot skp-dot-enabled" };
   const toolText = server.tools.length > 0 ? `${server.tools.length} 个工具` : "工具数未知";
   const meta = server.calls > 0 ? `${toolText} · 调用 ${server.calls} 次` : toolText;
-  const summary = server.summary ?? "运行时注入，不由能力面板管理（只读）";
+  const summary = isSynthesized(server)
+    ? "由工具命名空间合成 · 无 mcp-client 实例（只读）"
+    : (server.summary ?? "运行时注入，不由能力面板管理（只读）");
   return (
     <li className={selected ? "skp-row-wrap skp-row-wrap-active" : "skp-row-wrap"}>
       <button type="button" className={selected ? "skp-row skp-row-active" : "skp-row"} style={{ minHeight: 72 }} onClick={onSelect}>
@@ -242,10 +307,13 @@ function McpExternalRow({
           <span className="skp-row-title" title={server.serverName}>
             {server.serverName}
           </span>
-          <span className="skp-tag skp-tag-readonly">外部</span>
+          <ExternalSourceTags server={server} />
         </span>
         <span className="skp-row-meta">
-          {server.source !== undefined && <span className="skp-tag skp-tag-flat">{server.source}</span>}
+          {/* 有插件展示名时不再重复渲染 source 小标签（R4：两枚标签已表达来源）。 */}
+          {externalChannelOf(server) === undefined && server.source !== undefined && (
+            <span className="skp-tag skp-tag-flat">{server.source}</span>
+          )}
           {server.transport !== undefined && <span className="skp-tag skp-tag-flat">{server.transport}</span>}
           {defaultOff && (
             <span className="skp-tag skp-tag-warn" title="默认关闭：新建对话不启用；可在输入框的 MCP 弹层里按当前对话手动开启">
@@ -447,13 +515,23 @@ export function McpView({
   const matchesExternal = (server: ClientMcpRuntimeServer) =>
     q.length === 0 ||
     server.serverName.toLowerCase().includes(q) ||
+    (server.channel ?? "").toLowerCase().includes(q) ||
     (server.source ?? "").toLowerCase().includes(q) ||
     (server.summary ?? "").toLowerCase().includes(q);
   const globalServers = servers.filter((server) => server.scope === "global");
   const projectServers = servers.filter((server) => server.scope === "project");
   const visibleGlobal = globalServers.filter(matchesServer);
   const visibleProject = projectServers.filter(matchesServer);
-  const visibleExternal = runtimeServers.filter(matchesExternal);
+  // R4：有插件展示名的排前面（按展示名升序），无 channel 的排后面（按 serverName）。
+  const visibleExternal = runtimeServers
+    .filter(matchesExternal)
+    .sort((a, b) => {
+      const aChannel = a.channel ?? "";
+      const bChannel = b.channel ?? "";
+      if (aChannel.length === 0 && bChannel.length > 0) return 1;
+      if (bChannel.length === 0 && aChannel.length > 0) return -1;
+      return aChannel.localeCompare(bChannel) || a.serverName.localeCompare(b.serverName);
+    });
   const searching = trimmedQuery.length > 0;
   const visibleProjects = projects.filter((project) => {
     if (q.length === 0) return true;
@@ -547,8 +625,8 @@ export function McpView({
     const title = disabled
       ? "先选择工作区"
       : target === "global"
-        ? "添加全局 MCP 服务器"
-        : `添加项目 MCP 服务器（${projectName ?? projectPath}）`;
+        ? "添加全局 MCP"
+        : `添加项目 MCP（${projectName ?? projectPath}）`;
     return (
       <div className={scope === target ? "skp-scope-item skp-scope-item-active" : "skp-scope-item"}>
         <button type="button" className="skp-scope-main" aria-pressed={scope === target} onClick={() => setScope(target)}>
@@ -619,17 +697,17 @@ export function McpView({
   /** 当前 scope 的服务器列表（空态区分「还没有」与搜索「无匹配」）。 */
   const renderServerList = (list: ClientMcpServer[], group: "global" | "project") => {
     if (list.length === 0) {
-      if (searching) return <div className="skp-empty">没有匹配「{trimmedQuery}」的 MCP 服务器。</div>;
+      if (searching) return <div className="skp-empty">没有匹配「{trimmedQuery}」的 MCP。</div>;
       return (
         <div className="skp-empty">
-          <div>{group === "global" ? "还没有全局 MCP 服务器。" : "本项目还没有 MCP 服务器。"}</div>
+          <div>{group === "global" ? "还没有全局 MCP。" : "本项目还没有 MCP。"}</div>
           <button type="button" className="skp-btn" style={{ marginTop: 10 }} onClick={() => openAdd(group)}>
             {group === "global" ? "添加全局 MCP" : "添加到本项目"}
           </button>
         </div>
       );
     }
-    return renderServerScroll(list, group === "global" ? "全局 MCP 服务器" : "本项目 MCP 服务器");
+    return renderServerScroll(list, group === "global" ? "全局 MCP" : "本项目 MCP");
   };
 
   /** 全局 scope 的第二组：外部注入（只读，保留组头与计数；为空时不占位）。 */
@@ -697,11 +775,11 @@ export function McpView({
             </div>
             {scope === "global" ? (
               searching && visibleGlobal.length === 0 && visibleExternal.length === 0 ? (
-                <div className="skp-empty">没有匹配「{trimmedQuery}」的 MCP 服务器。</div>
+                <div className="skp-empty">没有匹配「{trimmedQuery}」的 MCP。</div>
               ) : (
                 <>
                   {searching
-                    ? visibleGlobal.length > 0 && renderServerScroll(visibleGlobal, "全局 MCP 服务器")
+                    ? visibleGlobal.length > 0 && renderServerScroll(visibleGlobal, "全局 MCP")
                     : renderServerList(visibleGlobal, "global")}
                   {renderExternalGroup()}
                 </>
@@ -736,7 +814,7 @@ export function McpView({
             ) : (
               <div className="skp-detail-empty">
                 {scope === "project" && projectPath === undefined
-                  ? "先选择一个工作区，再查看或添加本项目 MCP 服务器。"
+                  ? "先选择一个工作区，再查看或添加本项目 MCP。"
                   : "选择一个服务器查看详情，或新增一个。"}
               </div>
             )}
@@ -744,7 +822,7 @@ export function McpView({
         </div>
       )}
 
-      {/* 新增弹窗：表单 / JSON 两种模式（与技能安装弹窗同构；默认作用域跟随 scope nav）。 */}
+      {/* 新增弹窗：表单 / JSON 两种模式（与 Skills 安装弹窗同构；默认作用域跟随 scope nav）。 */}
       {addOpen && (
         <McpAddDialog
           api={mcpApi}
@@ -860,12 +938,14 @@ function McpExternalDetail({ api, server }: { api: McpApi; server: ClientMcpRunt
       <div className="skp-detail-head">
         <h3>{server.serverName}</h3>
         <span style={HEAD_TAGS_STYLE}>
-          <span className="skp-tag skp-tag-readonly">外部注入</span>
+          <ExternalSourceTags server={server} />
           <span className="skp-tag skp-tag-flat">只读</span>
         </span>
       </div>
       <div className="skp-note">
-        只读原因：该 MCP 由 {server.source ?? "其它插件"} 在运行时注入，能力面板只能查看与记录调用，不能编辑或删除。
+        {isSynthesized(server)
+          ? `只读原因：该实例由工具命名空间 mcp__${server.serverName}__* 合成（没有 mcp-client 实例，无配置可编辑），能力面板只能查看工具与调用记录。按会话开关请到对话首屏「本会话能力」区。`
+          : `只读原因：该 MCP 由 ${externalChannelOf(server) ?? server.source ?? "其它插件"} 在运行时注入，能力面板只能查看与记录调用，不能编辑或删除。按会话开关请到对话首屏「本会话能力」区。`}
       </div>
       <div className="skp-detail-actions">
         <button
@@ -882,9 +962,14 @@ function McpExternalDetail({ api, server }: { api: McpApi; server: ClientMcpRunt
       </div>
       <dl className="skp-detail-fields">
         <dt>来源</dt>
-        <dd>{server.source ?? "运行时注入（来源不可识别）"}</dd>
+        <dd>{externalChannelOf(server) ?? server.source ?? "来源未识别"}</dd>
+        <dt>来源判定</dt>
+        <dd>{externalAttributionText(server)}</dd>
         <dt>注入方式</dt>
-        <dd>{server.origin === "entry" ? "loader 条目（profile patch insert）" : "动态 fiber（其它插件在 apply 中挂载）"}</dd>
+        <dd>
+          {externalInjectionText(server)}
+          {isSynthesized(server) ? "；无实例配置，传输方式未知" : ""}
+        </dd>
         <dt>命名空间</dt>
         <dd>
           <code>mcp__{server.serverName}__*</code>
@@ -908,7 +993,11 @@ function McpExternalDetail({ api, server }: { api: McpApi; server: ClientMcpRunt
         <dt>本次运行调用</dt>
         <dd>{server.calls > 0 ? `${server.calls} 次` : "还没有调用记录"}</dd>
         <dt>管理</dt>
-        <dd>由注入方管理；能力面板只读展示，不提供编辑/删除/卸载。</dd>
+        <dd>
+          {isSynthesized(server)
+            ? "按会话开关请到对话首屏「本会话能力」区（工具命名空间无法在这里编辑或卸载）。"
+            : "由注入方管理；能力面板只读展示，不提供编辑/删除/卸载。"}
+        </dd>
       </dl>
       {toolsOpen && (
         <div className="skp-detail-inspect">
@@ -1345,7 +1434,7 @@ function McpForm({
 
   return (
     <div className={embedded ? undefined : "skp-detail-card"}>
-      {!embedded && <h3>{isNew ? "添加 MCP 服务器" : `编辑 ${server?.key}`}</h3>}
+      {!embedded && <h3>{isNew ? "添加 MCP" : `编辑 ${server?.key}`}</h3>}
       {errors.length > 0 && <div className="skp-error">{errors.join("\n")}</div>}
       <div className="skp-form">
         <label className="skp-field">
@@ -1647,7 +1736,7 @@ function McpAddDialog({
   const [tab, setTab] = useState<"form" | "json">("form");
 
   return (
-    <Modal title="添加 MCP 服务器" onClose={onClose}>
+    <Modal title="添加 MCP" onClose={onClose}>
       <div className="skp-tabs" role="tablist">
         {(["form", "json"] as const).map((t) => (
           <button

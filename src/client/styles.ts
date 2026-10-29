@@ -408,7 +408,9 @@ export const SKP_CSS = `
 .skp-dock-panel-view .skp-dock-head{min-height:34px;}
 .skp-dock-panel-view .skp-dock-title{font-size:15px;}
 .skp-dock-panel-view .skp-dock-search{width:220px;height:30px;}
-.skp-dock-panel-view .skp-dock-grid{max-height:none;overflow:visible;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;padding:0;}
+/* FINDING-02：会话「能力」Tab 1080 容器内宽 990 → 4 列需要 min ≤ (990-3×12)/4 = 238.5。
+   卡片最小宽 240→228，1fr 拉伸后实际 ≈238（帧 05 的 4 列）；hero 模式仍是固定 4 列，不受影响。 */
+.skp-dock-panel-view .skp-dock-grid{max-height:none;overflow:visible;grid-template-columns:repeat(auto-fill,minmax(228px,1fr));gap:12px;padding:0;}
 .skp-dock-panel-view .skp-dock-card{min-height:100px;padding:10px 12px;border-radius:12px;}
 .skp-dock-panel-view .skp-dock-card-name{font-size:12.5px;}
 .skp-dock-panel-view .skp-dock-card-desc{min-height:32px;font-size:11px;line-height:16px;}
@@ -586,9 +588,6 @@ button.skp-tag:focus-visible{outline:none;box-shadow:0 0 0 2px var(--skp-accent-
 .skp-jev-card{display:flex;flex-direction:column;gap:16px;width:100%;max-width:820px;padding:28px;border:1px solid var(--skp-border);border-radius:14px;background:var(--skp-surface);}
 .skp-jev-title{margin:0;font-size:18px;font-weight:600;color:var(--skp-text);}
 .skp-jev-subtitle{margin:0;font-size:13px;line-height:1.6;color:var(--skp-text-2);}
-.skp-jev-note{display:flex;flex-direction:column;gap:5px;padding:12px;border-radius:10px;background:var(--skp-fill);font-size:12px;line-height:1.6;color:var(--skp-text-3);}
-.skp-jev-note-strong{font-size:12.5px;font-weight:600;color:var(--skp-accent);}
-.skp-jev-note code{font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:11.5px;color:var(--skp-text-2);overflow-wrap:anywhere;}
 .skp-jev-banner{padding:10px 14px;border-radius:10px;background:var(--skp-warn-soft);color:var(--skp-warn);font-size:12.5px;line-height:1.55;}
 .skp-jev-loading{padding:20px 0;text-align:center;font-size:13px;color:var(--skp-text-3);}
 .skp-jev-field{display:flex;flex-direction:column;gap:5px;min-width:0;}
@@ -671,6 +670,10 @@ button.skp-tag:focus-visible{outline:none;box-shadow:0 0 0 2px var(--skp-accent-
 .skp-decision-nomatch{flex:none;margin:0;font-size:11px;line-height:16px;color:var(--dsw-alias-state-warn-primary,#c26a0a);}
 .skp-decision-banner{flex:none;padding:5px 8px;border-radius:8px;background:color-mix(in srgb,var(--dsw-alias-state-business-primary,#4176e6) 8%,transparent);color:var(--dsw-alias-label-secondary,#5b6472);font-size:11px;line-height:16px;overflow-wrap:anywhere;}
 .skp-decision-list{flex:1 1 auto;min-height:48px;margin:0;padding:1px;list-style:none;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:2px;scrollbar-width:thin;scrollbar-color:var(--dsw-alias-scrollbar-bg-l2,rgba(0,0,0,.18)) transparent;}
+/* FINDING-03：结果列表的滚动容器与“还有更多”的底部渐隐提示（仅内容溢出时渲染）。 */
+.skp-decision-list-wrap{position:relative;flex:1 1 auto;min-height:48px;display:flex;min-width:0;}
+.skp-decision-list-wrap>.skp-decision-list{flex:1 1 auto;min-width:0;}
+.skp-decision-list-fade{position:absolute;left:0;right:0;bottom:0;height:20px;pointer-events:none;background:linear-gradient(to bottom,transparent,var(--dsw-alias-bg-layer-1,#fff));}
 .skp-decision-row{display:grid;grid-template-columns:18px 34px minmax(0,1fr) minmax(0,1.2fr) 72px 44px;align-items:center;gap:8px;min-height:44px;padding:4px 8px;border-left:2px solid transparent;border-radius:8px;transition:background-color .12s ease,opacity .12s ease;}
 .skp-decision-row:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(20,28,40,.04));}
 .skp-decision-row-selected{background:color-mix(in srgb,var(--dsw-alias-state-business-primary,#4176e6) 8%,transparent);}
@@ -731,6 +734,49 @@ button.skp-tag:focus-visible{outline:none;box-shadow:0 0 0 2px var(--skp-accent-
 @container (max-width:720px){.skp-decision-name-cell{grid-area:name;}.skp-decision-src{max-width:64px;}}
 @container (max-width:560px){.skp-decision-desc{display:none;}.skp-decision-foot{flex-wrap:wrap;}.skp-decision-btn{flex:1 1 auto;}.skp-decision-btn-primary{flex:1 1 100%;order:3;min-width:0;}.skp-decision-badge-auto{display:none;}}
 .skp-decision-bar-wrap{display:flex;flex-direction:column;width:100%;min-width:0;}
+
+/* v13 R1：本会话控制条（行 3）。左批量 + 计数 + 范围说明；右侧预留给 R2 派生
+   继承（本批零实现，不渲染控件），因此本块只定义已用到的结构。 */
+.skp-dock-rail{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-height:36px;padding:6px 10px;border-radius:8px;background:var(--dsw-alias-bg-module-platform,rgba(20,28,40,.04));}
+.skp-dock-rail-btn{flex:none;display:inline-flex;align-items:center;justify-content:center;min-width:64px;height:24px;padding:0 10px;border:1px solid var(--dsw-alias-border-l3,rgba(20,28,40,.16));border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary,#5b6472);font:inherit;font-size:11px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer;transition:background-color .12s ease,border-color .12s ease,color .12s ease;}
+.skp-dock-rail-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(20,28,40,.05));color:var(--dsw-alias-label-primary,#1b1f26);}
+.skp-dock-rail-btn:focus-visible{outline:none;box-shadow:0 0 0 2px color-mix(in srgb,var(--dsw-alias-state-business-primary,#4176e6) 45%,transparent);}
+.skp-dock-rail-btn-primary{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary,#4176e6) 35%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-business-primary,#4176e6) 12%,transparent);color:var(--dsw-alias-state-business-primary,#4176e6);}
+.skp-dock-rail-btn-primary:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-state-business-primary,#4176e6) 18%,transparent);color:var(--dsw-alias-state-business-primary,#4176e6);}
+.skp-dock-rail-btn:disabled,.skp-dock-rail-btn[aria-disabled="true"]{border-color:var(--dsw-alias-border-l2,rgba(20,28,40,.08));background:color-mix(in srgb,var(--dsw-alias-label-primary,#1b1f26) 4%,transparent);color:var(--dsw-alias-label-tertiary,#8b95a1);cursor:default;}
+.skp-dock-rail-count{flex:none;font-size:11.5px;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary,#5b6472);white-space:nowrap;}
+.skp-dock-rail-note{flex:none;font-size:11px;color:var(--dsw-alias-label-tertiary,#8b95a1);white-space:nowrap;}
+.skp-dock-rail-progress{flex:none;font-size:11px;color:var(--dsw-alias-state-business-primary,#4176e6);white-space:nowrap;}
+.skp-dock-rail-fail{flex:none;padding:0;border:none;background:none;font:inherit;font-size:11px;color:var(--dsw-alias-state-error-primary,#d64545);white-space:nowrap;}
+button.skp-dock-rail-fail{cursor:pointer;text-decoration:underline;}
+button.skp-dock-rail-fail:hover{filter:brightness(.9);}
+/* Tools 域：来源未识别（琥珀）/ 行内工具数（灰）。 */
+.skp-dock-tag-unattributed{color:var(--dsw-alias-state-warn-primary,#c26a0a);background:color-mix(in srgb,var(--dsw-alias-state-warn-primary,#c26a0a) 14%,transparent);}
+.skp-dock-tag-count{flex:none;padding:0 5px;border-radius:4px;font-size:9.5px;line-height:16px;color:var(--dsw-alias-label-tertiary,#8b95a1);background:color-mix(in srgb,var(--dsw-alias-label-primary,#1b1f26) 8%,transparent);}
+.skp-dock-chip-tool .skp-dock-chip-dot{background:var(--dsw-alias-state-warn-primary,#c26a0a);}
+/* 决策结果行：Tools 行（插件）标签 / N 个工具 / 底部说明。 */
+.skp-decision-kind-tool{color:#a78bfa;background:color-mix(in srgb,#8b5cf6 18%,transparent);}
+.skp-decision-toolcount{flex:none;padding:0 5px;border-radius:4px;font-size:9.5px;line-height:15px;color:var(--dsw-alias-label-tertiary,#8b95a1);background:color-mix(in srgb,var(--dsw-alias-label-primary,#1b1f26) 8%,transparent);white-space:nowrap;}
+.skp-decision-note{flex:none;margin:0;font-size:10.5px;line-height:16px;color:var(--dsw-alias-label-tertiary,#8b95a1);}
+/* v13 R3：能力面板 · Tools 页（两栏；无左导航）。 */
+.skp-tools-body{overflow:hidden;}
+.skp-tools-pane{width:420px;}
+.skp-pane-title-note{min-width:0;margin-left:auto;font-size:11px;font-weight:400;color:var(--skp-text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.skp-tools-list{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:2px;min-width:0;}
+.skp-tools-item{display:flex;flex-direction:column;gap:2px;padding:7px 10px;border-radius:6px;min-width:0;}
+.skp-tools-item:nth-child(odd){background:var(--skp-fill);}
+.skp-tools-name{font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:11px;font-weight:600;color:var(--skp-text);overflow-wrap:anywhere;}
+.skp-tools-desc{font-size:12px;line-height:1.5;color:var(--skp-text-3);overflow-wrap:anywhere;}
+.skp-tools-impact{padding:8px 12px;border-radius:8px;background:var(--skp-warn-soft);color:var(--skp-warn);font-size:12px;line-height:1.55;}
+/* v13 R5：Jev 配置页副标题第二行 + API Key ⓘ（安全承诺收进 tooltip）。 */
+.skp-jev-subtitle-sub{font-size:11.5px;color:var(--skp-text-3);}
+.skp-jev-label-row{display:flex;align-items:center;gap:6px;min-width:0;}
+.skp-jev-info{flex:none;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;padding:0;border:none;border-radius:50%;background:transparent;color:var(--skp-text-3);font:inherit;font-size:12px;line-height:1;cursor:help;}
+.skp-jev-info:hover{color:var(--skp-text-2);}
+.skp-jev-info:focus-visible{outline:none;box-shadow:0 0 0 2px var(--skp-border-strong);}
+.skp-jev-key-safety{font-size:11.5px;color:var(--skp-text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+@container (max-width:1100px){.skp-tools-pane{width:340px;}}
+@container (max-width:900px){.skp-tools-pane{width:280px;}}
 
 `;
 

@@ -1,12 +1,13 @@
 # dsh-capability-settings
 
 一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）插件：
-在 Web GUI 里**可视化管理项目的全部能力**——Skills 与 MCP 服务器，覆盖
-**全局级 / 项目级（逐工作区）**双作用域。安装、启停、内容浏览与分发都能
+在 Web GUI 里**可视化管理项目的全部能力**——Skills、MCP 与插件工具（**Tools**），
+覆盖**全局级 / 项目级（逐工作区）**双作用域。安装、启停、内容浏览与分发都能
 **不离开浏览器**完成。
 
-面板还内置 TypeSafe Jev「能力决策」：按当前输入草稿为**本会话**预选技能 / MCP，
-一次请求批量打 0–1 分，可手动点按，也可按输入停顿自动触发（默认关闭）。
+面板还内置 TypeSafe Jev「能力决策」：按当前输入草稿为**本会话**预选
+Skills / MCP / Tools（Tools 以插件为单元），一次请求批量打 0–1 分，可手动点按，
+也可按输入停顿自动触发（默认关闭）。会话首屏另有**三域一键开 / 关**控制条。
 
 ![能力面板 v7 · 技能 · 项目（工作区列表在左导航）](docs/figma/preview/v7-01-skills-project.png)
 
@@ -16,8 +17,12 @@
 > **也不含注入技能分组与来源标签**（v12 新增）；新界面见
 > `docs/figma/preview/v11-*.png`（能力决策 5 帧）与并入 v12 的
 > `docs/figma/preview/v8-01/02-*.png`、`v11-04-results.png`（v12 提案原图见 `v12-*.png`）。
-> 当前 IA 说明见「一个面板，管住三个能力域」「注入技能」与
-> [docs/ux/panel-upgrade.md](docs/ux/panel-upgrade.md)。
+> **v13 新增的第三域 Tools、首屏三域控制条、MCP 两枚来源标签、含 Tools 的能力决策**
+> 见 `docs/figma/preview/v13-01…08-*.png`（Figma 页
+> `Capability Panel · 全局开关与派生 v13`）。
+> 当前 IA 说明见「一个面板，管住三个能力域」「注入技能」「Tools（插件工具）」
+> 与 [docs/ux/panel-upgrade.md](docs/ux/panel-upgrade.md)、
+> [docs/ux/capability-v13.md](docs/ux/capability-v13.md)（v1.8）。
 
 > **外壳版本要求**：侧栏入口用的是 root 作用域的 `sidebar.panellist` 槽
 > （「全局面板」图标排）与同 id 的 `main` keyed 槽，**需要 dsh 外壳 ≥ 0.2.0-rc.2**
@@ -29,11 +34,15 @@
 | 能力域 | 浏览/搜索 | 新增/安装 | 编辑 | 启用/禁用 | 删除 | 导入/导出 |
 |---|---|---|---|---|---|---|
 | **Skills** | ✅ 左导航「全局 / 项目」+ 头部搜索 + 项目按工作区下钻 + 详情（目录树 + `SKILL.md` 阅读器，预览/源码） | ✅ 上传 / 宿主路径 / URL 三种来源 | ✅ | ✅ 行尾「启用」开关（项目区启停；全局 = 在本项目禁用/恢复）+ 详情页模型/用户方向独立开关 | ✅ 确认对话框 | ✅ 导入到本项目（物理副本）/ 在本项目禁用（屏蔽占位）/ 下载 zip / 复制到宿主目录 |
-| **MCP 服务器** | ✅ 全局（含外部注入第二组）/ 项目按工作区下钻 + 实时挂载状态 + 行尾「默认」开关 + 工具与参数手风琴 | ✅ 表单新增（stdio/http）+ JSON 导入 | ✅ | ✅ 「默认」开关（新建对话）+ 当前对话开关（会话能力配置）+ 项目条目详情启停 | ✅ 两击确认 | ✅ 导入到本项目（引用，跟随全局）/ `.mcp.json` 与 Claude Code 格式兼容 |
+| **MCP** | ✅ 全局（含外部注入第二组）/ 项目按工作区下钻 + 实时挂载状态 + 行尾「默认」开关 + 工具与参数手风琴 | ✅ 表单新增（stdio/http）+ JSON 导入 | ✅ | ✅ 「默认」开关（新建对话）+ 当前对话开关（会话能力配置）+ 项目条目详情启停 | ✅ 两击确认 | ✅ 导入到本项目（引用，跟随全局）/ `.mcp.json` 与 Claude Code 格式兼容 |
+| **Tools**（插件工具） | ✅ 插件列表 + 搜索（按插件名 / 工具名 / 工具说明）+ 详情**只读工具清单**（工具名 + 一句话说明） | ❌ 由插件自带（插件注册即出现） | ❌ 工具清单只读 | ✅ **插件级**「启用」开关（仅当前会话；整插件全开 / 全关，无单工具开关） | ❌ | ❌ |
 
-> 上表是两个**条目域**（技能 / MCP）。面板另有第三个域 Tab **「Jev 模型」**：它不是条目管理，
-> 而是 TypeSafe Jev 的全局配置页（第三 Tab 无计数、无搜索、无左导航），并驱动首屏
-> **「✦ 能力决策」**。详见下文「Jev 能力决策」。
+> 上表前两个是**条目域**（Skills / MCP，有配置文件与写入操作）；**Tools 是全局工具
+> 注册视图**：只收「插件直接注册、且不是 `mcp__` 前缀」的工具，没有项目 / 工作区
+> 维度、没有配置文件、也没有编辑 / 删除——一个插件就是一个开关单元。`mcp__*` 工具
+> **恒归 MCP 域**，两域互斥、不重复收录。面板另有第四个域 Tab **「Jev 模型」**：
+> 它不是条目管理，而是 TypeSafe Jev 的全局配置页（无计数、无搜索、无左导航），
+> 并驱动首屏 **「✦ 能力决策」**。详见下文「Tools（插件工具）」与「Jev 能力决策」。
 >
 > 表中「编辑 / 删除 / 导入」等写操作只作用于本插件**受管磁盘目录**下的技能；由宿主
 > registry 注入的技能（DSH 内置 / 插件运行时 / Agent 预设渠道）**内容只读**，只能
@@ -49,6 +58,7 @@
 |---|---|---|
 | 项目级「默认关闭」声明（MCP 面板的「默认」开关 + 注入技能的「本项目启用」开关） | `<dshHome>/dsh-capability-settings/capability-overrides.json`（一个文件按**项目根**分 key：`projects.<项目根>.mcp` / `.skills`） | 旧项目内 `.agents/capability-overrides.json`（兼容 `.dsh` → `.claude`）：只读兼容，首次写入时把内容并入统一存储并删除旧文件 |
 | 项目级「全局能力引用」声明（MCP 的「导入到本项目」） | `<项目根>/.agents/capability-imports.json` | — |
+| 会话级能力开关（Skills / MCP / Tools 三域，按 sessionId） | `<dshHome>/dsh-capability-settings/session-capabilities.json`（`version: 1`，记录内 `skills` / `mcp` / `tools` 三个域） | — |
 | 全局 MCP 服务器 | `~/.agents/mcp.json` | `~/.dsh` → `~/.claude` |
 | Skills（项目/全局） | `.agents/skills`、`~/.agents/skills` | `.dsh/skills`（可写）、`.claude/skills`（只读展示） |
 | 项目 MCP 服务器 | `<项目根>/.mcp.json`（Claude Code 标准，位置不变） | — |
@@ -68,11 +78,14 @@
 会挤压对话区）。
 
 **头部两行**：第一行 =「能力面板 · 当前工作区路径 · 项目作用域下拉」；
-第二行 = **左侧域 Tab**（「技能 / MCP / Jev 模型」；技能与 MCP 带条目数量，形如
-「技能 12」「MCP 9」，`Jev 模型` 无计数）+ **右侧搜索框**（只在技能 / MCP 显示，
-按域切换 placeholder）。视图内不再有搜索/安装工具条——搜索与添加都收进头部与左导航。
+第二行 = **左侧域 Tab**（`Skills` / `MCP` / `Tools` / `Jev 模型`；前三个域带条目数量，
+形如「Skills 12」「MCP 9」「Tools 6」，`Tools` 的分母是**插件数**；`Jev 模型` 无计数）
++ **右侧搜索框**（只在 `Skills` / `MCP` / `Tools` 显示，按域切换 placeholder）。
+视图内不再有搜索/安装工具条——搜索与添加都收进头部与左导航。
 点 **Jev 模型** 时：第一行的「工作区路径 / 项目作用域下拉」与第二行搜索框隐藏，
 内容区为单列配置页（无左导航、无列表 / 详情）。
+点 **Tools** 时：同样隐藏项目作用域与左导航（全局工具注册没有项目 / 工作区维度），
+第一行显示 `全局工具注册 · 不区分项目 / 工作区` + 禁用态「全局工具 ▾」占位。
 
 **左导航 = 全局 / 项目**：两行，行右侧各有一个「+」用于安装技能 / 添加 MCP
 服务器（项目行在未选工作区时置灰，tooltip「先选择工作区」）。
@@ -249,6 +262,69 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 > 重导方式见 `docs/figma/README.md` §3.1.3。
 > **v7 及更早截图不含注入技能分组与来源标签**，仅作历史对照。
 
+### 🧰 Tools（插件工具）：一个插件一个开关，全局注册无项目维度
+
+插件除了挂 MCP server，还可以**直接向宿主工具注册表注册工具**（本机实例：
+`dsh-univer-office` 的 `univer_*`、`dsh-remote` 的 `rw_*`、`@xmanrui/dsh-im` 的
+`dsh_im_*`、`dsh-better-sidebar` 的 `sidebar_open`、`dsh-popout-window` 的
+`open_in_popout`、`dsh-diff-approval` 的 `dsh-diff-approval-annotate` 等）。
+这些工具此前只能"全部可见、无法按会话收起"；v13 把它们收进**第三个能力域 Tools**。
+
+**域边界（两域互斥，按序判定）**
+
+1. 工具名以 `mcp__` 开头 → **MCP 域**（永远是；插件自己注册的 `mcp__figma__*`
+   也归 MCP，不进入 Tools）；
+2. 命中宿主内建清单 → **不入任何域**（`bash` / `read` / `write` / `edit` / `glob` /
+   `grep` / `web_search` / `skill` / `todo_write` / `present` / `subagent` /
+   `workflow` / `ralph` / Agent Teams 工具组等；宿主不提供"危险等级"标注，这份
+   清单由本插件自维护，**升级宿主版本后需复核**）；
+3. 命中插件映射表 → Tools 插件单元；
+4. 其余（非 mcp、非内建、无映射）→ 合并进唯一的 **「来源未识别」** 单元
+   （`未识别` 琥珀标签；可开关、计入分母，但**不进 Jev 候选**——它可能混入未来
+   宿主新增的内建工具，让模型去"推荐关闭"风险高）。
+
+**归属是启发式**：宿主工具注册表只有 `name / description / parameters`，**没有
+"哪个插件注入"的字段**（`tools.register` 不接受来源参数），所以 Tools 按已知命名
+约定归类（`univer_*` → `dsh-univer-office`、`rw_*` → `dsh-remote`、
+`dsh_im_*` → `dsh-im`、`sidebar_open` → `dsh-better-sidebar`、
+`open_in_popout` → `dsh-popout-window`、`dsh-diff-approval-annotate` →
+`dsh-diff-approval`；含基础工具名 `univer` 的精确规则）。精确优先、同层最长前缀、
+前缀必须以 `_` / `-` 结尾（`rwx_*` 不会被 `rw_` 误吃）。识别不到就归「来源未识别」，
+**不猜成宿主内置**。
+
+**开关 = 整插件，只作用于当前会话**
+
+- 一个插件 = 一个开关单元，**没有单工具开关**；关闭 = 在该 agent 作用域调用
+  `tools.restrict({ deny: 该插件当前全部可继承工具名 })`，开启 = 解除（disposer）。
+- 持久化只存单元 id（`plugin:<插件展示名>`），**不存工具名**：插件升级增减工具后
+  deny 名单自动跟随；键缺失 = 默认开启（Tools **没有项目级默认**，见下）。
+- 工具集会变（MCP 连上、插件懒加载）：监听 `tools/change` 后微任务合并重算，
+  deny 名单与上一代等价时直接短路（`restrict` 自身也会触发 `tools/change`，
+  短路是刷新不形成循环的关键）。
+- **降级**：旧外壳 / 环境没有 `tools.restrict` → `tools.list` 提前返回
+  `lockedReason`，开关从一开始就置灰；名单为空（工具尚未注册）→ 不调用 restrict、
+  状态记 `skipped`；restrict 抛错 → 状态 `failed` + warning，**不阻断**其它开关
+  和另两域。工具注册表读不到 / 抛错 → Tools 页空态 + 说明，Skills / MCP 不受影响。
+- **注册在 agent 自身层的插件工具不会出现**：`tools.restrict` 只能过滤"继承层"，
+  自身层工具既枚举不到也关不掉，所以 Tools 里**不显示**（不是显示后置灰）——
+  这是相对早期交互稿的规格修正，避免给出一个"永远点不动"的开关。
+
+**面板 Tools 页（两栏、无左导航）**
+
+中列 = 插件行（插件名 + `插件` / `未识别` 标签 + `N 个工具` + 「启用」开关，本会话生效）；
+右侧详情 = 标题（插件名 + 两枚标签）+ `复制插件名` + 开关与状态 + `来源判定`
+（如 `前缀 univer_ → dsh-univer-office（插件清单映射表）`）+ `注入方式：插件运行时
+注册的非 MCP 工具（不落盘）` + 工具数 + **工具清单（只读）**（逐行工具名 + 一句话
+说明；无逐工具开关、无参数表）+ 关闭影响（`关闭该插件后，本会话模型看不到它的全部
+N 个工具；能力决策（Jev）以插件整体计分…；不改项目默认`）。主面板的开关在能解析
+到当前会话时可点（写 `tools.setSessionEnabled`），解析不到时置灰并提示
+「请在对话首屏设置本会话开关」。
+
+**为什么没有项目级默认**：Tools 是全局工具注册、与项目 / 工作区无关，UX 明确
+"不区分项目 / 工作区"；第一批**不做** `capability-overrides.json` 的 Tools 默认
+（否则同一个插件在不同项目默认不同，和 header 文案、会话级语义冲突）。「恢复默认」
+因此 = 清除该会话的显式覆盖 = 回到全开。
+
 ### 🔌 MCP：改配置即热挂载，不重启、不改 preset
 
 - 配置文件与 **Claude Code 的 `.mcp.json` 格式兼容**：项目级
@@ -286,11 +362,24 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   - 行尾「默认」**不是启停**：配置条目的启用/禁用在该条目的详情状态按钮与
     编辑表单里。
 - **外部注入的 MCP 也能管理（只读 + 默认/当前对话开关）**：其它插件或 profile
-  在运行时直接挂载的 `@deepseek-ai/dsh-mcp-client` 实例（不在本插件配置文件里）
-  出现在全局 scope 的第二组「外部注入」——名称旁标 `外部` 与**来源插件**（如
-  `dsh-to-figma`；来源来自 cordis 的 `Fiber.name`/loader 条目 id），详情给出
-  只读原因提示条与字段（命名空间、来源、注入方式、传输方式、默认 / 当前对话、
-  本次运行调用、管理说明），并可查看工具与参数、使用记录。它们
+  在运行时挂载 / 注册的 MCP 出现在全局 scope 的第二组「外部注入」。识别覆盖**两种
+  存在形态**：
+  1. **mcp-client 实例**：cordis 动态 fiber 或 loader 条目（profile
+     `cordis.patch.yml` 的 `insert:`）挂的实例，来源 = `Fiber.name` / 条目 id；
+  2. **插件自注册的工具命名空间**：插件直接 `ctx.tools.register` 注册
+     `mcp__<ns>__*`、**没有** mcp-client 实例（本机 `dsh-to-figma` 的
+     `figma`）。这类从全局工具视图反推，合成一条 `origin:"namespace"` 的行
+     （`synthesized`，无配置；详情注明「工具命名空间合成（不落盘、无 mcp-client
+     实例）」）。
+- **来源用两枚标签表达**（与 Skill 的「插件 + 渠道名」同形）：有插件展示名 →
+  `插件` 紫标签 + 插件名小标签（如 `dsh-to-figma`，超宽省略、悬停全名）；
+  命名空间合成但映射表未覆盖 → 只给 `未识别` 琥珀标签；其余 → 只给 `外部注入`。
+  详情新增「来源判定」（`前缀 mcp__figma__ → dsh-to-figma（插件清单映射表）` /
+  `运行时注入来源：{source} → {channel}` / `来源未识别（不是宿主内置）`）与
+  「注入方式」；组内排序 = 有插件名的按展示名升序、无插件名的排后面。真实例优先
+  于命名空间合成行（同名只出一条，`origin` 保持 `entry` / `fiber`）。
+- 详情给出只读原因提示条与字段（命名空间、来源、注入方式、传输方式、默认 / 当前
+  对话、本次运行调用、管理说明），并可查看工具与参数、使用记录。它们
   **不可编辑/删除/卸载**（配置与生命周期在注入方）。
 - 详情还有**「使用记录」**（只读、不落盘）：列出最近的调用——什么时候、哪个
   session（显示侧栏的会话标题，拿不到标题时显示会话 id 尾部）、调用了这个
@@ -323,15 +412,19 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 - **全局实例的「关掉」靠 `tools.restrict`**：全局 MCP 实例是共享的、无法按
   项目卸载，所以按 session 在该 agent 作用域上 deny 掉
   `mcp__<serverName>__*`——全局配置不动、其他项目不受影响；宿主不提供
-  `restrict` 时降级（记 warning + 状态标 `skipped`，工具对本会话仍可见）。
+  `restrict` 时降级（记 warning + 状态标 `skipped`，工具对本会话仍可见）；
+- **Tools 没有项目级维度（本版有意不做）**：Tools 是全局工具注册，插件工具与
+  项目 / 工作区无关，因此**不写** `capability-overrides.json` 的 Tools 默认名单；
+  开关只作用于会话（首屏 / 会话 Tab），「恢复默认」= 清除该会话覆盖 = 回到全开。
+  这样避免"同一插件在不同项目默认不同"与 header 文案、会话语义冲突。
 
 ### 🎛️ 会话能力配置：首屏内联 + 顶部「能力」Tab
 
-会话能力（Skills / MCP 服务器）的查看与开关分两个入口，**开关全部只作用于
+会话能力（Skills / MCP / Tools）的查看与开关分两个入口，**开关全部只作用于
 当前会话、按会话落盘**（`<dshHome>/dsh-capability-settings/session-capabilities.json`；
 宿主重启 / resume 后恢复），优先级
-`显式会话覆盖 > 项目默认 > 配置 disabled`。输入框工具栏的快捷按钮与底部能力条
-已按产品决定移除，会话内只保留下面两个入口：
+`显式会话覆盖 > 项目默认 > 配置 disabled`（Tools 无项目默认，键缺失 = 默认开启）。
+输入框工具栏的快捷按钮与底部能力条已按产品决定移除，会话内只保留下面两个入口：
 
 - **首屏（hero）默认展开**：新会话首屏在输入框卡片正下方直接展示能力面板
   （Tab + 卡片网格，默认展开、无需点击）。外壳 hero 相位不渲染
@@ -339,10 +432,17 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   `position: fixed` 面板，位置由输入卡 `[data-composer-card]` 的 rect +
   `ResizeObserver` 跟随，宽度与输入卡一致。
 - **会话中：顶部「能力」Tab**（`conversation.view`，与「对话 / 轨迹 /
-  上下文 / 编队」同级）：整页管理本会话 Skills / MCP，Tab 切换能力类型
-  （Tab 文案 `Skills` / `MCP`，不带「服务器」后缀）、卡片网格自适应列数、搜索、
-  `恢复默认`。进入该 Tab 时会临时隐藏输入框（只做能力管理、不需要对话输入），
-  切回其它 Tab 自动恢复。
+  上下文 / 编队」同级）：整页管理本会话能力，**三 Tab `Skills` / `MCP` / `Tools`**
+  （`Tools` 计数按插件数），卡片网格自适应列数、搜索、行 3 控制条、`恢复默认`。
+  进入该 Tab 时会临时隐藏输入框（只做能力管理、不需要对话输入），切回其它 Tab
+  自动恢复。
+- **行 3「本会话控制条」（v13 新增）**：`全部开启` / `全部关闭` + `已启用 n / m`
+  （m = 三域可开关单元总数，Skills 条数 + MCP 行数 + Tools 插件单元数）+
+  `仅当前会话 · 不改项目默认`；作用范围 = `Skills · MCP · Tools` **三域整体**
+  （不按模块分）。**无二次确认、无提醒条**：点一下直接生效；全开 / 全关时对应按钮
+  禁用（tooltip「已全部开启 / 已全部关闭」）；执行中按钮变
+  `全部开启中… / 全部关闭中…` 并显示域级进度（`正在关闭 2 / 3 个域…`）；部分失败
+  显示 `n 项失败 · 重试`，点重试**只重放失败所在域**。
 - **卡片来源标签完整显示**：注入技能卡片底部是「来源类别 + 渠道名」两个小标签，
   渠道名按内容自适应宽度（`DSH 内置（Office）`、`DSH 内置（随包技能目录）`、
   `dsh-diff-approval` 等不再被固定的 92px 上限截成 `DSH 内置（Offi…`）；卡片
@@ -360,30 +460,56 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   使该 skill 从「模型目录 / `skill` 工具 / `/name` 用户口令」三条链路消失；
   恢复即解除 shadow。**只可关闭、不能强制开启文件级已禁用项**；会话没有
   live agent 时开关置灰。
+- **Tools（插件级）**：关闭 = 对该插件在本会话的全部可继承工具
+  `tools.restrict`（deny 名单每次重算，持久化只存插件单元 id）；共享实例不卸载，
+  插件升级增减工具自动跟随。`lockedReason` 的单元开关置灰；冷会话（无 live agent）
+  仍可落盘，agent 创建后重算 restrict 生效。「来源未识别」单元同样可开关、计入
+  分母，但**不进 Jev 候选**。
+- **批量语义（`session.setBulk`）**：宿主自己枚举三域目标、**幂等**（重放只写差异）、
+  **同会话串行**、**部分失败不回滚**（失败项在 `failed[]` 里带
+  `domain / target / kind / error`，已成功项保留；重试 = 重放同一 action）；
+  冷会话时 Skills 项跳过（需要 live agent），MCP / Tools 仍落盘。
 - RPC：`skills.sessionList`（磁盘列表 + `enabledInSession` /
   `canToggleInSession`）、`skills.setSessionEnabled`；`mcp.list` 带上
-  `sessionId` 后由宿主投影 `enabledInSession`。
+  `sessionId` 后由宿主投影 `enabledInSession`；`tools.list`（插件单元 + 会话开关）
+  与 `tools.setSessionEnabled`（batch-first）；三域一键开 / 关 /
+  `恢复默认` 走 `session.setBulk`（`reset` = 只清显式会话覆盖，不动项目默认）。
 - **持久化与清理**：会话开关按 sessionId 落盘，切换会话 / 刷新页面 / 宿主重启 /
   resume 后都保持；写入失败只记 warning（本次运行内仍生效）。会话被删除后，插件
   按「存在性校验 + 24 小时两阶段」清理其记录——宿主没有会话删除事件，关机时的
   `session/disposed` 只做缺失标记、**绝不直接删除**，避免重启清空全部会话开关。
   `fork` 出的子会话是新 id，不继承父会话的会话级开关。
 
+> **⚠️ 派生继承（R2）本版未实现**：`继承 / 不继承` 布尔开关（subagent / teammate
+> 共用、三域整体、默认继承）目前**只有交互设计**
+> （[docs/ux/capability-v13.md](docs/ux/capability-v13.md) §4），代码、持久化字段
+> 与 RPC 都未落地——首屏行 3 右侧**不渲染任何继承控件或弱提示**。派生 agent 的
+> 能力仍按现有规则（项目默认 / 项目级声明）取得，**不是**「跟随父会话生效集合」；
+> 不要把设计稿的默认「继承」当成现状。
+
 ### 🧭 Jev 能力决策：按输入草稿为本会话预选能力
 
-面板第三个域 Tab「Jev 模型」是 TypeSafe Jev 的全局配置页；配置完成后，新会话首屏
-（hero）出现「✦ 能力决策」入口，按当前输入框草稿给本会话全部技能 / MCP 打 0–1 分，
-勾选后只写成**当前会话**的能力开关。
+面板第四个域 Tab「Jev 模型」是 TypeSafe Jev 的全局配置页；配置完成后，新会话首屏
+（hero）出现「✦ 能力决策」入口，按当前输入框草稿给本会话 **Skills / MCP / Tools**
+打 0–1 分（**Tools 以插件为一个单元**，不按单个工具打分），勾选后只写成**当前会话**
+的能力开关。
 
 **配置（全局，所有项目 / 会话共享）**
 
 - 字段：Base URL（默认 `https://api.typesafe.ai`）、模型名（默认 `jev-latest`）、
   API Key 来源（`直接填写` / `环境变量`，默认变量名 `TYPESAFE_API_KEY`）、测试连接、
   保存、恢复默认（需行内再点一次确认，只重置表单）。保存成功**不关闭配置页、不跳转**。
-- 密钥与路径：配置保存到宿主 `<dshHome>/dsh-capability-settings/jev.json`
-  （默认 `~/.dsh/dsh-capability-settings/jev.json`；`DSH_HOME` 存在时以其为根；目录 `700` /
-  文件 `600`）。宿主解析密钥的优先级是 **环境变量（`apiKeyEnv`）> 配置文件中的 key**；
-  界面只显示来源与末 4 位（短 key 显示 `****`），浏览器 / RPC 响应都拿不到明文。
+- **页头说明（v13 文案收口）**：不再有独立 callout（原先的说明块——一次请求 / 隐私
+  口径、密钥路径 `~/.dsh/...` 与 `目录 700 / 文件 600`——已整段删除）；说明并入
+  标题下**副标题两行**，密钥安全承诺收进 **API Key 标签右侧 `ⓘ`**
+  （`密钥仅存宿主，不下发浏览器`）。「能力决策」区内的成本提示与自动触发隐私说明
+  保留，其余字段与语义不变。
+- 密钥与路径（**配置落点事实，界面不再展示**）：配置保存到宿主
+  `<dshHome>/dsh-capability-settings/jev.json`（默认
+  `~/.dsh/dsh-capability-settings/jev.json`；`DSH_HOME` 存在时以其为根；目录 `700` /
+  文件 `600` 的权限不变）。宿主解析密钥的优先级是
+  **环境变量（`apiKeyEnv`）> 配置文件中的 key**；界面只显示来源与末 4 位
+  （短 key 显示 `****`），浏览器 / RPC 响应都拿不到明文。
 - 保存后无需刷新页面：下一次评分 / 测试立即使用新配置；首屏 hero 监听配置变更事件，
   并在窗口重新聚焦时重读配置。
 - 「能力决策」区：`输入停顿后自动评分`（默认**关闭**）、停顿阈值（默认 `1000 ms`，
@@ -396,16 +522,26 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   不依赖自动触发开关。草稿为空时按钮禁用；未配置 Jev 时按钮可点并带蓝点，点击
   跳到「Jev 模型」Tab 配置。
 - 结果面板替换 hero 能力区内容（同宽、不遮输入框、不抢焦点），仅保留标题 / 模型徽标 /
-  阈值滑杆 / 结果列表：分数降序（同分技能先于 MCP，再按名称）；阈值滑杆 `0–1`
-  步长 `0.05`、默认 `0.50`，分数 ≥ 阈值预勾选；可手改勾选；显示 `已选 n / N`
-  （N = 全部参与评分的技能 + MCP，含不可切换项）；底栏「重新评分 / 取消 /
-  应用所选（n）」。
+  阈值滑杆 / 结果列表：分数降序（**同分按三档全序 Skills → MCP → Tools**，再按名称）；
+  阈值滑杆 `0–1` 步长 `0.05`、默认 `0.50`，分数 ≥ 阈值预勾选；可手改勾选；显示
+  `已选 n / N`（N = 全部参与评分的 Skills + MCP + **Tools 插件单元**，含不可切换项；
+  「来源未识别」单元不参与）；底栏「重新评分 / 取消 / 应用所选（n）」。
+- **Tools 结果行（插件级）**：插件名（等宽字体）+ `插件` 标签 + `N 个工具` 标签 +
+  描述（`N 个工具 · 插件注入`）+ 分数条；**不逐工具出行、不挂来源小标签**（名称即
+  插件名，避免重复）；列表下方补一行说明：
+  `Tools 以插件整体计分与启用：选中即开启该插件全部工具；Jev 只收窄，不重新打开已关闭的能力。`
 - **注入技能参与评分与应用**：会话 `skills.sessionList` 含内置 / 插件 / preset 注入
   行后，Jev 枚举自动纳入它们（id 仍是 `skill:<name>`，应用写会话开关，逻辑与磁盘
   技能一致）。结果行在能力名旁显示来源小标签（**内置** / **插件** / **预设渠道**，
   取自宿主 additive 字段 `origin` / `channel`）；旧宿主没有这些字段时按原样不显示。
   冷会话评分集合**不含** preset 技能（无 live agent 选不中 preset 层），会话开始后
   可重新评分。
+- **Tools 参与评分与应用（插件级）**：候选 = 已识别的插件单元（`dsh-univer-office` /
+  `dsh-remote` / `dsh-im` / `dsh-better-sidebar` / `dsh-popout-window` /
+  `dsh-diff-approval` 等），`name` = 插件展示名、描述 = `N 个工具 · 插件注入`；
+  请求只带**工具名 + 一句话说明**（每题最多 8 个工具、总 500 码点；**不带参数
+  schema**、不带工具逐个开关）。「来源未识别」单元不进候选。旧宿主 / 未注入
+  `tools` 服务时枚举跳过 Tools 段（warn 一次），Skills / MCP 照常评分。
 - 评分请求**一次**发给 `POST {Base URL}/v1/systemone`：每个能力一条 `noul`，一个
   0–1 分；**不分片、不按能力拆请求**。单次最多 300 个能力（超出直接报错不请求）；
   超上下文返回「输入内容超出模型上下文上限」，不自动截断或分批。
@@ -413,12 +549,15 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   `NaN` → 该能力 0 分并标注「未获得评分」（`reason=no-answer`），**不整单失败**，
   列表不丢行。
 - 「应用所选」按**筛选语义**只写**当前会话**的会话开关：勾选 → 启用，未勾选的
-  可应用能力 → 关闭（技能关闭 / 恢复，MCP 按会话屏蔽 / 恢复；不可应用项不动），
-  不改项目默认。成功 toast 显示「启用 X 项、关闭 Y 项（仅当前会话）」，重复应用只写
-  差异；冷会话排队完整 ops（含关闭），提示「已加入本会话，发送首条消息后生效
-  （启用 X · 关闭 Y）」；失败尽力按前态回滚（启用 / 关闭均恢复）。未勾选任何能力时
-  也可直接应用（按钮「应用（关闭全部）」），等于关闭本会话全部可应用能力。应用为批量
-  写入（skills 同 tick、MCP 并发 ≤4），通常 <1s；实际耗时取决于本会话能力数与宿主状态。
+  可应用能力 → 关闭（技能关闭 / 恢复，MCP 按会话屏蔽 / 恢复，**Tools 整插件开 / 关**；
+  不可应用项不动），不改项目默认。**只收窄不扩权**：已关闭的能力不会被 Jev 重新
+  打开（未选中且已关闭 = 状态一致，进 `already-applied`）。成功 toast 显示「启用 X
+  项、关闭 Y 项（仅当前会话）」，重复应用只写差异；冷会话排队完整 ops（含关闭），
+  提示「已加入本会话，发送首条消息后生效（启用 X · 关闭 Y）」；失败尽力按前态回滚
+  （启用 / 关闭均恢复，含 Tools 的显式覆盖前态）。未勾选任何能力时也可直接应用
+  （按钮「应用（关闭全部）」），等于关闭本会话全部可应用能力。应用为批量写入
+  （skills 同 tick、MCP 并发 ≤4、Tools 并发 ≤4），通常 <1s；实际耗时取决于本会话
+  能力数与宿主状态。
 
 **输入停顿自动触发（默认关闭）**
 
@@ -443,28 +582,30 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 - 错误分类（宿主统一映射）：401/403 → Key 无效 / 无权限；400/422（`max_tokens_exceeded`
   等）→ 内容超上下文；429 → 请求过于频繁（自动重试最多 2 次）；529 → 服务过载
   （重试 2 次）；其它 5xx / 连接失败 → 网络错误；30s 超时；非 JSON / 结构错误 →
-  请求无法完成；会话无能力 → 「当前会话没有可评分的技能或 MCP 服务器」。4xx 不重试；
+  请求无法完成；会话无能力 → 「当前会话没有可评分的 Skills / MCP / Tools」。4xx 不重试；
   错误文案统一脱敏。
-- 隐私边界：评分请求由**宿主**发起，浏览器不直接访问 Jev；请求体只含当前草稿 +
-  能力名称 / 描述（截断到 200 / 120 码点），不含历史消息、文件正文、项目路径、
-  session/cwd 或 API Key；错误与日志同样脱敏。
+- 隐私边界：评分请求由**宿主**发起，浏览器不直接访问 Jev；请求体只含当前输入框草稿
+  + 能力名称 / 描述（截断到 200 / 120 码点；**Tools 为插件名 + 工具说明摘要**，
+  不发工具参数 schema），不含历史消息、文件正文、项目路径、session/cwd 或 API Key；
+  草稿仅用于本次评分、不落盘；错误与日志同样脱敏。
 
 ## 工作原理
 
 ```
 浏览器客户端                          宿主（host）
-┌──────────────────────────┐   RPC    ┌──────────────────────────────┐
-│ sidebar.panellist        │ ───────► │ ctx.capabilityPanel 服务      │
-│  └ 能力面板图标           │ /capabil-│  ├ skills        磁盘 CRUD +  │
-│ main(key=capability-     │ ity-     │  │               文件内容导出 │
-│  panel) └ 面板页面        │ panel    │  ├ mcp           配置 CRUD +   │
-│  ├ 域 Tab（技能/MCP/Jev） │ 通道     │  │               热挂载 loader │
-│  └ 左导航 + 项目下钻 + 详情│          │  ├ overrides 项目级默认关闭   │
-│ conversation.view        │          │  ├ imports   项目级引用声明   │
-│  └ 「能力」Tab（会话级）  │          │  ├ jev 配置 + rank / apply    │
-│ conversation.input.dock  │          │  └ agent/created → 排队/挂载   │
-│  └ 首屏能力面板 + 能力决策 │          │ 插件 ctx → 全局单例挂载        │
-│                          │          │                              │
+┌──────────────────────────┐          ┌──────────────────────────────┐
+│ sidebar.panellist        │   RPC    │ ctx.capabilityPanel 服务     │
+│ └ 能力面板图标           │ ───────► │ ├ skills        磁盘 CRUD +  │
+│ main(key=capability-     │ /capabil-│ │               文件内容导出 │
+│ panel) └ 面板页面        │ ity-     │ ├ mcp           配置 CRUD +  │
+│ ├ 域 Tab（Skills/MCP/    │ panel    │ │               热挂载 loader│
+│ │  Tools/Jev 模型）      │ 通道     │ ├ tools         插件 restrict│
+│ └ 左导航 + 项目下钻 /详情│          │ ├ overrides 项目级默认关闭   │
+│ conversation.view        │          │ ├ imports   项目级引用声明   │
+│ └ 「能力」Tab（会话级）  │          │ ├ jev 配置 + rank / apply    │
+│ conversation.input.dock  │          │ ├ session.setBulk 三域批量   │
+│ └ 首屏面板 + 行3控制条   │          │ └ agent/created → 排队/挂载  │
+│   + 能力决策             │          │ 插件 ctx → 全局单例挂载      │
 └──────────────────────────┘          └──────────────────────────────┘
 ```
 
@@ -493,6 +634,18 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   项目卸载，于是按 session 对该 agent 作用域 deny 掉该 server 的全局工具
   （名单按 `mcp__<serverName>__` 前缀精确取；宿主没有 `restrict`、名字尚未
   注册或调用抛错时降级为 warning + 状态标 `skipped`/`failed`，不影响挂载）。
+- **Tools 域的开关也是 `tools.restrict`，但按"插件"聚合**：宿主工具注册表只有
+  `name / description / parameters`、没有注入方字段（`tools.register` 不接受来源
+  参数），所以插件归属靠命名约定表推断（见「Tools（插件工具）」）。一条插件单元
+  被关闭时，把该插件当前全部可继承工具名放进同一条 `deny`——**与 MCP 的 restrict
+  是两条独立 restriction**，宿主侧按交集合并，各自持有 disposer、各自幂等短路；
+  不得合并成一条（否则任一方重算都要动对方名单，`tools/change` 易互相触发）。
+  `tools/change` 时会重算（restrict 只能按当前已注册名字屏蔽，首轮名单可能漏掉
+  后注册的工具）。
+- **三域批量走单一宿主端点 `session.setBulk`**：宿主自己枚举三域目标（技能 /
+  MCP / 插件单元），一次请求内批量写；幂等、同会话串行、部分失败不回滚。
+  MCP 的批量写会合并成**一次**重挂（`loader.setSessionEnabledMany`），Tools /
+  MCP 的落盘各一次（`state.setToggles`），避免 150+ 条逐条"读盘-合并-原子写"。
 - **若 profile 里已 root 级挂过同名 server**（例：`profiles/web` 的
   `cordis.patch.yml` 插了 mcp-AnySearch / mcp-tavily / mcp-mobile-next /
   mcp-context7 / mcp-github 共 5 条），本插件不再重复挂载该 serverName：状态
@@ -533,7 +686,8 @@ dsh plugin --profile web remove dsh-capability-settings
 移除后重新运行 `dsh web` 即可，侧栏入口与会话内入口随之消失。卸载**不会**触碰
 你已经管理的任何数据——`.agents/skills`（及旧位置 `.dsh/skills`）、`.mcp.json`、
 `capability-overrides.json`（现位于 `<dshHome>/dsh-capability-settings/`）、
-`capability-imports.json` 等文件全部原样保留，
+`capability-imports.json`、`session-capabilities.json`（会话级 Skills / MCP /
+Tools 开关）、`jev.json` 等文件全部原样保留，
 随时可重新安装接管。旧版快捷消息的 `quick-messages.json`（项目/全局）本版
 **不再读写**，同样不会被卸载动作删除。
 
@@ -569,25 +723,42 @@ pnpm push:install                              # 等价入口
 
 ```
 src/
-  index.ts        宿主插件入口——暴露 ctx.capabilityPanel 服务
+  index.ts        宿主插件入口——暴露 ctx.capabilityPanel 服务（skills / mcp / tools /
+                  overrides / jev / session）
   client.ts       客户端插件入口（侧栏 panellist 入口 + main 页面 + 会话内入口）
   remote.ts       host↔client RPC 接线（endpoint 按域前缀路由）
-  shared/         项目根探测 / 文件写锁 / skill 根定位与来源分类（两端共用）
+  session-state.ts 会话级开关持久化（session-capabilities.json：skills / mcp / tools 三域）
+  session-bulk.ts 三域批量端点 session.setBulk（三域的 enable / disable / reset）
+  shared/         项目根探测 / 文件写锁 / skill 根定位与来源分类 / 插件归属映射表 + 宿主内建排除
+                  （plugin-attribution.ts，两端共用）
   skills/         skills 域：磁盘读写、CRUD、安装/导出、URL 下载、shadow stub、校验、
                   registry 桥（宿主注入技能合并 / 详情 fallback / 资源边界 / 导出快照）
-  mcp/            MCP 域：.mcp.json 读写、全局单例 + 项目级每会话挂载、探测（测试连接）
+  mcp/            MCP 域：.mcp.json 读写、全局单例 + 项目级每会话挂载、探测（测试连接）、
+                  运行时注入发现（fiber / loader 条目 / 工具命名空间合成）
+  tools/          Tools 域（插件级）：全局工具枚举与插件聚合、会话记录与 hydrate、
+                  tools.restrict 应用 / 重算（types / manager / restrict）
   overrides/      项目级「默认关闭」声明：统一存储 <dshHome>/dsh-capability-settings/capability-overrides.json
   imports/        项目级「全局能力引用」：.agents/capability-imports.json（MCP）
   jev/            Jev 能力决策：配置读写/校验（config-file）、密钥解析与 RPC（manager）、
-                  rank（systemone 请求/容错解析/排序）、apply（会话开关事务 + 冷会话排队）
-  client/         React 面板（三域 Tab + 左导航 + 工作区下钻 + 详情）、目录树/阅读器、工具参数手风琴、
-                  Jev 模型配置页（jev-panel）、会话内能力配置 + 首屏「✦ 能力决策」调度器、入口外壳、
-                  zip 工具、零依赖 Markdown、自含样式
+                  rank（systemone 请求/容错解析/排序）、apply（会话开关事务 + 冷会话排队，
+                  含 Tools 插件级单元）
+  client/         React 面板（四域 Tab + 左导航 + 工作区下钻 + 详情 + Tools 两栏页）、
+                  目录树/阅读器、工具参数手风琴、Jev 模型配置页（jev-panel）、
+                  会话内能力配置（三 Tab + 行 3 控制条）+ 首屏「✦ 能力决策」调度器、
+                  入口外壳、zip 工具、零依赖 Markdown、自含样式
 ```
 
 ## 设计文档与截图
 
-- 能力面板（技能 / MCP）规格：[docs/ux/panel-upgrade.md](docs/ux/panel-upgrade.md)（v1.4 / v7 IA）
+- 能力面板（Skills / MCP）规格：[docs/ux/panel-upgrade.md](docs/ux/panel-upgrade.md)（v1.4 / v7 IA）
+- 三域交互规格（v13，**v1.8**）：[docs/ux/capability-v13.md](docs/ux/capability-v13.md)
+  （三域边界 / R1 控制条 / Tools 插件级 / MCP 来源标签 / R5 文案；含**仅供参考、
+  未实现**的 R2 派生继承设计）
+- v13 第一批实现方案（唯一权威）：
+  [docs/architecture/v13-implementation.md](docs/architecture/v13-implementation.md)
+  （RPC 契约附录 A / 文件矩阵附录 B / 存储 / restrict / 批量 / 测试用例 §10）
+- v13 取证（宿主 0.2.1-rc.3 实读）：
+  [docs/research/capability-v13-evidence.md](docs/research/capability-v13-evidence.md)
 - 注入技能来源与启停契约：[docs/architecture/skill-sources.md](docs/architecture/skill-sources.md)
 - Jev 能力决策：
   - 产品规格（v1.3.1，含实现裁决记录）：[docs/specs/jev-auto-select.md](docs/specs/jev-auto-select.md)
@@ -602,6 +773,11 @@ src/
     Figma 页 **`Capability Panel · 能力决策 v11`**（`56:7043`）
   - v12 提案原图（保留作提案，不替代基线）：`docs/figma/preview/v12-01-skills-global.png` …
     `v12-04-session-capability-tab.png`，Figma 页 `Capability Panel · Skill 来源 v12（提案）`
+  - 三域 / 全局开关 **v13**（8 帧：三域 hero、MCP 来源、Tools 插件卡、全关态、会话 Tab 整页、
+    Tools 面板、Jev 配置、含 Tools 的决策结果）：
+    `docs/figma/preview/v13-01-hero-skills.png` … `v13-08-decision-results.png`，
+    Figma 页 **`Capability Panel · 全局开关与派生 v13`**（`106:2`）；其中 R2「派生继承」
+    控件为**设计稿提案、本版未实现**（见上「会话能力配置」的 R2 声明）
 - 建稿/坐标规格：`docs/figma/prototype/v11/spec-v11.md`；面板 v7 原型保留在
   `docs/figma/preview/v7-01-skills-project.png`、`v7-02-mcp-project.png`
 - 运行时验证报告（tester，task-17）：`notes/verify/jev-capability-decision/report.md`
@@ -609,8 +785,9 @@ src/
 
 > `docs/screenshots/` 下的图片是 1.1–1.2 旧版界面留档（包含已下线的快捷消息域与
 > 已移除的输入框能力工具组），仅作历史对照，不再在本文中引用。
-> **跨版本说明**：v7 及更早截图不含第三个域 Tab「Jev 模型」、首屏「✦ 能力决策」
-> 与注入技能分组/来源标签；当前界面以 v8（面板）与 v11（能力决策）预览为准，
+> **跨版本说明**：v7 及更早截图不含第三个域 Tab、「✦ 能力决策」与注入技能分组/
+> 来源标签；v13 又新增第三域 `Tools`、首屏行 3 控制条、MCP 两枚来源标签与含 Tools
+> 的决策结果。当前界面以 v13（三域 / 开关 / 来源）与 v8 / v11 预览为准，
 > v6/v7 仅作历史对照。
 > 尺寸与线框见 `docs/ux/jev-auto-select.md` 与 `docs/ux/panel-upgrade.md` 的 §4 / §9。
 

@@ -110,6 +110,22 @@ export interface McpLoader {
         kind: "project" | "server";
         enabled: boolean | undefined;
     }): Promise<void>;
+    /**
+     * **批量**设置某个 session 的手动开关（R1 `session.setBulk` 用）。
+     *
+     * 语义与单条 `setSessionEnabled` 完全一致，但：一次 hydrate → 写全部 toggle
+     * （`state.setToggles` 一次落盘）→ **一次** `scheduleRemount`。现状逐条调用会
+     * 排队 N 次重挂（150 条量级不可接受），批量端点必须走这个方法。
+     */
+    setSessionEnabledMany(input: {
+        sessionId: string;
+        cwd?: string;
+        entries: Array<{
+            target: string;
+            kind: "project" | "server";
+            enabled: boolean | undefined;
+        }>;
+    }): Promise<void>;
     /** 该 session 的显式开关快照（键带 `project:` / `server:` 前缀）。 */
     sessionToggleState(sessionId?: string): Record<string, boolean>;
 }

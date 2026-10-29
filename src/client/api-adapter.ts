@@ -20,6 +20,8 @@ import type {
   ClientOverrides,
   ClientSkillDetail,
   ClientSkillSummary,
+  ClientToolsList,
+  ClientToolsUnit,
   CreateSkillInput,
   InstallResult,
   JevApplyResult,
@@ -30,6 +32,10 @@ import type {
   JevTestResult,
   McpTestResult,
   McpUpsertInput,
+  SessionBulkFailure,
+  SessionBulkInput,
+  SessionBulkResult,
+  SessionBulkSuccess,
   SkillResourceErrorCode,
   SkillResourceResult,
   WorkspaceOption,
@@ -65,6 +71,11 @@ export interface AdapterDeps {
    * 会多返回 `enabledInSession`，`mcp.setSessionEnabled` 也知道改哪个会话。
    */
   sessionId?: string;
+  /**
+   * 解析"当前会话" id（v13 A5：主面板没有 sessionId，Tools 页要写会话开关）。
+   * 同步读客户端 sessions 快照；解析不到返回 undefined（UI 降级只读）。
+   */
+  currentSessionId?(): string | undefined;
 }
 
 /** 构建传输无关的面板 API（RPC 实现）。 */
@@ -381,7 +392,8 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
 
       /**
        * 运行时注入的 MCP（只读）：宿主的 `{servers:[{serverName,tools,calls}]}` 直接
-       * 投影成客户端类型；脏数据丢弃。
+       * 投影成客户端类型；脏数据丢弃。v13 R4 额外透传 channel / attribution /
+       * synthesized，并把 `origin:"namespace"`（工具命名空间合成行）原样保留。
        */
       /**
        * 设置**当前 session** 的能力开关。sessionId 来自 api 的 deps（composer 的
@@ -413,7 +425,15 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
               return {
                 serverName: typeof server.serverName === "string" ? server.serverName : "",
                 ...(typeof server.source === "string" && server.source.length > 0 ? { source: server.source } : {}),
-                origin: server.origin === "entry" ? ("entry" as const) : ("fiber" as const),
+                origin:
+                  server.origin === "entry"
+                    ? ("entry" as const)
+                    : server.origin === "namespace"
+                      ? ("namespace" as const)
+                      : ("fiber" as const),
+                ...(typeof server.channel === "string" && server.channel.length > 0 ? { channel: server.channel } : {}),
+                ...(toMcpAttribution(server.attribution) !== undefined ? { attribution: toMcpAttribution(server.attribution) } : {}),
+                ...(server.synthesized === true ? { synthesized: true } : {}),
                 ...(server.transport === "stdio" || server.transport === "http" ? { transport: server.transport } : {}),
                 ...(typeof server.summary === "string" && server.summary.length > 0 ? { summary: server.summary } : {}),
                 ...(server.disabledInProject === true ? { disabledInProject: true } : {}),
@@ -434,6 +454,46 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
             })
             .filter((server) => server.serverName.length > 0) as ClientMcpRuntimeServer[],
         };
+      },
+    },
+
+    tools: {
+      /**
+       * 列出插件单元（v13）。宿主把「服务缺失 / schemas() 失败」包成空 units +
+       * errors（不阻断其它域）；适配器原样投影，界面据此显示空态说明。
+       */
+      async list(input): Promise<ClientToolsList> {
+        const sessionId = input?.sessionId ?? deps.sessionId;
+        const result = await rpc("tools.list", { ...(sessionId !== undefined ? { sessionId } : {}) });
+        if (!result.ok) {
+          return { units: [], totalGlobalTools: 0, excludedBuiltinCount: 0, errors: result.errors };
+        }
+        return toToolsList(result.value);
+      },
+
+      /** 按会话开关插件（batch-first）；业务失败抛错（与 skills/mcp 单条一致）。 */
+      async setSessionEnabled(input) {
+        const sessionId = input.sessionId ?? deps.sessionId;
+        if (sessionId === undefined) throw new Error("tools.setSessionEnabled 需要当前会话");
+        const result = unwrap(
+          await rpc("tools.setSessionEnabled", { sessionId, units: input.units, enabled: input.enabled }),
+        ) as { ok: true; applied?: unknown } | { ok: false; errors: string[] };
+        if (!result.ok) throw new Error(result.errors.join("; "));
+        return { ok: true as const, applied: typeof result.applied === "number" ? result.applied : input.units.length };
+      },
+    },
+
+    session: {
+      /**
+       * 批量开/关/恢复默认（v13 R1）。`failed[]` 属成功 value，不抛错；
+       * 业务失败（缺 sessionId / 非法 action / 未知域）原样返回 `{ok:false,errors}`。
+       */
+      async setBulk(input: SessionBulkInput): Promise<SessionBulkResult> {
+        const sessionId = input.sessionId ?? deps.sessionId;
+        const payload = { ...input, ...(sessionId !== undefined ? { sessionId } : {}) };
+        const result = await rpc("session.setBulk", payload);
+        if (!result.ok) return { ok: false, errors: result.errors };
+        return toSessionBulkResult(unwrap(result));
       },
     },
 
@@ -547,6 +607,10 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
     },
 
     // 工作区相关方法直接透传注入的 deps（状态由 client.ts 持有）。
+    currentSessionId() {
+      return deps.currentSessionId?.();
+    },
+
     workspaceLabel() {
       return deps.currentWorkspaceCwd() ?? "（无工作区）";
     },
@@ -566,6 +630,129 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
     subscribeWorkspace(listener) {
       return deps.subscribeWorkspace(listener);
     },
+  };
+}
+
+/**
+ * `tools.list` 视图的防御性投影：宿主字段缺失 / 类型漂移时补默认值，
+ * 保证 UI 永远可渲染（工具清单只收 name/description，不带 parameters）。
+ */
+function toToolsList(value: unknown): ClientToolsList {
+  const raw = (value ?? {}) as Record<string, unknown>;
+  const units = (Array.isArray(raw.units) ? raw.units : [])
+    .map((item) => {
+      const unit = (item ?? {}) as Record<string, unknown>;
+      if (typeof unit.unit !== "string" || unit.unit.length === 0) return undefined;
+      const tools = (Array.isArray(unit.tools) ? unit.tools : [])
+        .map((tool) => {
+          const brief = (tool ?? {}) as Record<string, unknown>;
+          if (typeof brief.name !== "string" || brief.name.length === 0) return undefined;
+          return {
+            name: brief.name,
+            ...(typeof brief.description === "string" && brief.description.length > 0 ? { description: brief.description } : {}),
+          };
+        })
+        .filter((tool): tool is NonNullable<typeof tool> => tool !== undefined);
+      const attribution = (unit.attribution ?? {}) as Record<string, unknown>;
+      const matchedBy =
+        attribution.matchedBy === "prefix" || attribution.matchedBy === "exact" ? attribution.matchedBy : ("unknown" as const);
+      const restriction = (unit.restriction ?? {}) as Record<string, unknown>;
+      const restrictionState =
+        restriction.state === "applied" || restriction.state === "skipped" || restriction.state === "failed"
+          ? restriction.state
+          : undefined;
+      const projected: ClientToolsUnit = {
+        unit: unit.unit,
+        name: typeof unit.name === "string" && unit.name.length > 0 ? unit.name : unit.unit,
+        kind: unit.kind === "unattributed" ? "unattributed" : "plugin",
+        tools,
+        toolCount:
+          typeof unit.toolCount === "number" && Number.isFinite(unit.toolCount) ? unit.toolCount : tools.length,
+        attribution: {
+          matchedBy,
+          ...(typeof attribution.pattern === "string" && attribution.pattern.length > 0 ? { pattern: attribution.pattern } : {}),
+          ...(typeof attribution.packageName === "string" && attribution.packageName.length > 0
+            ? { packageName: attribution.packageName }
+            : {}),
+        },
+        enabledInSession: unit.enabledInSession !== false,
+        explicit: unit.explicit === true,
+        ...(typeof unit.lockedReason === "string" && unit.lockedReason.length > 0 ? { lockedReason: unit.lockedReason } : {}),
+        ...(restrictionState !== undefined
+          ? {
+              restriction: {
+                state: restrictionState,
+                ...(typeof restriction.error === "string" && restriction.error.length > 0 ? { error: restriction.error } : {}),
+              },
+            }
+          : {}),
+      };
+      return projected;
+    })
+    .filter((unit): unit is ClientToolsUnit => unit !== undefined);
+  return {
+    units,
+    totalGlobalTools: typeof raw.totalGlobalTools === "number" ? raw.totalGlobalTools : 0,
+    excludedBuiltinCount: typeof raw.excludedBuiltinCount === "number" ? raw.excludedBuiltinCount : 0,
+    errors: Array.isArray(raw.errors) ? raw.errors.filter((item): item is string => typeof item === "string") : [],
+    ...(typeof raw.sessionId === "string" && raw.sessionId.length > 0 ? { sessionId: raw.sessionId } : {}),
+  };
+}
+
+/** `session.setBulk` 成功 value 的防御性投影（缺字段补 0 / 空表）。 */
+function toSessionBulkResult(value: unknown): SessionBulkSuccess {
+  const raw = (value ?? {}) as Record<string, unknown>;
+  const countOf = (input: unknown): { changed: number; unchanged: number; skipped: number; failed: number } => {
+    const item = (input ?? {}) as Record<string, unknown>;
+    const num = (candidate: unknown): number =>
+      typeof candidate === "number" && Number.isFinite(candidate) ? candidate : 0;
+    return { changed: num(item.changed), unchanged: num(item.unchanged), skipped: num(item.skipped), failed: num(item.failed) };
+  };
+  const byDomain = (raw.byDomain ?? {}) as Record<string, unknown>;
+  const failed = (Array.isArray(raw.failed) ? raw.failed : [])
+    .map((item) => {
+      const entry = (item ?? {}) as Record<string, unknown>;
+      if (typeof entry.domain !== "string" || typeof entry.target !== "string") return undefined;
+      const kind =
+        entry.kind === "skill" || entry.kind === "mcp-project" || entry.kind === "mcp-server" || entry.kind === "plugin"
+          ? entry.kind
+          : "skill";
+      return {
+        domain: entry.domain as SessionBulkFailure["domain"],
+        target: entry.target,
+        kind,
+        error: typeof entry.error === "string" ? entry.error : "操作失败",
+      };
+    })
+    .filter((item): item is SessionBulkFailure => item !== undefined);
+  const action = raw.action === "disable" || raw.action === "reset" ? raw.action : "enable";
+  const num = (candidate: unknown): number =>
+    typeof candidate === "number" && Number.isFinite(candidate) ? candidate : 0;
+  return {
+    ok: true,
+    action,
+    applied: num(raw.applied),
+    unchanged: num(raw.unchanged),
+    skipped: num(raw.skipped),
+    failed,
+    byDomain: {
+      skills: countOf(byDomain.skills),
+      mcp: countOf(byDomain.mcp),
+      tools: countOf(byDomain.tools),
+    },
+    ...(raw.coldSession === true ? { coldSession: true } : {}),
+    elapsedMs: num(raw.elapsedMs),
+  };
+}
+
+/** `mcp.runtime` 的 attribution 投影（未知形状丢弃，避免 UI 渲染垃圾）。 */
+function toMcpAttribution(value: unknown): { matchedBy: "namespace" | "source" | "unknown"; pattern?: string } | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const raw = value as Record<string, unknown>;
+  if (raw.matchedBy !== "namespace" && raw.matchedBy !== "source" && raw.matchedBy !== "unknown") return undefined;
+  return {
+    matchedBy: raw.matchedBy,
+    ...(typeof raw.pattern === "string" && raw.pattern.length > 0 ? { pattern: raw.pattern } : {}),
   };
 }
 

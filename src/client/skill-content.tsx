@@ -309,7 +309,7 @@ export function SkillContent({
           if (detail === undefined) {
             setState({
               status: "error",
-              message: `无法读取技能「${summary.name}」：它可能已被插件卸载，或需要先在会话中激活所属预设。`,
+              message: `无法读取 Skills 「${summary.name}」：它可能已被插件卸载，或需要先在会话中激活所属预设。`,
             });
             return;
           }
@@ -559,7 +559,7 @@ export function SkillContent({
         <div
           className="skp-file-tree"
           role="tree"
-          aria-label="技能文件"
+          aria-label="Skills 文件"
           tabIndex={0}
           ref={treeRef}
           style={{ width: treeWidth }}
@@ -569,7 +569,7 @@ export function SkillContent({
           }}
         >
           <div className="skp-file-tree-head">
-            <span className="skp-file-tree-title">技能文件</span>
+            <span className="skp-file-tree-title">Skills 文件</span>
             <span
               className="skp-group-count"
               title={
@@ -680,7 +680,7 @@ export function SkillContent({
           <SkpSelect
             className="skp-file-picker-dd"
             value={selectedPath ?? ""}
-            ariaLabel="选择技能文件"
+            ariaLabel="选择 Skills 文件"
             options={state.files.map((file) => ({ value: file.path, label: file.path, hint: formatSize(file.size) }))}
             onChange={selectFile}
           />
@@ -736,7 +736,7 @@ export function SkillContent({
             </div>
           )}
           {state.status === "ready" && selectedFile === undefined && (
-            <div className="skp-reader-state skp-reader-state-muted">此技能没有可预览的文件</div>
+            <div className="skp-reader-state skp-reader-state-muted">此 Skills 没有可预览的文件</div>
           )}
           {/* 注入行资源文件的懒加载态：请求中 / 失败。 */}
           {state.status === "ready" && selectedFile !== undefined && selectedFile.lazyState === "loading" && <ReaderSkeleton />}
