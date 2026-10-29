@@ -46,6 +46,7 @@
  *
  * @module dsh-capability-settings/session-state
  */
+import { type MigrationReport } from "./tools/attribution/migrate.js";
 /** 当前数据文件版本；版本不认识时整份忽略（不猜测迁移）。 */
 export declare const SESSION_STATE_VERSION = 1;
 /** 插件在 dsh home 下的目录名（与包名一致，和 `jev.json` 共用）。 */
@@ -142,8 +143,13 @@ export interface SessionStateStore {
     skills(sessionId: string): Readonly<Record<string, boolean>>;
     /** 某会话的 MCP 显式开关（同步；调用方需先 `await ready()`）。 */
     mcp(sessionId: string): Readonly<Record<string, boolean>>;
-    /** 某会话的 Tools 显式开关（同步；调用方先 `await ready()`）。 */
+    /** 某会话的 Tools 显式开关（同步；调用方先 `await ready()`；只回规范 `plugin:` 键）。 */
     tools(sessionId: string): Readonly<Record<string, boolean>>;
+    /**
+     * 一次性 unit id 迁移（D2）：把 `plugin:<旧 display>` 归一为 `plugin:<包名>`，
+     * 同时写入旧键镜像（可回滚）并保留未知键；幂等（已 settled 不写盘）。
+     */
+    migrateToolsUnits(): Promise<MigrationReport>;
     /**
      * 校验记录是否仍属于"当前这个会话"。
      *

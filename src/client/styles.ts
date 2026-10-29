@@ -176,6 +176,7 @@ export const SKP_CSS = `
 .skp-textarea{min-height:72px;resize:vertical;font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:13px;line-height:1.5;}
 .skp-subheader-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 .skp-note{font-size:13px;color:var(--skp-text-3);word-break:break-all;}
+.skp-note-warn{color:var(--skp-warn);}
 .skp-modal-overlay{position:fixed;z-index:95;inset:0;background:var(--skp-mask);display:grid;place-items:center;}
 .skp-modal{width:520px;max-width:92vw;max-height:84vh;overflow:auto;display:flex;flex-direction:column;gap:16px;padding:22px;border:1px solid var(--skp-border);border-radius:14px;background:var(--skp-surface);box-shadow:0 24px 64px rgba(15,20,30,.22),0 4px 16px rgba(15,20,30,.1);scrollbar-width:thin;}
 .skp-modal h3{margin:0;font-size:16px;font-weight:600;color:var(--skp-text);}
@@ -418,6 +419,8 @@ export const SKP_CSS = `
 .skp-dock-panel-view .skp-dock-foot{border-top:1px solid var(--dsw-alias-border-l1,rgba(20,28,40,.05));padding-top:12px;}
 .skp-dock-panel-view .skp-dock-tabs{padding:3px;}
 .skp-dock-panel-view .skp-dock-empty{min-height:220px;}
+/* task-32：Tools 归属仍在解析时的轻量提示（首屏 Tools Tab；transient，不阻塞开关）。 */
+.skp-dock-grid-note{grid-column:1/-1;display:flex;align-items:center;min-height:18px;font-size:10.5px;color:var(--dsw-alias-label-tertiary,#8b95a1);}
 @container (max-width:900px){.skp-dock-panel-view .skp-dock-grid{grid-template-columns:repeat(auto-fill,minmax(220px,1fr));}}
 @container (min-width:1180px){.skp-dock-panel-view .skp-dock-grid{grid-template-columns:repeat(5,minmax(0,1fr));}}
 @container (min-width:1180px){.skp-dock-panel-hero .skp-dock-grid{grid-template-columns:repeat(5,minmax(0,1fr));}}

@@ -25,6 +25,8 @@ import type { SessionStateStore } from "../session-state.js";
 import { type RestrictOutcome, type ToolsRestrictionState } from "./restrict.js";
 import { type ToolsInspectResult, type ToolsListView, type ToolsSetGlobalResult, type ToolsSetSessionResult } from "./types.js";
 import type { ToolsGlobalStore } from "./global-state.js";
+import { type AttributionResolver } from "./attribution/resolver.js";
+import type { ToolAttribution } from "./attribution/types.js";
 /** 结构化 logger 子集（与插件其它模块一致，缺省静默）。 */
 export interface ToolsLogger {
     warn?(message: string): void;
@@ -58,6 +60,10 @@ export interface ToolsManagerDeps {
     global?: ToolsGlobalStore;
     /** 全局 tools 服务访问器（测试注入；缺省 `ctx.root.get("tools") ?? ctx.get("tools")`）。 */
     globalTools?: () => any;
+    /**
+     * 自动归属 resolver（T0/T1/T2/T3 + 表兜底）。缺省 = 纯人工表（旧装配/测试）。
+     */
+    resolver?: AttributionResolver;
 }
 /** 挂到 `ctx.capabilityPanel.tools` 的服务形状（方案 §5.1）。 */
 export interface ToolsManager {
@@ -135,6 +141,7 @@ export declare function applyForAgent(agent: any, sessionId: string, toggles: Re
     globalTools?: () => any;
     logger?: ToolsLogger;
     globallyDisabled?: ReadonlySet<string>;
+    resolveTool?: (toolName: string) => ToolAttribution;
 }): ApplyForAgentResult;
 /**
  * 创建 Tools 域管理器（组合根单例）。

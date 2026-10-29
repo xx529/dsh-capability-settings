@@ -42,6 +42,7 @@ import { createJevManager } from "./jev/manager.js";
 import { createSessionState } from "./session-state.js";
 import { createSessionStateReconciler } from "./session-state-reconcile.js";
 import { createToolsManager } from "./tools/manager.js";
+import { createAttributionResolver } from "./tools/attribution/resolver.js";
 import type { ToolsManager } from "./tools/manager.js";
 import { createToolsGlobalStore } from "./tools/global-state.js";
 import { createSessionBulk } from "./session-bulk.js";
@@ -65,6 +66,12 @@ export interface Config {
   mountRpc?: boolean;
   /** 为 false 时不自动把 MCP server 挂载进 agent。缺省 true。 */
   mountMcp?: boolean;
+  /**
+   * 插件工具自动归属（T0 运行时栈 / T1 包扫描 / T2 namespace / T3 相似度）。
+   *
+   * 缺省 **true**；false = 退回纯人工表（T4）行为（不挂监听、不扫描、不写缓存）。
+   */
+  enableAutoAttribution?: boolean;
 }
 
 /**
@@ -125,6 +132,13 @@ declare module "@deepseek-ai/cordis" {
  * （状态查询 + 写后重挂）共用同一实例，保证两者的状态口径一致。
  */
 export function apply(ctx: any, config: Config = {}) {
+  // 自动归属 resolver：**最先**创建（T0 监听覆盖窗口最大），异步扫描不阻塞首屏。
+  const attribution = createAttributionResolver({
+    ctx,
+    ...(config.dshHome !== undefined ? { dshHome: config.dshHome } : {}),
+    logger: ctx.logger,
+    enabled: config.enableAutoAttribution !== false,
+  });
   // overrides 原身只做声明文件的读/写；loader 与各域管理器共用它的 sets()
   // 快照。MCP 域的禁用切换落盘后需要热重挂（禁用即卸载、恢复即挂载），但
   // overrides 与 loader 互相依赖（loader 要 sets、切换要 reload），所以在
@@ -141,7 +155,12 @@ export function apply(ctx: any, config: Config = {}) {
   // Tools 两层语义：全局默认（`tools-global.json`，能力面板开关） + 会话覆盖
   // （`session-capabilities.json` 的 `tools` 域，会话首屏开关）。
   const toolsGlobal = createToolsGlobalStore({ dshHome: config.dshHome, logger: ctx.logger });
-  const tools = createToolsManager(ctx, { state: sessionState, global: toolsGlobal, logger: ctx.logger });
+  const tools = createToolsManager(ctx, {
+    state: sessionState,
+    global: toolsGlobal,
+    logger: ctx.logger,
+    resolver: attribution,
+  });
   // R1 批量端点：延迟构造（依赖最终 service），同 session 串行由模块内部保证。
   const sessionBulkRef: { current?: SessionBulk } = {};
   // 项目级「全局能力引用」存储：MCP 管理器与 MCP loader 共用同一实例
@@ -262,7 +281,8 @@ export function apply(ctx: any, config: Config = {}) {
         tools: () => ctx.get?.("tools"),
         // 运行时注入的 mcp-client：cordis 注册表里的动态 fiber + loader 条目
         // （见 mcp/runtime.ts）。只读，用来给出「来源插件」与桥接层配置。
-        scanInjected: () => [...scanInjectedMcpInstances(ctx).values()],
+        scanInjected: () =>
+        [...scanInjectedMcpInstances(ctx, (namespace) => attribution.resolveNamespace(namespace)).values()],
       },
       loader,
       overrides,
@@ -318,12 +338,22 @@ export function apply(ctx: any, config: Config = {}) {
     typeof ctx.on === "function" ? ctx.on("session/disposed", () => reconciler.noteDisposed()) : undefined;
   const offAgentDisposed =
     typeof ctx.on === "function" ? ctx.on("agent/disposed", () => reconciler.noteDisposed()) : undefined;
+  // unit id 迁移（D2）：读时已归一（内存语义正确），这里做一次性写回 + 镜像；
+  // 幂等、异步、失败只 warn，绝不阻塞 RPC。
+  void toolsGlobal.migrateUnitIds().catch((error: unknown) => {
+    ctx.logger?.warn?.(`capability-panel: tools-global.json unit id 迁移失败：${String(error)}`);
+  });
+  void sessionState.migrateToolsUnits().catch((error: unknown) => {
+    ctx.logger?.warn?.(`capability-panel: session-capabilities.json tools unit id 迁移失败：${String(error)}`);
+  });
+
   const disposers: Array<() => void> = [
     disposeUsageGuard,
     () => skillsRegistry.dispose(),
     () => skillSessions.dispose(),
     () => tools.dispose(),
     () => toolsGlobal.dispose(),
+    () => attribution.dispose(),
     () => jev.dispose(),
     () => reconciler.dispose(),
     () => sessionState.dispose(),

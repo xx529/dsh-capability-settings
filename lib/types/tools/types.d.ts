@@ -45,13 +45,28 @@ export interface ToolsUnitView {
     tools: HostToolBrief[];
     /** 工具数（卡片描述与 Jev toolCount 用）。 */
     toolCount: number;
-    /** 归属判定（详情「来源判定」文案）。 */
+    /**
+     * 归属判定（详情「来源判定」文案）。
+     *
+     * additive：`matchedBy` 扩为自动发现层；旧值 `prefix` / `exact` / `source`
+     * 继续被识别（人工表 T4 仍发旧值，保证旧客户端文案不变）。
+     */
     attribution: {
-        matchedBy: "prefix" | "exact" | "unknown";
+        matchedBy: "runtime" | "literal" | "namespace" | "table" | "similarity" | "prefix" | "exact" | "source" | "unknown";
         /** 命中的模式原文（未识别缺省）。 */
         pattern?: string;
-        /** 包名（已识别才有）。 */
+        /** 包名（已识别才有；= 规范 unit id）。 */
         packageName?: string;
+        /** 置信度（`similarity` 记为 medium，UI 应标「推测」）。 */
+        confidence?: "high" | "medium" | "low";
+        /** 诊断：自动归属结果与人工表（T4）不一致。 */
+        conflictsWithTable?: boolean;
+        /** 诊断：多候选/相似度 margin 不足。 */
+        ambiguous?: boolean;
+        /** 诊断：该单元内工具归属依据不一致（运行时 + 扫描/推测混排）。 */
+        mixed?: boolean;
+        /** 旧 unit id（迁移诊断；`plugin:<legacy>` 可回滚）。 */
+        legacyUnit?: string;
     };
     /**
      * 全局默认（能力面板开关）：true = 全局启用（默认）、false = 全局默认关闭。
@@ -107,6 +122,12 @@ export interface ToolsListView {
     errors: string[];
     /** 本次查询绑定的会话（没传 sessionId 时缺省；enabledInSession 恒为默认值）。 */
     sessionId?: string;
+    /**
+     * 归属扫描/缓存是否仍在后台收敛（additive）。
+     *
+     * `true` 时列表已可用（不阻塞），前端可在首次见到后延迟静默刷新一次。
+     */
+    attributionSettling?: boolean;
 }
 /**
  * `tools.setSessionEnabled` 入参（**batch-first**：单条 = 长度 1 的数组）。

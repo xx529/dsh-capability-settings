@@ -15,6 +15,7 @@ import type {
   ClientMcpList,
   ClientMcpStatus,
   ClientMcpTool,
+  ClientAttributionInfo,
   ClientMcpRuntimeServer,
   ClientMcpUsageEntry,
   ClientOverrides,
@@ -412,9 +413,10 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
           ...(deps.sessionId !== undefined ? { sessionId: deps.sessionId } : {}),
         });
         if (!result.ok) throw new Error(result.errors.join("; "));
-        const view = (result.value ?? { servers: [] }) as { servers?: unknown };
+        const view = (result.value ?? { servers: [] }) as { servers?: unknown; attributionSettling?: unknown };
         const servers = Array.isArray(view.servers) ? view.servers : [];
         return {
+          ...(view.attributionSettling === true ? { attributionSettling: true } : {}),
           servers: servers
             .map((raw) => {
               const server = (raw ?? {}) as Record<string, unknown>;
@@ -429,7 +431,7 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
                       ? ("namespace" as const)
                       : ("fiber" as const),
                 ...(typeof server.channel === "string" && server.channel.length > 0 ? { channel: server.channel } : {}),
-                ...(toMcpAttribution(server.attribution) !== undefined ? { attribution: toMcpAttribution(server.attribution) } : {}),
+                ...(toAttribution(server.attribution) !== undefined ? { attribution: toAttribution(server.attribution) } : {}),
                 ...(server.synthesized === true ? { synthesized: true } : {}),
                 ...(server.transport === "stdio" || server.transport === "http" ? { transport: server.transport } : {}),
                 ...(typeof server.summary === "string" && server.summary.length > 0 ? { summary: server.summary } : {}),
@@ -686,9 +688,7 @@ function toToolsList(value: unknown): ClientToolsList {
           };
         })
         .filter((tool): tool is NonNullable<typeof tool> => tool !== undefined);
-      const attribution = (unit.attribution ?? {}) as Record<string, unknown>;
-      const matchedBy =
-        attribution.matchedBy === "prefix" || attribution.matchedBy === "exact" ? attribution.matchedBy : ("unknown" as const);
+      const attribution = toAttribution(unit.attribution) ?? { matchedBy: "unknown" as const };
       // v13 两层语义：`defaultEnabled` = 全局默认，`enabled` = 本会话生效值。
       // 旧宿主只有 `enabledInSession`（单层）→ 两个都回落到它；再缺省按默认开启。
       const legacyEnabled = typeof unit.enabledInSession === "boolean" ? unit.enabledInSession : undefined;
@@ -707,13 +707,7 @@ function toToolsList(value: unknown): ClientToolsList {
         tools,
         toolCount:
           typeof unit.toolCount === "number" && Number.isFinite(unit.toolCount) ? unit.toolCount : tools.length,
-        attribution: {
-          matchedBy,
-          ...(typeof attribution.pattern === "string" && attribution.pattern.length > 0 ? { pattern: attribution.pattern } : {}),
-          ...(typeof attribution.packageName === "string" && attribution.packageName.length > 0
-            ? { packageName: attribution.packageName }
-            : {}),
-        },
+        attribution,
         defaultEnabled,
         enabled,
         // 旧字段保留填值（旧代码/测试读 enabledInSession 时语义不变）。
@@ -738,6 +732,7 @@ function toToolsList(value: unknown): ClientToolsList {
     excludedBuiltinCount: typeof raw.excludedBuiltinCount === "number" ? raw.excludedBuiltinCount : 0,
     errors: Array.isArray(raw.errors) ? raw.errors.filter((item): item is string => typeof item === "string") : [],
     ...(typeof raw.sessionId === "string" && raw.sessionId.length > 0 ? { sessionId: raw.sessionId } : {}),
+    ...(raw.attributionSettling === true ? { attributionSettling: true } : {}),
   };
 }
 
@@ -809,14 +804,61 @@ function toSessionBulkResult(value: unknown): SessionBulkSuccess {
   };
 }
 
-/** `mcp.runtime` 的 attribution 投影（未知形状丢弃，避免 UI 渲染垃圾）。 */
-function toMcpAttribution(value: unknown): { matchedBy: "namespace" | "source" | "unknown"; pattern?: string } | undefined {
+/** 已知的归属依据取值（task-32 additive；未知值统一回落 `unknown`）。 */
+const ATTRIBUTION_MATCHED_BY = new Set<ClientAttributionInfo["matchedBy"]>([
+  "runtime",
+  "literal",
+  "table",
+  "similarity",
+  "namespace",
+  "prefix",
+  "exact",
+  "source",
+  "unknown",
+]);
+
+/**
+ * 置信度归一：宿主 D4 契约是 `"high" | "medium" | "low"` 字符串；兼容旧数字口径
+ * （0–1 或 0–100 → 统一归一到 0–1）。其它形状丢弃（不展示）。
+ */
+function normalizeConfidence(value: unknown): "high" | "medium" | "low" | number | undefined {
+  if (value === "high" || value === "medium" || value === "low") return value;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const normalized = value > 1 ? value / 100 : value;
+    return Math.max(0, Math.min(1, normalized));
+  }
+  return undefined;
+}
+
+/**
+ * 归属判定投影（Tools 单元 / MCP 运行时实例共用）：
+ * - `matchedBy` 只收已知值，未知/缺失回落 `unknown`；
+ * - 其余 additive 字段（confidence / conflictsWithTable / ambiguous / mixed /
+ *   legacyUnit）逐项容错：类型不对就丢弃，不影响开关语义；
+ * - 传入非对象返回 undefined（调用方决定是否补 `{matchedBy:"unknown"}`）。
+ */
+function toAttribution(value: unknown): ClientAttributionInfo | undefined {
   if (value === null || typeof value !== "object") return undefined;
   const raw = value as Record<string, unknown>;
-  if (raw.matchedBy !== "namespace" && raw.matchedBy !== "source" && raw.matchedBy !== "unknown") return undefined;
+  const matchedBy = ATTRIBUTION_MATCHED_BY.has(raw.matchedBy as ClientAttributionInfo["matchedBy"])
+    ? (raw.matchedBy as ClientAttributionInfo["matchedBy"])
+    : ("unknown" as const);
+  // legacyUnit 只认 true 或非空旧键字符串；false/空串视为「未迁移」。
+  const legacyUnit =
+    raw.legacyUnit === true
+      ? true
+      : typeof raw.legacyUnit === "string" && raw.legacyUnit.length > 0
+        ? raw.legacyUnit
+        : undefined;
   return {
-    matchedBy: raw.matchedBy,
+    matchedBy,
     ...(typeof raw.pattern === "string" && raw.pattern.length > 0 ? { pattern: raw.pattern } : {}),
+    ...(typeof raw.packageName === "string" && raw.packageName.length > 0 ? { packageName: raw.packageName } : {}),
+    ...(normalizeConfidence(raw.confidence) !== undefined ? { confidence: normalizeConfidence(raw.confidence) } : {}),
+    ...(raw.conflictsWithTable === true ? { conflictsWithTable: true } : {}),
+    ...(raw.ambiguous === true ? { ambiguous: true } : {}),
+    ...(raw.mixed === true ? { mixed: true } : {}),
+    ...(legacyUnit !== undefined ? { legacyUnit } : {}),
   };
 }
 

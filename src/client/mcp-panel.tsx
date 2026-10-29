@@ -241,10 +241,41 @@ function ExternalSourceTags({ server }: { server: ClientMcpRuntimeServer }) {
   );
 }
 
-/** 详情「来源判定」文案（方案 §7.6，frontend 直抄）。 */
+/** 归属依据的人话标签（task-32：runtime/literal/table/similarity 等新依据）。 */
+function externalAttributionLabel(server: ClientMcpRuntimeServer): string | undefined {
+  switch (server.attribution?.matchedBy) {
+    case "runtime":
+      return "运行时捕获";
+    case "literal":
+      return "包扫描";
+    case "table":
+      return "人工映射";
+    case "similarity":
+      return "名字推测";
+    default:
+      return undefined;
+  }
+}
+
+/** true = 来源含推测成分（MCP 详情同样加「推测」标识，不改变只读语义）。 */
+function externalAttributionIsSpeculative(server: ClientMcpRuntimeServer): boolean {
+  const attribution = server.attribution;
+  if (attribution === undefined) return false;
+  return (
+    attribution.matchedBy === "similarity" || attribution.ambiguous === true || attribution.conflictsWithTable === true
+  );
+}
+
+/** 详情「来源判定」文案（方案 §7.6；task-32 新依据优先用人话标签）。 */
 function externalAttributionText(server: ClientMcpRuntimeServer): string {
   const channel = externalChannelOf(server);
   const matchedBy = server.attribution?.matchedBy;
+  const basisLabel = externalAttributionLabel(server);
+  if (basisLabel !== undefined) {
+    const pattern = server.attribution?.pattern ?? server.attribution?.packageName;
+    const target = channel ?? server.source;
+    return `${basisLabel}${pattern !== undefined ? `：${pattern}` : ""}${target !== undefined && target !== pattern ? ` → ${target}` : ""}`;
+  }
   if (channel !== undefined) {
     if (matchedBy === "namespace") {
       return `前缀 mcp__${server.attribution?.pattern ?? server.serverName}__ → ${channel}（插件清单映射表）`;
@@ -924,9 +955,22 @@ function McpExternalDetail({ api, server }: { api: McpApi; server: ClientMcpRunt
         <h3>{server.serverName}</h3>
         <span style={HEAD_TAGS_STYLE}>
           <ExternalSourceTags server={server} />
+          {externalAttributionIsSpeculative(server) && (
+            <span className="skp-tag skp-tag-warn" title="来源为推测，请核对工具清单">
+              推测
+            </span>
+          )}
           <span className="skp-tag skp-tag-flat">只读</span>
         </span>
       </div>
+      {externalAttributionIsSpeculative(server) && (
+        <div className="skp-note skp-note-warn">来源为推测，请核对工具清单</div>
+      )}
+      {(server.attribution?.legacyUnit === true || typeof server.attribution?.legacyUnit === "string") && (
+        <div className="skp-note" title={typeof server.attribution.legacyUnit === "string" ? `旧版键：${server.attribution.legacyUnit}` : undefined}>
+          旧版键已迁移
+        </div>
+      )}
       <div className="skp-note">
         {isSynthesized(server)
           ? `只读原因：该实例由工具命名空间 mcp__${server.serverName}__* 合成（没有 mcp-client 实例，无配置可编辑），能力面板只能查看工具与调用记录。按会话开关请到对话首屏「本会话能力」区。`

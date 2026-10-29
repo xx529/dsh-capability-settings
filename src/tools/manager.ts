@@ -48,6 +48,9 @@ import {
   type ToolsUnitView,
 } from "./types.js";
 import type { ToolsGlobalStore } from "./global-state.js";
+import { tableToolAttribution, type AttributionResolver } from "./attribution/resolver.js";
+import { displayNameOfPackage, legacyUnitOf } from "./attribution/unit-id.js";
+import type { ToolAttribution } from "./attribution/types.js";
 
 /** 结构化 logger 子集（与插件其它模块一致，缺省静默）。 */
 export interface ToolsLogger {
@@ -76,6 +79,8 @@ interface ToolsEnumeration {
     unit: string;
     name: string;
     kind: "plugin" | "unattributed";
+    /** 单元级归属（聚合多条工具结果；`mixed` 表示依据不一致）。 */
+    attribution: ToolsUnitView["attribution"];
     /** 轻量视图（name + 截断 description）：`tools.list` / deny 计算用。 */
     tools: HostToolBrief[];
     /**
@@ -84,7 +89,6 @@ interface ToolsEnumeration {
      * 避免与归属逻辑二次漂移；枚举结果本身按调用即弃，不常驻内存）。
      */
     details: ToolsInspectedTool[];
-    attribution: ToolsUnitView["attribution"];
   }>;
   /** 全局工具总数（诊断）。 */
   totalGlobalTools: number;
@@ -127,6 +131,10 @@ export interface ToolsManagerDeps {
   global?: ToolsGlobalStore;
   /** 全局 tools 服务访问器（测试注入；缺省 `ctx.root.get("tools") ?? ctx.get("tools")`）。 */
   globalTools?: () => any;
+  /**
+   * 自动归属 resolver（T0/T1/T2/T3 + 表兜底）。缺省 = 纯人工表（旧装配/测试）。
+   */
+  resolver?: AttributionResolver;
 }
 
 /** 挂到 `ctx.capabilityPanel.tools` 的服务形状（方案 §5.1）。 */
@@ -176,7 +184,10 @@ function truncateCodepoints(text: string, limit: number): string {
  *
  * @param access 全局 tools 服务访问器（`() => ctx.root.get("tools")`）
  */
-function enumerateGlobalTools(access: () => any): ToolsEnumeration {
+function enumerateGlobalTools(
+  access: () => any,
+  resolve: (toolName: string) => ToolAttribution = (toolName) => tableToolAttribution(toolName) ?? { matchedBy: "unknown", confidence: "low" },
+): ToolsEnumeration {
   const empty = (errors: string[]): ToolsEnumeration => ({
     units: [],
     totalGlobalTools: 0,
@@ -218,26 +229,61 @@ function enumerateGlobalTools(access: () => any): ToolsEnumeration {
       excludedBuiltinCount += 1;
       continue;
     }
-    // 规则 3/4：插件映射命中 → 插件单元；否则合并进唯一「来源未识别」单元。
-    const rule = attributeTool(name);
-    const unit = rule?.display ?? UNATTRIBUTED_UNIT;
-    const display = rule?.display ?? UNATTRIBUTED_DISPLAY;
-    const kind: "plugin" | "unattributed" = rule === undefined ? "unattributed" : "plugin";
-    const candidate: ToolsUnitView["attribution"] =
-      rule === undefined
-        ? { matchedBy: "unknown" }
-        : {
-            matchedBy: rule.match,
-            pattern: rule.pattern,
-            ...(rule.packageName !== undefined ? { packageName: rule.packageName } : {}),
-          };
+    // 规则 3/4：自动归属（T0→T1→T4→T3）命中 → 该插件单元；否则合并进唯一的
+    // 「来源未识别」单元（unit id = 规范 npm 包名，展示名去 scope）。
+    const attribution = resolve(name);
+    const packageId = attribution.packageId;
+    const unit = packageId !== undefined ? packageId : UNATTRIBUTED_UNIT;
+    const display =
+      packageId !== undefined
+        ? attribution.display ?? displayNameOfPackage(packageId)
+        : UNATTRIBUTED_DISPLAY;
+    const kind: "plugin" | "unattributed" = packageId === undefined ? "unattributed" : "plugin";
     let entry = byUnit.get(unit);
     if (entry === undefined) {
-      entry = { unit, name: display, kind, tools: [], details: [], attribution: candidate };
+      entry = {
+        unit,
+        name: display,
+        kind,
+        tools: [],
+        details: [],
+        attribution: {
+          matchedBy: attribution.matchedBy,
+          ...(attribution.pattern !== undefined ? { pattern: attribution.pattern } : {}),
+          ...(packageId !== undefined ? { packageName: packageId } : {}),
+          confidence: attribution.confidence,
+          ...(attribution.conflictsWithTable === true ? { conflictsWithTable: true } : {}),
+          ...(attribution.ambiguous === true ? { ambiguous: true } : {}),
+          ...(legacyUnitOf(unit) !== undefined ? { legacyUnit: legacyUnitOf(unit) } : {}),
+        },
+      };
       byUnit.set(unit, entry);
-    } else if (isBetterAttribution(entry.attribution, candidate)) {
-      // 单元级归属取"最有代表性"的一条，避免结果随 schemas() 返回顺序漂移。
-      entry.attribution = candidate;
+    } else {
+      // 单元级归属聚合：取最高优先级依据；不同依据 = mixed（诊断）。
+      const priority: Record<string, number> = {
+        runtime: 6,
+        literal: 5,
+        table: 4,
+        namespace: 4,
+        similarity: 3,
+        prefix: 2,
+        exact: 2,
+        source: 1,
+        unknown: 0,
+      };
+      const currentRank = priority[entry.attribution.matchedBy] ?? 0;
+      const candidateRank = priority[attribution.matchedBy] ?? 0;
+      if (candidateRank > currentRank) {
+        entry.attribution = {
+          ...entry.attribution,
+          matchedBy: attribution.matchedBy,
+          confidence: attribution.confidence,
+          ...(attribution.pattern !== undefined ? { pattern: attribution.pattern } : {}),
+        };
+      } else if (candidateRank !== currentRank) {
+        entry.attribution = { ...entry.attribution, mixed: true };
+      }
+      if (attribution.conflictsWithTable === true) entry.attribution = { ...entry.attribution, conflictsWithTable: true };
     }
     const fullDescription = typeof raw?.description === "string" && raw.description.length > 0 ? raw.description : undefined;
     // 轻量视图（list）：description 截断到 200 码点。
@@ -358,10 +404,18 @@ export function applyForAgent(
   agent: any,
   sessionId: string,
   toggles: ReadonlyMap<string, boolean>,
-  options: { globalTools?: () => any; logger?: ToolsLogger; globallyDisabled?: ReadonlySet<string> } = {},
+  options: {
+    globalTools?: () => any;
+    logger?: ToolsLogger;
+    globallyDisabled?: ReadonlySet<string>;
+    resolveTool?: (toolName: string) => ToolAttribution;
+  } = {},
 ): ApplyForAgentResult {
   if (agent?.ctx === undefined) return { targets: [], outcome: { state: "skipped", deny: [] } };
-  const enumeration = enumerateGlobalTools(options.globalTools ?? (() => rootToolsOf(agent)));
+  const enumeration = enumerateGlobalTools(
+    options.globalTools ?? (() => rootToolsOf(agent)),
+    options.resolveTool ?? ((name) => tableToolAttribution(name) ?? { matchedBy: "unknown", confidence: "low" }),
+  );
   const { targets, targetTools } = computeTargets(toggles, enumeration, options.globallyDisabled ?? new Set<string>());
   if (targets.length === 0) return { targets: [], outcome: { state: "skipped", deny: [] } };
   const deny = computeDenyNames(targetTools, enumeration.names);
@@ -539,7 +593,7 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
       if (disposed) return;
       await hydrateGlobal();
       await hydrateToggles(typeof record.agent?.id === "string" ? record.agent.id : undefined, metaOf(record));
-      applyRecord(record, enumerateGlobalTools(globalTools));
+      applyRecord(record, enumerateGlobalTools(globalTools, deps.resolver?.resolveTool ?? ((name) => tableToolAttribution(name) ?? { matchedBy: "unknown", confidence: "low" })));
     });
     record.queue = run.catch(() => undefined);
     return run;
@@ -564,7 +618,7 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
       void (async () => {
         await hydrateGlobal();
         if (disposed) return;
-        const enumeration = enumerateGlobalTools(globalTools);
+        const enumeration = enumerateGlobalTools(globalTools, deps.resolver?.resolveTool ?? ((name) => tableToolAttribution(name) ?? { matchedBy: "unknown", confidence: "low" }));
         for (const record of sessions.values()) applyRecord(record, enumeration);
       })();
     });
@@ -638,7 +692,7 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
   async function list(input?: { sessionId?: string }): Promise<ToolsListView> {
     const sessionId = typeof input?.sessionId === "string" && input.sessionId.length > 0 ? input.sessionId : undefined;
     await hydrateGlobal();
-    const enumeration = enumerateGlobalTools(globalTools);
+    const enumeration = enumerateGlobalTools(globalTools, deps.resolver?.resolveTool ?? ((name) => tableToolAttribution(name) ?? { matchedBy: "unknown", confidence: "low" }));
     const record = findRecord(sessionId);
     if (sessionId !== undefined) await hydrateToggles(sessionId, metaOf(record));
     const toggles = sessionId !== undefined ? sessionToggles.get(sessionId) : undefined;
@@ -679,6 +733,7 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
       excludedBuiltinCount: enumeration.excludedBuiltinCount,
       errors: [...enumeration.errors],
       ...(sessionId !== undefined ? { sessionId } : {}),
+      ...(deps.resolver !== undefined ? { attributionSettling: deps.resolver.settling() } : {}),
     };
   }
 
@@ -704,7 +759,7 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
     if (rawUnit.length === 0) return { ok: false, errors: ["unit is required"] };
     // 兼容两种写法：`plugin:<unit>`（持久化键，任务书示例）与裸 unit（list 返回形）。
     const unit = unitOfKey(rawUnit) ?? rawUnit;
-    const enumeration = enumerateGlobalTools(globalTools);
+    const enumeration = enumerateGlobalTools(globalTools, deps.resolver?.resolveTool ?? ((name) => tableToolAttribution(name) ?? { matchedBy: "unknown", confidence: "low" }));
     if (enumeration.errors.length > 0) return { ok: false, errors: [...enumeration.errors] };
     const found = enumeration.units.find((entry) => entry.unit === unit);
     if (found === undefined) return { ok: false, errors: [`unknown tools unit: ${rawUnit}`] };
@@ -739,7 +794,7 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
     const record = findRecord(sessionId);
     await hydrateGlobal();
     await hydrateToggles(sessionId, metaOf(record));
-    const enumeration = enumerateGlobalTools(globalTools);
+    const enumeration = enumerateGlobalTools(globalTools, deps.resolver?.resolveTool ?? ((name) => tableToolAttribution(name) ?? { matchedBy: "unknown", confidence: "low" }));
     const known = new Map(enumeration.units.map((unit) => [unit.unit, unit]));
     let toggles = sessionToggles.get(sessionId);
     if (toggles === undefined) {
@@ -800,7 +855,7 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
     const store = deps.global;
     if (store === undefined) return { ok: false, errors: ["tools global store unavailable"] };
     await hydrateGlobal();
-    const enumeration = enumerateGlobalTools(globalTools);
+    const enumeration = enumerateGlobalTools(globalTools, deps.resolver?.resolveTool ?? ((name) => tableToolAttribution(name) ?? { matchedBy: "unknown", confidence: "low" }));
     if (enumeration.errors.length > 0) return { ok: false, errors: [...enumeration.errors] };
     const known = new Set(enumeration.units.map((unit) => unit.unit));
     const requested: string[] = [];

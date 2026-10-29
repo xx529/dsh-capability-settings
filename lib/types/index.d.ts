@@ -41,6 +41,12 @@ export interface Config {
     mountRpc?: boolean;
     /** 为 false 时不自动把 MCP server 挂载进 agent。缺省 true。 */
     mountMcp?: boolean;
+    /**
+     * 插件工具自动归属（T0 运行时栈 / T1 包扫描 / T2 namespace / T3 相似度）。
+     *
+     * 缺省 **true**；false = 退回纯人工表（T4）行为（不挂监听、不扫描、不写缓存）。
+     */
+    enableAutoAttribution?: boolean;
 }
 /**
  * skills 域服务 = 磁盘 CRUD 管理器 + 会话级开关（按会话落盘的 runtime shadow）。

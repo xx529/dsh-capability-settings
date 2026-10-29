@@ -22,6 +22,7 @@
  *
  * @module dsh-capability-settings/tools/global-state
  */
+import { type MigrationReport } from "./attribution/migrate.js";
 /** 当前数据文件版本；版本不认识时整份忽略（不猜测迁移）。 */
 export declare const TOOLS_GLOBAL_VERSION = 1;
 /** 数据文件名。 */
@@ -66,6 +67,11 @@ export interface ToolsGlobalStore {
      * `{ok:false, errors}`（内存镜像仍生效）。
      */
     setEnabled(units: readonly string[], enabled: boolean): Promise<ToolsGlobalSetResult>;
+    /**
+     * 一次性 unit id 迁移（D2）：旧 display 键 → 规范包名 + 旧键镜像 + 未知键保留。
+     * 幂等（已 settled 不写盘）；失败只 warn（返回 changed:false）。
+     */
+    migrateUnitIds(): Promise<MigrationReport>;
     /** 卸载：停止后续写入（进行中的写盘不会被打断）。 */
     dispose(): void;
 }

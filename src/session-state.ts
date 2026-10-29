@@ -56,6 +56,12 @@ import { atomicWriteText } from "./shared/atomic-write.js";
 import { errMessage } from "./shared/errors.js";
 import { withFileLock } from "./shared/file-lock.js";
 import { readJsonDocument } from "./shared/json-config.js";
+import {
+  canonicalizeToggleKeys,
+  mirrorKeyFor,
+  type MigrationReport,
+} from "./tools/attribution/migrate.js";
+import { canonicalUnitId } from "./tools/attribution/unit-id.js";
 
 /** 当前数据文件版本；版本不认识时整份忽略（不猜测迁移）。 */
 export const SESSION_STATE_VERSION = 1;
@@ -175,8 +181,13 @@ export interface SessionStateStore {
   skills(sessionId: string): Readonly<Record<string, boolean>>;
   /** 某会话的 MCP 显式开关（同步；调用方需先 `await ready()`）。 */
   mcp(sessionId: string): Readonly<Record<string, boolean>>;
-  /** 某会话的 Tools 显式开关（同步；调用方先 `await ready()`）。 */
+  /** 某会话的 Tools 显式开关（同步；调用方先 `await ready()`；只回规范 `plugin:` 键）。 */
   tools(sessionId: string): Readonly<Record<string, boolean>>;
+  /**
+   * 一次性 unit id 迁移（D2）：把 `plugin:<旧 display>` 归一为 `plugin:<包名>`，
+   * 同时写入旧键镜像（可回滚）并保留未知键；幂等（已 settled 不写盘）。
+   */
+  migrateToolsUnits(): Promise<MigrationReport>;
   /**
    * 校验记录是否仍属于"当前这个会话"。
    *
@@ -239,8 +250,23 @@ function sanitizeEntry(raw: unknown): SessionStateEntry | undefined {
   if (skills !== undefined) entry.skills = skills;
   const mcp = sanitizeToggles(source.mcp);
   if (mcp !== undefined) entry.mcp = mcp;
-  const tools = sanitizeToggles(source.tools);
-  if (tools !== undefined) entry.tools = tools;
+  const toolsRaw = sanitizeToggles(source.tools);
+  if (toolsRaw !== undefined) {
+    // unit id 迁移：读时归一（未知键原样保留，写盘时也不删）。
+    const canonicalTools = canonicalizeToggleKeys(toolsRaw).entries as Record<string, boolean>;
+    // 已迁移的记录里「旧键镜像」与规范键并存：读时保留镜像（否则会被判成
+    // 未迁移而反复写回，破坏迁移幂等）。
+    for (const [key, value] of Object.entries(toolsRaw)) {
+      if (canonicalTools[key] !== undefined) continue;
+      if (!key.startsWith("plugin:")) continue;
+      const unit = canonicalUnitId(key.slice("plugin:".length));
+      if (unit === undefined) continue;
+      const canonicalKey = `plugin:${unit}`;
+      // 仅当磁盘上「规范键已存在」时才保留镜像（迁移前的旧键不合成，否则会误判已迁移）。
+      if (toolsRaw[canonicalKey] !== undefined && canonicalTools[canonicalKey] === value) canonicalTools[key] = value;
+    }
+    entry.tools = canonicalTools;
+  }
   if (typeof source.missingSince === "number" && Number.isFinite(source.missingSince)) entry.missingSince = source.missingSince;
   // 完全空的记录没有保存价值（只有 meta 也不影响语义，但会让文件膨胀）。
   if (entry.skills === undefined && entry.mcp === undefined && entry.tools === undefined && entry.missingSince === undefined) return undefined;
@@ -338,8 +364,20 @@ export function createSessionState(deps: SessionStateDeps = {}): SessionStateSto
     if (key.length === 0) return;
     const entry = ensureEntry(sessionId, meta);
     const toggles = entry[field] ?? {};
-    if (enabled === undefined) delete toggles[key];
-    else toggles[key] = enabled;
+    /** Tools 域：规范键 + 旧键镜像双写（可回滚）；未知键原样写。 */
+    const keys = ((): string[] => {
+      if (field !== "tools" || !key.startsWith("plugin:")) return [key];
+      const unit = canonicalUnitId(key.slice("plugin:".length));
+      if (unit === undefined) return [key];
+      const out = [`plugin:${unit}`];
+      const mirror = mirrorKeyFor(unit);
+      if (mirror !== undefined) out.push(`plugin:${mirror}`);
+      return out;
+    })();
+    for (const writeKey of keys) {
+      if (enabled === undefined) delete toggles[writeKey];
+      else toggles[writeKey] = enabled;
+    }
     if (Object.keys(toggles).length > 0) entry[field] = toggles;
     else delete entry[field];
     if (isEmptyEntry(entry)) {
@@ -406,7 +444,77 @@ export function createSessionState(deps: SessionStateDeps = {}): SessionStateSto
     },
 
     tools(sessionId: string): Readonly<Record<string, boolean>> {
-      return { ...(image.sessions[sessionId]?.tools ?? {}) };
+      const raw = image.sessions[sessionId]?.tools ?? {};
+      const out: Record<string, boolean> = {};
+      for (const [key, value] of Object.entries(raw)) {
+        if (!key.startsWith("plugin:")) continue;
+        if (canonicalUnitId(key.slice("plugin:".length)) === undefined) continue;
+        out[key] = value;
+      }
+      return out;
+    },
+
+    async migrateToolsUnits(): Promise<MigrationReport> {
+      if (disposed) return { changed: false, rewritten: 0, unknown: [], mirrors: [] };
+      await ready();
+      const unknown: string[] = [];
+      const mirrors: Array<{ unit: string; legacy: string }> = [];
+      let rewritten = 0;
+      let changed = false;
+      for (const entry of Object.values(image.sessions)) {
+        const raw = entry.tools;
+        if (raw === undefined) continue;
+        // settled 判定：所有 plugin: 键都是规范形态且镜像齐全。
+        let settled = true;
+        for (const key of Object.keys(raw)) {
+          if (!key.startsWith("plugin:")) continue;
+          const unit = canonicalUnitId(key.slice("plugin:".length));
+          if (unit === undefined) continue;
+          const canonicalKey = `plugin:${unit}`;
+          if (canonicalKey !== key) {
+            // 旧键镜像：规范键存在且值相等 ⇒ 已迁移（不回写成全量，保证幂等）。
+            if (!Object.hasOwn(raw, canonicalKey) || raw[canonicalKey] !== raw[key]) {
+              settled = false;
+              break;
+            }
+            continue;
+          }
+          const mirror = mirrorKeyFor(unit);
+          if (mirror !== undefined) {
+            const mirrorKey = `plugin:${mirror}`;
+            if (!Object.hasOwn(raw, mirrorKey) || raw[mirrorKey] !== raw[key]) {
+              settled = false;
+              break;
+            }
+          }
+        }
+        if (settled) continue;
+        const next: Record<string, boolean> = {};
+        for (const [key, value] of Object.entries(raw)) {
+          if (!key.startsWith("plugin:")) {
+            next[key] = value;
+            unknown.push(key);
+            continue;
+          }
+          const unit = canonicalUnitId(key.slice("plugin:".length));
+          if (unit === undefined) {
+            next[key] = value;
+            unknown.push(key);
+            continue;
+          }
+          if (`plugin:${unit}` !== key) rewritten += 1;
+          next[`plugin:${unit}`] = value;
+          const mirror = mirrorKeyFor(unit);
+          if (mirror !== undefined) {
+            next[`plugin:${mirror}`] = value;
+            mirrors.push({ unit, legacy: `plugin:${mirror}` });
+          }
+        }
+        entry.tools = next;
+        changed = true;
+      }
+      if (changed) await persist();
+      return { changed, rewritten, unknown: [...new Set(unknown)], mirrors };
     },
 
     verifySession(sessionId: string, meta?: SessionStateMeta): boolean {

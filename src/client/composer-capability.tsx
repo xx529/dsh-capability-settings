@@ -83,6 +83,8 @@ export interface CapabilitySnapshot {
   externals: ClientMcpRuntimeServer[];
   /** Tools 域（v13）：插件级开关单元；tools 服务不可用时降级为空数组。 */
   tools: ClientToolsUnit[];
+  /** true = 宿主仍在解析插件归属（task-32 additive）：首屏显示轻量「来源解析中…」，不阻塞开关。 */
+  attributionSettling: boolean;
   mounts: Record<string, MountInfo>;
   settling: boolean;
 }
@@ -161,7 +163,15 @@ export interface ToolRow {
 
 export type Row = SkillRow | McpRow | ToolRow;
 
-const EMPTY_SNAPSHOT: CapabilitySnapshot = { skills: [], servers: [], externals: [], tools: [], mounts: {}, settling: false };
+const EMPTY_SNAPSHOT: CapabilitySnapshot = {
+  skills: [],
+  servers: [],
+  externals: [],
+  tools: [],
+  attributionSettling: false,
+  mounts: {},
+  settling: false,
+};
 
 /** 项目来源判定（与 shared/skill-sources 的语义一致，客户端侧保持轻量）。 */
 function sourceIsProject(source: string): boolean {
@@ -218,19 +228,26 @@ async function fetchSnapshot(api: CapabilityPanelApi, workspace: string): Promis
     const rows = await api.skills.list();
     return rows.map((row) => ({ ...row, enabledInSession: true, canToggleInSession: false }));
   });
-  const [skills, mcp, statuses, runtime, tools] = await Promise.all([
+  const [skills, mcp, statuses, runtime, toolsView] = await Promise.all([
     skillsPromise,
     api.mcp.list(),
     api.mcp.status().catch(() => []),
     api.mcp.runtime({ cwd: workspace }).catch(() => ({ servers: [] as ClientMcpRuntimeServer[] })),
     // v13 Tools 域：宿主/tools 服务缺失时降级为空数组（不阻断另两域，UI 出空态）。
-    api.tools.list().then((view) => view.units).catch(() => [] as ClientToolsUnit[]),
+    api.tools.list().catch(() => ({
+      units: [] as ClientToolsUnit[],
+      totalGlobalTools: 0,
+      excludedBuiltinCount: 0,
+      errors: [],
+      attributionSettling: false,
+    })),
   ]);
   return {
     skills: skills.filter((skill) => skill.shadowStub !== true),
     servers: mcp.servers,
     externals: runtime.servers,
-    tools,
+    tools: toolsView.units,
+    attributionSettling: toolsView.attributionSettling === true,
     mounts: aggregateMounts(statuses),
     settling: statuses.some((status) => status.settling === true),
   };
@@ -1982,6 +1999,9 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
 
       {/* 卡片网格 */}
       <div className="skp-dock-grid" role="tabpanel">
+        {tab === "tools" && props.snapshot.attributionSettling && (
+          <div className="skp-dock-grid-note">来源解析中…</div>
+        )}
         {loading && filtered.length === 0 ? (
           <div className="skp-dock-empty">加载中…</div>
         ) : filtered.length === 0 ? (

@@ -60,6 +60,7 @@ Skills / MCP / Tools（Tools 以插件为单元），一次请求批量打 0–1
 | 项目级「默认关闭」声明（MCP 面板的「默认」开关 + 注入技能的「本项目启用」开关） | `<dshHome>/dsh-capability-settings/capability-overrides.json`（一个文件按**项目根**分 key：`projects.<项目根>.mcp` / `.skills`） | 旧项目内 `.agents/capability-overrides.json`（兼容 `.dsh` → `.claude`）：只读兼容，首次写入时把内容并入统一存储并删除旧文件 |
 | 项目级「全局能力引用」声明（MCP 的「导入到本项目」） | `<项目根>/.agents/capability-imports.json` | — |
 | 会话级能力开关（Skills / MCP / Tools 三域，按 sessionId） | `<dshHome>/dsh-capability-settings/session-capabilities.json`（`version: 1`，记录内 `skills` / `mcp` / `tools` 三个域） | — |
+| Tools 归属扫描缓存（自动发现） | `<dshHome>/dsh-capability-settings/tool-attribution.json`（`version: 1`；包名+version+mtime+宿主版本失效；目录 `700` / 文件 `600`、原子写 + 锁；损坏自动重建） | — |
 | Tools **全局默认**（能力面板 Tools 页开关；所有会话 / 新会话） | `<dshHome>/dsh-capability-settings/tools-global.json`（`{"version":1,"disabled":["<unit>",…]}`；目录 `700` / 文件 `600`、原子写 + 文件锁；缺省 = 全部启用） | — |
 | 全局 MCP 服务器 | `~/.agents/mcp.json` | `~/.dsh` → `~/.claude` |
 | Skills（项目/全局） | `.agents/skills`、`~/.agents/skills` | `.dsh/skills`（可写）、`.claude/skills`（只读展示） |
@@ -301,6 +302,33 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
    （`未识别` 琥珀标签；可开关、计入分母，但**不进 Jev 候选**——它可能混入未来
    宿主新增的内建工具，让模型去"推荐关闭"风险高）。
 
+**归属自动发现（v14）：新增插件无需改表**
+
+宿主工具注册表没有"哪个插件注入"的字段，所以按四层自动发现插件归属，
+原硬编码映射表退化为**人工兜底与降级锚**（不再需要为新插件改表）：
+
+1. **T0 运行时栈（主路径）**：resolver 独立监听 `tools/change`（同步 emit），
+   在监听器里临时把 `Error.stackTraceLimit` 抬到 48 抓注册调用栈，从帧路径的
+   `node_modules/<pkg>` 反推包名；丢弃宿主帧（`app.asar` / `@deepseek-ai/*`）、
+   `dsh-mcp-client` bridge 帧与自身包帧；零文件 IO、单次约 µs 级；连续失败 3 次
+   自动禁用本进程的 T0（降级静态层）。
+2. **T1 包扫描（冷启动回填）**：按插件包根扫源码字面量（只读 `.js/.mjs/.cjs`，
+   跳 artifacts/test/`.d.ts`/node_modules，单文件/单包/总量限额）——工具名在
+   **唯一**一个插件包里出现 → 归该包；多命中不猜（标 ambiguous）。
+3. **T2 MCP 命名空间**：`mcp__<ns>__*` 的 `<ns>` 在唯一插件包内出现 → 该包
+   （T0' 运行时命名空间优先）；`figma` 这类插件自注册命名空间不再依赖硬编码。
+4. **T3 名字相似度（仅兜底）**：包名 token ∩ 工具名 token，score ≥0.5 且
+   领先第二名 ≥0.3 才采用，标 `similarity` + **「推测」（琥珀）**，详情提示
+   「来源为自动推测，关闭前请核对下方工具清单」；推测单元仍可开关。
+   仍无法归属 → **「来源未识别」**（不猜，不进 Jev 候选）。
+
+归属结果显示在 Tools / MCP 详情的「来源判定」：运行时捕获 / 包扫描 / 人工映射 /
+名字推测 / 命名空间 / 未识别；`tools.list.attributionSettling=true` 表示后台
+扫描未收敛（列表不阻塞，前端可延迟静默刷新一次）。**已知边界**：本插件监听之前
+注册的工具、异步注册（只剩 bridge 帧）、包根不可得、扫描超时/多命中 → 逐层降级，
+最差等于改造前的「人工表 + 来源未识别」；`enableAutoAttribution: false` 可退回
+纯人工表行为（不挂监听、不扫描、不写缓存）。
+
 **归属是启发式**：宿主工具注册表只有 `name / description / parameters`，**没有
 "哪个插件注入"的字段**（`tools.register` 不接受来源参数），所以 Tools 按已知命名
 约定归类（`univer_*` → `dsh-univer-office`、`rw_*` → `dsh-remote`、
@@ -310,6 +338,17 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 含基础工具名 `univer` / `figma` 的精确规则）。精确优先、同层最长前缀、
 前缀必须以 `_` / `-` 结尾（`rwx_*` 不会被 `rw_` 误吃）。识别不到就归「来源未识别」，
 **不猜成宿主内置**。
+
+**开关单元 id = 完整包名，展示名去 scope**
+
+- unit id（持久化键 `plugin:<unit>`）= **归一化完整 npm 包名**（含 scope，如
+  `@xmanrui/dsh-im`）；卡片/详情展示名 = 包名去 scope（`dsh-im`），7 个已知插件
+  展示名不变；
+- **旧键迁移**：历史会话开关/全局默认里的旧 display 键在读取时自动归一
+  （`dsh-im → @xmanrui/dsh-im`、`dsh-popout-window → @local/dsh-popout-window`；
+  其余 5 个 id 不变），并**一次性写回 + 旧键镜像双写**（可回滚，保留到下一
+  minor）：旧版插件读回时仍能找到开关；无法识别的键原样保留、绝不删除；
+  迁移幂等、崩溃可续。
 
 **两层语义：能力面板 = 全局默认，会话首屏 = 本会话覆盖**
 

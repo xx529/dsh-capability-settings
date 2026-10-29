@@ -7,6 +7,11 @@
 
 ### 修复
 
+- **插件工具归属漏真实工具名 / 新插件需要改表**：改为四层自动发现——T0 运行时
+  注册栈（主）、T1 插件包字面量唯一命中（冷启动回填）、T2 MCP 命名空间自动映射、
+  T3 名字相似度（仅兜底，标「推测」）；原 `TOOL_RULES` 降为人工兜底/降级锚。
+  `figma_*`、`diff_approval_annotate` 等真实工具名现在自动归到对应插件，不再落
+  「来源未识别」；未知仍不猜（T5）。
 - **Skills 项目默认关闭没有投影到会话（真 bug）**：能力面板里「本项目默认关闭」的
   全局 Skills（项目区有屏蔽占位 / shadow stub）在对话首屏仍显示为启用——会话
   `list()` 用 runtime shadow 判断，漏掉了磁盘层的 stub 遮蔽。现在：
@@ -59,6 +64,25 @@
 
 ### 新增
 
+- **工具归属自动发现（T0–T4）**：新增 `src/tools/attribution/**`（unit-id /
+  migrate / runtime / scan / cache / resolver）。T0 独立监听 `tools/change` 抓注册
+  栈（`stackTraceLimit=48`，连续 3 次失败自动禁用）；T1 包扫描只读字面量（限额 +
+  超时 + 让出事件循环）；T2 `mcp__<ns>__` 命名空间；T3 相似度 ≥0.5 且 margin ≥0.3；
+  T4 人工表兜底。`tools.list.units[].attribution` additive 增
+  `confidence/conflictsWithTable/ambiguous/mixed/legacyUnit`，`matchedBy` 扩为
+  `runtime|literal|namespace|table|similarity`（旧值保留）；`tools.list` 增
+  `attributionSettling`。
+- **归属扫描缓存 `tool-attribution.json` v1**：`{version,generatedAt,hostVersion,
+  selfPackage,packages{version,mtimeMs,literals,namespaceHints},runtime,failures}`；
+  包名+version+mtime+宿主版本失效；T0 增量 2s debounce；原子写 + 文件锁 + 锁内合并
+  + 进程内串行；损坏/未知 version → 空缓存 + warn + 后台重建；不存绝对路径。
+- **`enableAutoAttribution` 配置开关**（缺省 on）：false = 纯人工表行为（不挂
+  监听、不扫描、不写缓存）。
+- **unit id 迁移**：unit = 归一化完整包名（含 scope）；`dsh-im →
+  @xmanrui/dsh-im`、`dsh-popout-window → @local/dsh-popout-window`（其余 5 个不变，
+  展示名全部不变）；读时别名归一 + 一次性锁内写回 + **旧键镜像双写**（可回滚，
+  保留到下一 minor）+ 未知键原样保留；两文件（tools-global.json、
+  session-capabilities.json 的 tools 域）独立、幂等、崩溃可续。
 - **第三个能力域 Tools（插件级开关）**：新增宿主 `src/tools/{types,manager,restrict}.ts`
   与归属单一事实源 `src/shared/plugin-attribution.ts`。枚举源唯一 =
   `ctx.root.get("tools").schemas()`（全局视图，天然只含可继承层）；按序归类：
@@ -241,6 +265,12 @@
 
 ### 内部
 
+- **自动归属实现**：`src/tools/attribution/resolver.ts` 同步解析（绝不 await 扫描）+
+  后台缓存/扫描；`manager.ts` 的 `enumerateGlobalTools` 接 resolver、unit=规范包名、
+  单元级归属聚合（优先级 + `mixed`/`legacyUnit`）；`src/mcp/runtime.ts` 命名空间
+  支持动态 resolver；`src/index.ts` 最先装配 resolver 并 kick-off 两文件迁移；
+  `global-state.ts` / `session-state.ts` 读归一、镜像双写、`migrateUnitIds` /
+  `migrateToolsUnits`（settled 幂等）。
 - **`src/skills/session.ts` 会话投影**：`projectShadow === "stub"`（非 injected
   磁盘全局行）在无显式覆盖时 `enabledInSession=false`，显式覆盖优先（true /
   false / 清除三态）；`projectShadow === "skill"` 的全局重复行从会话视图过滤

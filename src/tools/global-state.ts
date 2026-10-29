@@ -33,6 +33,13 @@ import { errMessage } from "../shared/errors.js";
 import { withFileLock } from "../shared/file-lock.js";
 import { readJsonDocument } from "../shared/json-config.js";
 import { SESSION_STATE_DIR_NAME } from "../session-state.js";
+import {
+  buildMirroredUnitList,
+  canonicalizeUnitList,
+  isUnitListSettled,
+  type MigrationReport,
+} from "./attribution/migrate.js";
+import { canonicalUnitId } from "./attribution/unit-id.js";
 
 /** 当前数据文件版本；版本不认识时整份忽略（不猜测迁移）。 */
 export const TOOLS_GLOBAL_VERSION = 1;
@@ -89,6 +96,11 @@ export interface ToolsGlobalStore {
    * `{ok:false, errors}`（内存镜像仍生效）。
    */
   setEnabled(units: readonly string[], enabled: boolean): Promise<ToolsGlobalSetResult>;
+  /**
+   * 一次性 unit id 迁移（D2）：旧 display 键 → 规范包名 + 旧键镜像 + 未知键保留。
+   * 幂等（已 settled 不写盘）；失败只 warn（返回 changed:false）。
+   */
+  migrateUnitIds(): Promise<MigrationReport>;
   /** 卸载：停止后续写入（进行中的写盘不会被打断）。 */
   dispose(): void;
 }
@@ -137,8 +149,10 @@ export function createToolsGlobalStore(deps: ToolsGlobalStoreDeps = {}): ToolsGl
   const logger = deps.logger;
   const filePath = toolsGlobalFile(deps.dshHome);
   const dir = toolsGlobalDir(deps.dshHome);
-  /** 内存镜像（磁盘 + 本次运行内的改动）。 */
+  /** 内存镜像（规范 unit + 旧键镜像 + 未知键；`disabled()` 只回规范 unit）。 */
   let image = new Set<string>();
+  /** 无法识别的原始键（读时保留、写时原样写回，绝不删除）。 */
+  let unknownKeys = new Set<string>();
   /** 懒加载 promise（失败也 resolve，避免每次调用重试）。 */
   let loaded: Promise<void> | undefined;
   let disposed = false;
@@ -152,7 +166,15 @@ export function createToolsGlobalStore(deps: ToolsGlobalStoreDeps = {}): ToolsGl
   async function load(): Promise<void> {
     try {
       const raw = await readJsonDocument(filePath, "tools global defaults");
-      image = raw === undefined ? new Set<string>() : sanitizeSnapshot(raw);
+      if (raw === undefined) {
+        image = new Set<string>();
+        unknownKeys = new Set<string>();
+      } else {
+        const stored = sanitizeSnapshot(raw);
+        const canonical = canonicalizeUnitList([...stored]);
+        unknownKeys = new Set(canonical.report.unknown);
+        image = new Set<string>([...canonical.units, ...canonical.report.unknown]);
+      }
     } catch (error) {
       warn(`capability-panel: 读取全局 Tools 默认失败，按"全部启用"继续（${errMessage(error)}）`);
       image = new Set<string>();
@@ -179,7 +201,34 @@ export function createToolsGlobalStore(deps: ToolsGlobalStoreDeps = {}): ToolsGl
     ready,
 
     disabled(): ReadonlySet<string> {
-      return new Set(image);
+      const disabled = new Set<string>();
+      for (const entry of image) if (!unknownKeys.has(entry)) disabled.add(entry);
+      return disabled;
+    },
+
+    /**
+     * 一次性 unit id 迁移（D2）：锁内把旧键归一为包名 + 写入旧键镜像 + 保留未知键。
+     * 幂等（已 settled 不写盘）；失败只 warn。
+     */
+    async migrateUnitIds(): Promise<MigrationReport> {
+      if (disposed) return { changed: false, rewritten: 0, unknown: [], mirrors: [] };
+      await ready();
+      const units: string[] = [];
+      for (const entry of image) if (!unknownKeys.has(entry)) units.push(entry);
+      const unknowns = [...unknownKeys];
+      if (isUnitListSettled([...units, ...unknowns])) return { changed: false, rewritten: 0, unknown: unknowns, mirrors: [] };
+      try {
+        return await withFileLock(filePath, async () => {
+          const canonical = canonicalizeUnitList(units);
+          const built = buildMirroredUnitList(canonical.units, [...unknowns, ...canonical.report.unknown]);
+          image = new Set(built.list);
+          await writeSnapshot(image);
+          return { ...canonical.report, changed: true, mirrors: canonical.report.mirrors };
+        });
+      } catch (error) {
+        warn(`capability-panel: 迁移 tools-global.json 的 unit id 失败（保留旧数据）：${errMessage(error)}`);
+        return { changed: false, rewritten: 0, unknown: unknowns, mirrors: [] };
+      }
     },
 
     async setEnabled(units, enabled): Promise<ToolsGlobalSetResult> {
@@ -199,12 +248,18 @@ export function createToolsGlobalStore(deps: ToolsGlobalStoreDeps = {}): ToolsGl
             disk = new Set(image);
           }
           let changed = 0;
-          for (const unit of requested) {
-            if (enabled) {
-              if (disk.delete(unit)) changed += 1;
-            } else if (!disk.has(unit)) {
-              disk.add(unit);
-              changed += 1;
+          for (const raw of requested) {
+            const unit = canonicalUnitId(raw) ?? raw;
+            const mirrors = new Set<string>([unit]);
+            const canonicalValues = canonicalizeUnitList([unit]);
+            for (const mirror of canonicalValues.report.mirrors) mirrors.add(mirror.legacy);
+            for (const key of mirrors) {
+              if (enabled) {
+                if (disk.delete(key)) changed += 1;
+              } else if (!disk.has(key)) {
+                disk.add(key);
+                changed += 1;
+              }
             }
           }
           // 无变化不写盘（幂等；避免每次点击都刷一次 mtime）。

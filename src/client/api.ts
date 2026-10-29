@@ -341,6 +341,52 @@ export interface ClientMcpUsageView {
   limit: number;
 }
 
+// ---------------------------------------------------------------------------
+// 自动归属（task-32 additive）
+//
+// 宿主把「插件 ↔ 工具 / MCP 命名空间」的归属判定从静态映射表扩展为多依据：
+// 运行时捕获 / 包扫描 / 人工映射 / 名字推测 / 命名空间命中 / 未识别。客户端只做
+// **展示与容错投影**：新增字段缺省全部可选，未知 matchedBy 一律回落 unknown。
+// ---------------------------------------------------------------------------
+
+/** 归属依据（新增值为 task-32 additive；`source` 兼容 v13 R4 的 MCP 来源判定）。 */
+export type ClientAttributionMatchedBy =
+  | "runtime"
+  | "literal"
+  | "table"
+  | "similarity"
+  | "namespace"
+  | "prefix"
+  | "exact"
+  | "source"
+  | "unknown";
+
+/** 一条归属判定（Tools 单元 / MCP 运行时实例共用）。 */
+export interface ClientAttributionInfo {
+  /** 命中依据；未知/旧宿主缺失回落 `"unknown"`。 */
+  matchedBy: ClientAttributionMatchedBy;
+  /** 命中的模式 / 命名空间 / source / 包名等原文（依据不同含义不同）。 */
+  pattern?: string;
+  /** 包名（已识别才有）。 */
+  packageName?: string;
+  /**
+   * 置信度：宿主 D4 契约为 `"high" | "medium" | "low"`（字符串）；
+   * 兼容旧数字口径（0–1 或 0–100，adapter 归一到 0–1）。缺省 = 不展示。
+   */
+  confidence?: "high" | "medium" | "low" | number;
+  /** true = 推测结果与人工映射表冲突（UI 加「推测」标识）。 */
+  conflictsWithTable?: boolean;
+  /** true = 候选不唯一（推测路径；UI 加「推测」标识）。 */
+  ambiguous?: boolean;
+  /** true = 同一单元由多个来源合并（诊断用）。 */
+  mixed?: boolean;
+  /**
+   * 旧版持久化键已迁移到新 unit 的标记（additive）：true 或旧键原文。
+   * UI 显示小字「旧版键已迁移」，不参与开关语义。
+   */
+  legacyUnit?: boolean | string;
+}
+
 /**
  * 运行时注入的 MCP 实例（**只读**）：不是本插件配置文件里的条目，而是其它插件
  * 或 profile 直接挂载的 mcp-client。面板只展示，不提供编辑/卸载。
@@ -361,14 +407,10 @@ export interface ClientMcpRuntimeServer {
    */
   channel?: string;
   /**
-   * 来源判定（v13 R4 additive）：详情「来源判定」文案与诊断。
-   * `matchedBy` = 命中命名空间 / source / 未识别。
+   * 来源判定（v13 R4 + task-32 additive）：详情「来源判定」文案与诊断。
+   * 旧宿主只回 `matchedBy: namespace/source/unknown`，新宿主可带推测标记。
    */
-  attribution?: {
-    matchedBy: "namespace" | "source" | "unknown";
-    /** 命中的命名空间 / source 原文。 */
-    pattern?: string;
-  };
+  attribution?: ClientAttributionInfo;
   /** v13 R4 additive：true = 由工具命名空间合成（没有 mcp-client 实例，无 config）。 */
   synthesized?: boolean;
   /** 桥接层配置里读到的传输方式（与配置条目同形）。 */
@@ -390,6 +432,8 @@ export interface ClientMcpRuntimeServer {
 /** `mcp.runtime` 的返回。 */
 export interface ClientMcpRuntimeView {
   servers: ClientMcpRuntimeServer[];
+  /** true = 宿主仍在解析归属（task-32 additive；UI 显示「来源解析中…」，不阻塞操作）。 */
+  attributionSettling?: boolean;
 }
 
 /** 新增/更新一条 server 的入参。 */
@@ -498,14 +542,8 @@ export interface ClientToolsUnit {
   tools: ClientToolBrief[];
   /** 工具数（卡片描述与 Jev toolCount 用）。 */
   toolCount: number;
-  /** 归属判定（详情「来源判定」文案）。 */
-  attribution: {
-    matchedBy: "prefix" | "exact" | "unknown";
-    /** 命中的模式原文（未识别缺省）。 */
-    pattern?: string;
-    /** 包名（已识别才有）。 */
-    packageName?: string;
-  };
+  /** 归属判定（详情「来源判定」文案；task-32 additive，字段均容错）。 */
+  attribution: ClientAttributionInfo;
   /**
    * **全局默认**开关（v13 两层语义；能力面板的 Tools 开关展示 / 写这个）。
    * 关闭后所有会话默认不可用；单个会话仍可在对话首屏单独开启。
@@ -540,6 +578,8 @@ export interface ClientToolsList {
   errors: string[];
   /** 本次查询绑定的会话（没传 sessionId 时缺省）。 */
   sessionId?: string;
+  /** true = 宿主仍在解析归属（task-32 additive；UI 显示「来源解析中…」，不阻塞开关）。 */
+  attributionSettling?: boolean;
 }
 
 /**

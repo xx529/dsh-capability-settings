@@ -57,12 +57,57 @@ function sortUnits(units: ClientToolsUnit[]): ClientToolsUnit[] {
   return [...units.filter((unit) => unit.kind !== "unattributed"), ...units.filter((unit) => unit.kind === "unattributed")];
 }
 
-/** 详情「来源判定」文案（frontend 直抄方案 §7.6 / §9.4）。 */
-function attributionText(unit: ClientToolsUnit): string {
-  if (unit.attribution.matchedBy === "unknown") return "来源未识别（不是宿主内置）";
-  const pattern = unit.attribution.pattern ?? unit.name;
-  const matched = unit.attribution.matchedBy === "exact" ? `精确匹配 ${pattern}` : `前缀 ${pattern}`;
-  return `${matched} → ${unit.name}（插件清单映射表）`;
+/** 归属依据的人话标签（task-32：运行时/包扫描/人工映射/名字推测/命名空间/未识别）。 */
+function attributionLabel(unit: ClientToolsUnit): string {
+  switch (unit.attribution.matchedBy) {
+    case "runtime":
+      return "运行时捕获";
+    case "literal":
+      return "包扫描";
+    case "table":
+    case "prefix":
+    case "exact":
+      return "人工映射";
+    case "similarity":
+      return "名字推测";
+    case "namespace":
+      return "命名空间";
+    default:
+      return "未识别";
+  }
+}
+
+/** true = 来源含推测成分（UI 加琥珀「推测」标识与核对提示）。 */
+function attributionIsSpeculative(unit: ClientToolsUnit): boolean {
+  const attribution = unit.attribution;
+  return (
+    attribution.matchedBy === "similarity" || attribution.ambiguous === true || attribution.conflictsWithTable === true
+  );
+}
+
+/** 详情「来源判定」的补充说明（依据原文 / 冲突 / 置信度 / 多来源合并）。 */
+function attributionDetail(unit: ClientToolsUnit): string | undefined {
+  const attribution = unit.attribution;
+  const parts: string[] = [];
+  const pattern = attribution.pattern ?? attribution.packageName;
+  if (attribution.matchedBy === "prefix" && pattern !== undefined) parts.push(`前缀 ${pattern} → ${unit.name}（插件清单映射表）`);
+  else if (attribution.matchedBy === "exact" && pattern !== undefined) parts.push(`精确匹配 ${pattern} → ${unit.name}（插件清单映射表）`);
+  else if (pattern !== undefined && pattern !== unit.name) parts.push(pattern);
+  if (attribution.conflictsWithTable === true) parts.push("与人工映射冲突");
+  if (attribution.ambiguous === true) parts.push("存在多个候选");
+  if (attribution.mixed === true) parts.push("多来源合并");
+  const confidence = attribution.confidence;
+  if (typeof confidence === "number" && Number.isFinite(confidence)) {
+    // 旧数字口径：0–1 → 百分比（adapter 已归一到 0–1）。
+    parts.push(`置信度 ${Math.round(Math.max(0, Math.min(1, confidence)) * 100)}%`);
+  } else if (confidence === "high") {
+    parts.push("高置信");
+  } else if (confidence === "medium") {
+    parts.push("中置信");
+  } else if (confidence === "low") {
+    parts.push("低置信");
+  }
+  return parts.length > 0 ? parts.join(" · ") : undefined;
 }
 
 /**
@@ -209,6 +254,8 @@ export function ToolsView({
   );
 
   const selected = units.find((unit) => unit.unit === selectedUnit);
+  /** true = 宿主仍在解析归属：显示轻量提示，不阻塞开关。 */
+  const attributionSettling = data?.attributionSettling === true;
 
   // 选中单元时懒加载工具 schema（按 unit 缓存）：失败/旧宿主降级为 list 的 name+description。
   const inspectState = selectedUnit === undefined ? undefined : inspectCache[selectedUnit];
@@ -330,6 +377,7 @@ export function ToolsView({
                 · {units.filter((unit) => defaultEnabledOf(unit)).length} 默认启用 · 插件级开关（整插件生效）
               </span>
             </div>
+            {attributionSettling && <div className="skp-pane-note">来源解析中…</div>}
             {units.length === 0 ? (
               <div className="skp-empty">
                 {listErrors.length > 0 ? "当前外壳未提供工具注册表，无法列出 Tools。" : "尚未发现 Tools。"}
@@ -429,17 +477,39 @@ export function ToolsView({
 
                 {/* 开关只在左侧列表行（详情不再重复操作行，也不出现「本会话」）。 */}
 
-                {/* 来源判定 / 注入方式（方案 §9.4 文案）。 */}
+                {/* 来源判定 / 注入方式（task-32：按依据显示 + 推测标识）。 */}
                 <div className="skp-detail-meta">
                   <span className="skp-detail-meta-item">
                     <span className="skp-detail-meta-strong">来源判定：</span>
-                    {attributionText(selected)}
+                    {attributionLabel(selected)}
+                    {attributionDetail(selected) !== undefined ? ` · ${attributionDetail(selected) ?? ""}` : ""}
                   </span>
+                  {attributionIsSpeculative(selected) && (
+                    <span className="skp-tag skp-tag-warn" title="来源为推测，请核对工具清单">
+                      推测
+                    </span>
+                  )}
+                  {(selected.attribution.legacyUnit === true || typeof selected.attribution.legacyUnit === "string") && (
+                    <span
+                      className="skp-note"
+                      title={
+                        typeof selected.attribution.legacyUnit === "string"
+                          ? `旧版键：${selected.attribution.legacyUnit}`
+                          : "旧版持久化键已迁移到新的插件单元"
+                      }
+                    >
+                      旧版键已迁移
+                    </span>
+                  )}
+                  {attributionSettling && <span className="skp-note">来源解析中…</span>}
                   <span className="skp-detail-meta-item">
                     <span className="skp-detail-meta-strong">注入方式：</span>
                     插件运行时注册的非 MCP 工具（不落盘）
                   </span>
                 </div>
+                {attributionIsSpeculative(selected) && (
+                  <p className="skp-note skp-note-warn">来源为推测，请核对工具清单</p>
+                )}
 
                 <div className="skp-note">
                   工具数 {selected.toolCount} · 开关为插件级：关闭后该插件全部工具在所有会话默认不可见（不改已有会话的显式覆盖）

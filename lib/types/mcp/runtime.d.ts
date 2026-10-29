@@ -68,11 +68,17 @@ export declare function scanInjectedMcpEntries(ctx: any): InjectedMcpInstance[];
  * @param ctx 宿主插件上下文
  * @param exclude 已被 fiber / loader 条目 / 本插件配置占用的 serverName（不重复合成）
  */
-export declare function scanInjectedMcpNamespaces(ctx: any, exclude: ReadonlySet<string>): InjectedMcpInstance[];
+export declare function scanInjectedMcpNamespaces(ctx: any, exclude: ReadonlySet<string>, resolveNamespace?: (namespace: string) => {
+    display?: string;
+    packageId?: string;
+} | undefined): InjectedMcpInstance[];
 /**
  * 三条发现路径的并集：fiber → loader 条目 → namespace（仅缺失名字）。
  *
  * 合并顺序保证「已有实例的命名空间不会被 namespace 路径覆盖」（方案 §7.2-5）。
  * 同一 serverName 优先保留 loader 条目那条（带来源 id）。
  */
-export declare function scanInjectedMcpInstances(ctx: any): Map<string, InjectedMcpInstance>;
+export declare function scanInjectedMcpInstances(ctx: any, resolveNamespace?: (namespace: string) => {
+    display?: string;
+    packageId?: string;
+} | undefined): Map<string, InjectedMcpInstance>;

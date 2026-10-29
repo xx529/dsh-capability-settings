@@ -153,7 +153,11 @@ export function scanInjectedMcpEntries(ctx: any): InjectedMcpInstance[] {
  * @param ctx 宿主插件上下文
  * @param exclude 已被 fiber / loader 条目 / 本插件配置占用的 serverName（不重复合成）
  */
-export function scanInjectedMcpNamespaces(ctx: any, exclude: ReadonlySet<string>): InjectedMcpInstance[] {
+export function scanInjectedMcpNamespaces(
+  ctx: any,
+  exclude: ReadonlySet<string>,
+  resolveNamespace?: (namespace: string) => { display?: string; packageId?: string } | undefined,
+): InjectedMcpInstance[] {
   const found: InjectedMcpInstance[] = [];
   let schemas: unknown;
   try {
@@ -172,10 +176,12 @@ export function scanInjectedMcpNamespaces(ctx: any, exclude: ReadonlySet<string>
     namespaces.add(parsed.serverName);
   }
   for (const serverName of [...namespaces].sort((left, right) => left.localeCompare(right))) {
-    const rule = attributeMcpNamespace(serverName);
-    // 命中映射表 → source 直接放展示名（视图层据此出「插件 + 名称」两枚标签）；
+    // 动态 resolver（T0' 运行时命名空间 / T2 包扫描 / 表兜底）；缺省退回人工表。
+    const resolved = resolveNamespace?.(serverName);
+    const display = resolved?.display ?? attributeMcpNamespace(serverName)?.display;
+    // 命中 → source 直接放展示名（视图层据此出「插件 + 名称」两枚标签）；
     // 未命中 → 不带 source（视图层标「未识别」，不猜）。
-    found.push({ serverName, origin: "namespace", ...(rule !== undefined ? { source: rule.display } : {}) });
+    found.push({ serverName, origin: "namespace", ...(display !== undefined ? { source: display } : {}) });
   }
   return found;
 }
@@ -186,11 +192,14 @@ export function scanInjectedMcpNamespaces(ctx: any, exclude: ReadonlySet<string>
  * 合并顺序保证「已有实例的命名空间不会被 namespace 路径覆盖」（方案 §7.2-5）。
  * 同一 serverName 优先保留 loader 条目那条（带来源 id）。
  */
-export function scanInjectedMcpInstances(ctx: any): Map<string, InjectedMcpInstance> {
+export function scanInjectedMcpInstances(
+  ctx: any,
+  resolveNamespace?: (namespace: string) => { display?: string; packageId?: string } | undefined,
+): Map<string, InjectedMcpInstance> {
   const merged = new Map<string, InjectedMcpInstance>();
   for (const instance of scanInjectedMcpFibers(ctx)) merged.set(instance.serverName, instance);
   for (const instance of scanInjectedMcpEntries(ctx)) merged.set(instance.serverName, instance);
-  for (const instance of scanInjectedMcpNamespaces(ctx, new Set(merged.keys()))) {
+  for (const instance of scanInjectedMcpNamespaces(ctx, new Set(merged.keys()), resolveNamespace)) {
     merged.set(instance.serverName, instance);
   }
   return merged;

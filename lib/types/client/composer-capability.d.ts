@@ -28,6 +28,8 @@ export interface CapabilitySnapshot {
     externals: ClientMcpRuntimeServer[];
     /** Tools 域（v13）：插件级开关单元；tools 服务不可用时降级为空数组。 */
     tools: ClientToolsUnit[];
+    /** true = 宿主仍在解析插件归属（task-32 additive）：首屏显示轻量「来源解析中…」，不阻塞开关。 */
+    attributionSettling: boolean;
     mounts: Record<string, MountInfo>;
     settling: boolean;
 }
