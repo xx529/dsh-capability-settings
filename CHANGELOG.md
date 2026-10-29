@@ -39,7 +39,7 @@
 
 ### 新增
 
-- **第三个能力域 Tools（插件级会话开关）**：新增宿主 `src/tools/{types,manager,restrict}.ts`
+- **第三个能力域 Tools（插件级开关）**：新增宿主 `src/tools/{types,manager,restrict}.ts`
   与归属单一事实源 `src/shared/plugin-attribution.ts`。枚举源唯一 =
   `ctx.root.get("tools").schemas()`（全局视图，天然只含可继承层）；按序归类：
   `mcp__*` 恒归 **MCP 域**、宿主内建工具**不入任何域**（排除清单在插件侧自维护，
@@ -57,13 +57,31 @@
   - **枚举不到就不显示**：注册在 agent 自身层的插件工具不可 restrict、也无法从
     全局视图枚举，因此**不出现**在 Tools 域（不是显示后置灰）——这是相对早期
     UX 稿的规格修正。
-- **RPC `tools.list` / `tools.setSessionEnabled`**：前者返回 `units`
-  （`unit/name/kind/tools/toolCount/attribution/enabledInSession/explicit/
-  lockedReason/restriction`）+ 诊断字段 `totalGlobalTools` /
-  `excludedBuiltinCount` / `errors`；后者 **batch-first**（单条 = 长度 1 的数组），
-  入参只接受**单元 id**、宿主自己重算工具名（客户端无法注入任意 deny 名单），
-  `enabled: true|false|undefined` 分别表示写显式开 / 显式关 / 清除覆盖。
-  `tools` 服务缺失或 `schemas()` 失败时返回空列表 + `errors`，不阻断另两域。
+- **RPC `tools.list` / `tools.setSessionEnabled`**：`tools.list` 返回 `units`
+  （`unit/name/kind/tools/toolCount/attribution/defaultEnabled/enabled/
+  enabledInSession/explicit/lockedReason/restriction`）+ 诊断字段
+  `totalGlobalTools` / `excludedBuiltinCount` / `errors`——`defaultEnabled` 是
+  全局默认、`enabled` 是本会话生效值（= 会话覆盖 ?? 全局默认）、
+  `enabledInSession` 为恒等 legacy 别名；`tools.setSessionEnabled` **batch-first**
+  （单条 = 长度 1 的数组），入参只接受**单元 id**、宿主自己重算工具名（客户端无法
+  注入任意 deny 名单），`enabled: true|false|undefined` 分别表示写显式开 /
+  显式关 / 清除覆盖。`tools` 服务缺失或 `schemas()` 失败时返回空列表 + `errors`，
+  不阻断另两域。
+- **RPC `tools.setGlobalEnabled`（全局默认）**：`{units: string[], enabled: boolean}`
+  → `{ok:true, applied}` / `{ok:false, errors}`；写 `tools-global.json` 后
+  **异步扇出**到全部 live agent（微任务 + 每会话串行队列，不阻塞写 RPC），新 agent
+  在 `agent/created` 按生效值应用。只接受当前枚举出的单元 id，兼容裸 unit 与
+  `plugin:<unit>` 写法。
+- **RPC `tools.inspect`（懒加载工具 schema）**：入参 `{unit, sessionId?}`；成功
+  value = `{unit, tools:[{name, description?, parameters?}]}`（**成功支无 `ok`
+  字段**），业务失败 `{ok:false, errors}`。`parameters` 取宿主 `schemas()` 原文
+  **不裁剪**，`description` 也是完整值（不按 list 的 200 码点截断）；复用
+  `tools.list` 同一份枚举/归属逻辑（不二次扫描、不漂移），仅在详情选中插件时调用。
+- **Tools 全局默认存储 `tools-global.json`**：`<dshHome>/dsh-capability-settings/
+  tools-global.json` = `{"version":1,"disabled":["<unit>",…]}`（缺省 / 缺失 =
+  全部启用）；目录 `700` / 文件 `600`、原子写 + 文件锁；损坏 / 未知 version →
+  warn + 按全部启用降级；写入失败只 warn（本次运行内仍生效）；已卸载插件的残留
+  unit 读取时忽略、不删用户数据。
 - **R1 批量端点 `session.setBulk`**：`{sessionId, action:"enable"|"disable"|"reset",
   domains?, cwd?, dryRun?}`，宿主自己枚举目标（不信客户端列表）：
   - 幂等（同一 action 重放 → `applied:0` + `unchanged:N`）、**同会话串行**（排队
@@ -101,14 +119,16 @@
   失败按前态逆序回滚、冷会话排队；Tools 写入单列并发组（≤4，写入会触发 restrict
   重算）。`JevCapabilityWrite` / `JevPrevState` 增加 `tools` 分支，
   `compareRankItems` 由「skill 先于 mcp」改为三档全序 skill → mcp → tool。
+  （候选口径后改为「本会话 effective 启用」，见「变更」。）
 - **能力面板第四个域 Tab `Tools`**：两栏（插件列表 + 详情），**无左导航、无项目 /
   工作区下拉**（全局工具注册没有项目维度），header `全局工具注册 · 不区分项目 /
   工作区`；列表行 = 插件名 + `插件` / `未识别` 标签 + `N 个工具` + 「启用」开关
-  （本会话生效；详情里标「本会话」）；
-  详情 = 来源判定 / 注入方式 / 工具数 / **只读工具清单**（无逐工具开关、无参数表）/
-  关闭影响（`关闭该插件后，本会话模型看不到它的全部 N 个工具…`）。开关写
-  `tools.setSessionEnabled`；解析不到当前会话时置灰并提示「请在对话首屏设置本会话
-  开关」。
+  （**全局默认**，不需要当前会话，也不显示任何具体会话状态）；详情 = 来源判定 /
+  注入方式 / 工具数 / **工具清单（只读手风琴）**——工具行显示 `N 个参数 / 无参数`，
+  展开有参数表（参数 / 类型 / 必填 / 说明）与可折叠的原始 JSON；schema 由
+  `tools.inspect` 按需懒加载（`tools.list` 保持轻量），失败降级为「仅名称 + 说明」。
+  详情整页纵向可滚动；开关写 `tools.setGlobalEnabled`，会话首屏的覆盖写
+  `tools.setSessionEnabled`。
 - **会话级开关持久化**（`src/session-state.ts`）：`<dshHome>/dsh-capability-settings/
   session-capabilities.json`，按 sessionId 记录 Skills / MCP / Tools 显式覆盖
   （`tools` 域为 v13 additive，见「内部」）；目录 0700 /
@@ -123,6 +143,29 @@
 
 ### 变更
 
+- **⚠️ Tools 改为两层语义（覆盖 v13 早期的「仅会话开关」设计 / A5）**：与
+  Skills、MCP 一致——
+  - **能力面板 Tools 页 = 全局默认**（所有会话、含新建会话），写
+    `tools-global.json`；**会话首屏 /「能力」Tab = 本会话覆盖**，写
+    `session-capabilities.json` 的 `tools` 域；
+  - **effective = 会话覆盖 ?? 全局默认**，`tools.restrict` 按 effective 应用。
+    因此**全局关闭的插件仍可在单个会话里单独开启**，全局开启时也可只关本会话；
+  - 首屏行 3 的「全部开启 / 全部关闭」**只写本会话覆盖**、不动全局默认；底栏
+    「恢复默认」清除本会话覆盖 → Tools 回落到全局默认；
+  - 全局默认变化**扇出到所有 live 会话**（异步重算，不阻塞开关）；新建会话按
+    全局默认应用；
+  - 早期方案里的 **A3（Tools 无项目级默认）与 A5（主面板只读 / 仅会话级）作废**，
+    行为以本节与 README 为准。
+- **Tools 面板体验修复**：详情整页纵向可滚动（插件工具多时不再撑破布局）；工具
+  清单改手风琴（每行 `N 个参数 / 无参数`，展开显示说明 + 参数表 + 可折叠原始
+  JSON）；删除「关闭该插件后…」琥珀影响条与「无参数表」文案；主面板开关改为
+  **全局默认**（无需解析当前会话）。
+- **MCP 外部注入行名称可见**：来源两枚标签（`插件` + 展示名）从名称行移到下方
+  meta 行，`serverName` 不再被标签挤没（`figma` 等合成行现在能直接看到名称）。
+- **主面板全局 Skills 在「跟随当前会话」时可开关**：未钉选项目时，行开关的写操作
+  落在**当前会话的工作区**（tooltip 注明作用域）；只有完全没有工作区时才置灰。
+- **Jev Tools 候选改为「本会话 effective 启用」**：全局默认关闭 / 本会话已关的
+  插件不进入候选（不能被 Jev 重新打开，只收窄不扩权）；apply 仍写会话覆盖。
 - **能力面板 / 会话面板改为三域 + 全站命名统一**：用户可见文案 `技能` → `Skills`、
   `MCP 服务器` → `MCP`、`插件工具` → `Tools`（注释与内部标识不动）。主面板 Tab 行
   变为四域 `Skills / MCP / Tools / Jev 模型`（`Jev 模型` 仍是配置页、无计数）；
@@ -178,6 +221,22 @@
 
 ### 内部
 
+- **Tools 两层生效 + 扇出（`src/tools/manager.ts`）**：全局默认镜像按需 hydrate；
+  `effectiveEnabled(unit, sessionToggles, globalDisabled)` 为唯一口径（已导出纯函数，
+  供 R2 复用）；`tools.restrict` 目标 = 所有 effective=false 单元；
+  `setGlobalEnabled` 写盘后 `refreshGlobal()` + 微任务扇出（每会话走既有串行队列，
+  fire-and-forget）；`tools/change` 重算前先 hydrate 全局，避免用空集合误释放
+  「全局关闭」的 deny；`applyForAgent` 新增可选 `globallyDisabled`（不读全局存储，
+  子 agent 继承时投影即可）。
+- **Tools 全局默认存储（`src/tools/global-state.ts`）**：目录 0700 / 文件 0600、
+  原子写 + `withFileLock` 锁内读盘合并；`disabled` 清洗（只收非空字符串、去重）；
+  未知 version / JSON 损坏 / 读失败 → warn + 按全部启用；无变化不写盘（幂等）；
+  stale unit 保留在文件里（读取时忽略，不删用户数据）。
+- **`tools.inspect` 实现**：与 `tools.list` 共用同一次枚举/归属逻辑（不二次扫描），
+  完整 `description` + 原始 `parameters` 不裁剪；整包 > 1 MiB 只记 warning（不静默
+  丢字段）；`tools.list` 仍只回 name + 200 码点说明。
+- **Jev Tools 回滚前态按来源区分**：有显式会话覆盖时记 `true`，仅靠全局默认生效时
+  记 `undefined`（回滚 = 清除覆盖回到全局默认，不写死 true 破坏全局关闭）。
 - **`session-capabilities.json` v1 追加 `tools` 域（additive，版本号不变）**：
   记录级 `sessions.<id>.tools`（键 `plugin:<unit>` → boolean，
   未识别单元为 `plugin:__unattributed__`）。`version` 仍为 **1**，旧版插件读本文件

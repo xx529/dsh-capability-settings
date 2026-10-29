@@ -120,6 +120,19 @@ export interface PanelRpcService {
   tools: {
     list(input: { sessionId?: string }): Promise<unknown>;
     setSessionEnabled(input: unknown): Promise<unknown>;
+    /**
+     * 懒加载单个单元的工具 schema（`tools.inspect`）：完整 description + 原始
+     * `parameters` JSON Schema。成功 value = `{ unit, tools }`；业务失败 =
+     * `{ok:false, errors}`（信封仍恒 `{ok:true,value}`）。
+     */
+    inspect(input: unknown): Promise<unknown>;
+    /**
+     * 设置 **全局默认**（能力面板开关，所有会话；写 `tools-global.json` 并扇出）。
+     *
+     * `{units, enabled}` → `{ok:true, applied}` / `{ok:false, errors}`；
+     * 会话首屏的开关仍走 `tools.setSessionEnabled`（只写本会话覆盖）。
+     */
+    setGlobalEnabled(input: unknown): Promise<unknown>;
   };
   /**
    * R1 批量端点：三域一次开关（Skills / MCP / Tools），幂等、按会话串行、
@@ -218,6 +231,12 @@ export async function handleEndpoint(service: PanelRpcService, endpoint: string,
       case "tools.setSessionEnabled":
         // batch-first（单条 = 长度 1 的数组）；业务失败收在 value.ok=false。
         return { ok: true, value: await service.tools.setSessionEnabled(p) };
+      case "tools.inspect":
+        // 懒加载工具 schema（完整 description + parameters）；业务失败在 value 内。
+        return { ok: true, value: await service.tools.inspect(p) };
+      case "tools.setGlobalEnabled":
+        // 全局默认（能力面板）：写 tools-global.json + 异步扇出；业务失败在 value 内。
+        return { ok: true, value: await service.tools.setGlobalEnabled(p) };
       case "session.setBulk":
         // 三域批量：业务失败（缺 sessionId / 非法 action / 未知域名）也在 value 内。
         return { ok: true, value: await service.session.setBulk(p) };

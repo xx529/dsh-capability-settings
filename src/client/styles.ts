@@ -762,12 +762,15 @@ button.skp-dock-rail-fail:hover{filter:brightness(.9);}
 .skp-tools-body{overflow:hidden;}
 .skp-tools-pane{width:420px;}
 .skp-pane-title-note{min-width:0;margin-left:auto;font-size:11px;font-weight:400;color:var(--skp-text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.skp-tools-list{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:2px;min-width:0;}
-.skp-tools-item{display:flex;flex-direction:column;gap:2px;padding:7px 10px;border-radius:6px;min-width:0;}
-.skp-tools-item:nth-child(odd){background:var(--skp-fill);}
-.skp-tools-name{font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:11px;font-weight:600;color:var(--skp-text);overflow-wrap:anywhere;}
-.skp-tools-desc{font-size:12px;line-height:1.5;color:var(--skp-text-3);overflow-wrap:anywhere;}
-.skp-tools-impact{padding:8px 12px;border-radius:8px;background:var(--skp-warn-soft);color:var(--skp-warn);font-size:12px;line-height:1.55;}
+/* v13 修复：Tools 详情（插件详情 + 20+ 工具手风琴）要能独立纵向滚动到底。
+   只作用在 .skp-tools-body 里，Skills 详情仍靠内部文件树/阅读器自滚，不受影响。 */
+.skp-tools-body .skp-detail-fixed{display:block;overflow-y:auto;overflow-x:hidden;}
+.skp-tools-body .skp-detail-fixed .skp-detail-card{min-height:0;}
+/* 手风琴交给详情外层滚动（避免详情内部再出现第二根滚动条）。 */
+.skp-tools-body .skp-tool-accordion{max-height:none;overflow:visible;}
+/* 工具展开后的原始 JSON（默认收起；pre 自身横向滚动）。 */
+.skp-tools-raw{display:flex;flex-direction:column;gap:6px;min-width:0;margin-top:4px;}
+.skp-tools-raw-json{margin:0;padding:8px 10px;border-radius:6px;background:var(--skp-fill);font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:11.5px;line-height:1.55;color:var(--skp-text-2);white-space:pre;overflow-x:auto;max-height:240px;overflow-y:auto;scrollbar-width:thin;}
 /* v13 R5：Jev 配置页副标题第二行 + API Key ⓘ（安全承诺收进 tooltip）。 */
 .skp-jev-subtitle-sub{font-size:11.5px;color:var(--skp-text-3);}
 .skp-jev-label-row{display:flex;align-items:center;gap:6px;min-width:0;}

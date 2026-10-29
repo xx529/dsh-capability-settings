@@ -24,7 +24,7 @@
  * @module dsh-capability-settings/client/mcp-panel
  */
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type {
   CapabilityPanelApi,
@@ -39,6 +39,7 @@ import type {
 import { summarizeEntry, transportOf, validateEntry } from "../mcp/entry-util.js";
 import type { McpScope, McpServerEntry } from "../mcp/types.js";
 import { Modal } from "./modal.js";
+import { ToolParameterTable, toolParameters } from "./tool-schema.js";
 import { SkpSelect } from "./select.js";
 import { hasWorkspaceLabel, useAsyncList } from "./panel-common.js";
 import { aggregateMounts, MOUNT_LABEL, type MountInfo } from "./mcp-common.js";
@@ -104,24 +105,6 @@ const INSPECT_HEAD_RIGHT_STYLE: CSSProperties = {
   flexWrap: "wrap",
   justifyContent: "flex-end",
 };
-
-/** 参数表：四列网格（参数 / 类型 / 必填 / 说明）。 */
-const PARAM_GRID_STYLE: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1.3fr) minmax(0, .8fr) 56px minmax(0, 2fr)",
-  columnGap: 10,
-  minWidth: 0,
-};
-
-/** 参数表单元格（表头与数据行共用，只有内边距/边框）。 */
-const PARAM_CELL_STYLE: CSSProperties = {
-  padding: "7px 0",
-  borderBottom: "1px solid var(--skp-border)",
-  minWidth: 0,
-};
-
-/** 参数表表头单元格（去掉上内边距）。 */
-const PARAM_HEAD_CELL_STYLE: CSSProperties = { ...PARAM_CELL_STYLE, paddingTop: 0 };
 
 /**
  * 一条配置条目行（本项目 / 全局共用）。
@@ -302,14 +285,16 @@ function McpExternalRow({
   return (
     <li className={selected ? "skp-row-wrap skp-row-wrap-active" : "skp-row-wrap"}>
       <button type="button" className={selected ? "skp-row skp-row-active" : "skp-row"} style={{ minHeight: 72 }} onClick={onSelect}>
+        {/* v13 修复：名称行只放状态点 + serverName；来源两枚标签移到 meta 行，
+            否则两枚标签会把 serverName 挤没（figma 行看不到名字）。 */}
         <span className="skp-row-name">
           <span className={dot.className} style={dot.style} title={defaultOff ? "默认关闭（新建对话不启用）" : "运行时注入的实例"} />
           <span className="skp-row-title" title={server.serverName}>
             {server.serverName}
           </span>
-          <ExternalSourceTags server={server} />
         </span>
         <span className="skp-row-meta">
+          <ExternalSourceTags server={server} />
           {/* 有插件展示名时不再重复渲染 source 小标签（R4：两枚标签已表达来源）。 */}
           {externalChannelOf(server) === undefined && server.source !== undefined && (
             <span className="skp-tag skp-tag-flat">{server.source}</span>
@@ -1535,14 +1520,6 @@ function McpForm({
 // 工具与参数（两栏检视器）
 // ---------------------------------------------------------------------------
 
-/** 面板渲染用的一条工具参数（从 inputSchema 展开）。 */
-interface ToolParameter {
-  name: string;
-  type: string;
-  required: boolean;
-  description?: string;
-}
-
 /**
  * 「工具与参数」手风琴检视器（配置条目与外部注入共用）：
  *  - 每个工具一行，只显示工具名 + 参数个数（不显示 description）；
@@ -1563,7 +1540,7 @@ function ToolsInspector({ tools }: { tools: readonly ClientMcpTool[] }) {
     <div className="skp-tool-accordion" role="list">
       {tools.map((tool) => {
         const open = expandedName === tool.name;
-        const parameters = toolParameters(tool);
+        const parameters = toolParameters(tool.parameters);
         return (
           <div key={tool.name} className={open ? "skp-tool-item skp-tool-item-open" : "skp-tool-item"} role="listitem">
             <button
@@ -1579,37 +1556,7 @@ function ToolsInspector({ tools }: { tools: readonly ClientMcpTool[] }) {
             </button>
             {open && (
               <div className="skp-tool-body">
-                {parameters.length === 0 ? (
-                  <div className="skp-note">无参数</div>
-                ) : (
-                  <div style={PARAM_GRID_STYLE}>
-                    {["参数", "类型", "必填", "说明"].map((label) => (
-                      <span key={label} className="skp-field-label" style={PARAM_HEAD_CELL_STYLE}>
-                        {label}
-                      </span>
-                    ))}
-                    {parameters.map((parameter) => (
-                      <Fragment key={parameter.name}>
-                        <code className="skp-param-name" style={PARAM_CELL_STYLE}>
-                          {parameter.name}
-                        </code>
-                        <span className="skp-test-stat" style={PARAM_CELL_STYLE}>
-                          {parameter.type}
-                        </span>
-                        <span style={PARAM_CELL_STYLE}>
-                          <span className={parameter.required ? "skp-tag skp-tag-warn" : "skp-tag skp-tag-flat"}>
-                            {parameter.required ? "必填" : "可选"}
-                          </span>
-                        </span>
-                        <span className="skp-param-desc" style={PARAM_CELL_STYLE}>
-                          {parameter.description !== undefined && parameter.description.trim().length > 0
-                            ? parameter.description
-                            : "—"}
-                        </span>
-                      </Fragment>
-                    ))}
-                  </div>
-                )}
+                <ToolParameterTable parameters={parameters} />
               </div>
             )}
           </div>
@@ -1672,38 +1619,6 @@ function formatUsageTime(time: number): string {
   const sameDay =
     date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
   return sameDay ? clock : `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${clock}`;
-}
-
-/** 从工具的 `inputSchema` 展开参数（`properties` + `required`）。 */
-function toolParameters(tool: ClientMcpTool): ToolParameter[] {
-  const schema = tool.parameters;
-  if (schema === undefined || schema === null) return [];
-  const properties = schema.properties;
-  if (properties === null || typeof properties !== "object" || Array.isArray(properties)) return [];
-  const required = Array.isArray(schema.required) ? schema.required.filter((name): name is string => typeof name === "string") : [];
-  return Object.entries(properties as Record<string, unknown>).map(([name, raw]) => {
-    const property = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
-    const description = typeof property.description === "string" ? property.description : undefined;
-    return {
-      name,
-      type: schemaType(property),
-      required: required.includes(name),
-      ...(description !== undefined ? { description } : {}),
-    };
-  });
-}
-
-/** 一个 JSON Schema 属性的类型名（联合类型用 ` | ` 连接，缺 type 时给结构提示）。 */
-function schemaType(property: Record<string, unknown>): string {
-  const type = property.type;
-  if (typeof type === "string") return type;
-  if (Array.isArray(type)) {
-    const parts = type.filter((part): part is string => typeof part === "string");
-    if (parts.length > 0) return parts.join(" | ");
-  }
-  if (Array.isArray(property.enum)) return "enum";
-  if (property.anyOf !== undefined || property.oneOf !== undefined) return "union";
-  return "unknown";
 }
 
 // ---------------------------------------------------------------------------

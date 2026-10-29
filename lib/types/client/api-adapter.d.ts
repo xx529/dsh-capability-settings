@@ -38,11 +38,6 @@ export interface AdapterDeps {
      * 会多返回 `enabledInSession`，`mcp.setSessionEnabled` 也知道改哪个会话。
      */
     sessionId?: string;
-    /**
-     * 解析"当前会话" id（v13 A5：主面板没有 sessionId，Tools 页要写会话开关）。
-     * 同步读客户端 sessions 快照；解析不到返回 undefined（UI 降级只读）。
-     */
-    currentSessionId?(): string | undefined;
 }
 /** 构建传输无关的面板 API（RPC 实现）。 */
 export declare function createPanelApi(deps: AdapterDeps): CapabilityPanelApi;

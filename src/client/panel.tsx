@@ -472,8 +472,20 @@ function skillSwitchChecked(item: ClientSkillSummary): boolean {
   return item.projectShadow !== "stub";
 }
 
-/** 行开关是否置灰 + tooltip（只读 / 项目副本生效中 / 无工作区）。 */
-function skillSwitchDisabled(item: ClientSkillSummary, hasWorkspace: boolean): { disabled: boolean; title: string } {
+/**
+ * 行开关是否置灰 + tooltip（只读 / 项目副本生效中 / 无工作区）。
+ *
+ * `hasWorkspace` = 有可写作用域：钉选了项目目录，或只跟随当前会话（此时写操作
+ * 使用 `currentWorkspaceCwd()` = 当前会话的工作区）。`pinned` 仅用于 tooltip：
+ * 未钉选时提示开关作用于「当前会话的工作区」。
+ */
+function skillSwitchDisabled(
+  item: ClientSkillSummary,
+  hasWorkspace: boolean,
+  pinned = true,
+): { disabled: boolean; title: string } {
+  /** 未钉选项目时的作用域说明（跟随当前会话的工作区）。 */
+  const scopeNote = pinned ? "" : "（作用于当前会话的工作区）";
   if (item.injected === true) {
     if (!hasWorkspace) {
       return { disabled: true, title: "先选择工作区，才能设置此注入 Skills 在本项目的默认启停" };
@@ -481,8 +493,8 @@ function skillSwitchDisabled(item: ClientSkillSummary, hasWorkspace: boolean): {
     return {
       disabled: false,
       title: skillSwitchChecked(item)
-        ? "关闭：在本项目默认禁用此注入 Skills（写入 .agents/capability-overrides.json，不影响其它项目与其它会话）"
-        : "打开：恢复此注入 Skills 在本项目默认可用",
+        ? `关闭：在本项目默认禁用此注入 Skills（写入 .agents/capability-overrides.json，不影响其它项目与其它会话）${scopeNote}`
+        : `打开：恢复此注入 Skills 在本项目默认可用${scopeNote}`,
     };
   }
   if (item.readOnly) {
@@ -507,13 +519,13 @@ function skillSwitchDisabled(item: ClientSkillSummary, hasWorkspace: boolean): {
     return { disabled: true, title: "本项目已有同名 Skills（项目副本生效中），请在项目副本上操作" };
   }
   if (item.projectShadow === "stub") {
-    return { disabled: false, title: "打开：删除本项目内的屏蔽占位，恢复此全局 Skills 在本项目可用" };
+    return { disabled: false, title: `打开：删除本项目内的屏蔽占位，恢复此全局 Skills 在本项目可用${scopeNote}` };
   }
   return {
     disabled: false,
     title: skillSwitchChecked(item)
-      ? "关闭：在本项目内禁用此全局 Skills（生成屏蔽占位，不影响其它项目）"
-      : "打开：恢复此全局 Skills 在本项目可用",
+      ? `关闭：在本项目内禁用此全局 Skills（生成屏蔽占位，不影响其它项目）${scopeNote}`
+      : `打开：恢复此全局 Skills 在本项目可用${scopeNote}`,
   };
 }
 
@@ -909,7 +921,10 @@ function SkillsView({
     const state = invocationState(item);
     const checked = skillSwitchChecked(item);
     const tags = skillTags(item, diskGlobalItems.some((global) => global.name === item.name));
-    const switcher = skillSwitchDisabled(item, pinned !== undefined);
+    // v13 修复：未钉选项目时也允许切换（写操作使用 currentWorkspaceCwd =
+    // 当前会话的工作区）；只有完全没有工作区时才置灰。
+    const hasWorkspace = pinned !== undefined || hasWorkspaceLabel(workspace);
+    const switcher = skillSwitchDisabled(item, hasWorkspace, pinned !== undefined);
     const dotClass = isInjected
       ? checked
         ? "skp-dot skp-dot-enabled"

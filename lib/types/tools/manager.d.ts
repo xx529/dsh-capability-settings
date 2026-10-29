@@ -23,7 +23,8 @@
  */
 import type { SessionStateStore } from "../session-state.js";
 import { type RestrictOutcome, type ToolsRestrictionState } from "./restrict.js";
-import { type ToolsListView, type ToolsSetSessionResult } from "./types.js";
+import { type ToolsInspectResult, type ToolsListView, type ToolsSetGlobalResult, type ToolsSetSessionResult } from "./types.js";
+import type { ToolsGlobalStore } from "./global-state.js";
 /** 结构化 logger 子集（与插件其它模块一致，缺省静默）。 */
 export interface ToolsLogger {
     warn?(message: string): void;
@@ -31,6 +32,14 @@ export interface ToolsLogger {
 }
 /** 工具说明的码点上限（与 Jev 的 `DESCRIPTION_LIMIT` 同口径）。 */
 export declare const TOOL_DESCRIPTION_LIMIT = 200;
+/**
+ * `tools.inspect` 输出的软告警阈值（UTF-8 字节）。
+ *
+ * 详情页要拿完整 schema（用户明确要求对齐 dsh-context 的检视器、可看原始 JSON），
+ * 所以**不裁剪字段**；只在整包超过该阈值时记一条 warning（便于诊断"详情页很慢"），
+ * 严禁静默丢 `parameters`。
+ */
+export declare const TOOL_INSPECT_WARN_BYTES: number;
 /** 旧外壳（无 `tools.restrict`）时的单元锁定文案。 */
 export declare const LOCKED_RESTRICT_UNAVAILABLE = "\u5F53\u524D\u5916\u58F3\u4E0D\u652F\u6301\u6309\u4F1A\u8BDD\u5173\u95ED";
 /** 构造依赖。 */
@@ -42,6 +51,11 @@ export interface ToolsManagerDeps {
     state?: SessionStateStore;
     /** 宿主日志（结构子集）。 */
     logger?: ToolsLogger;
+    /**
+     * 全局默认存储（`tools-global.json`，能力面板开关）。提供时
+     * `effective = 会话覆盖 ?? 全局默认`；省略时按「全部启用」处理（旧装配）。
+     */
+    global?: ToolsGlobalStore;
     /** 全局 tools 服务访问器（测试注入；缺省 `ctx.root.get("tools") ?? ctx.get("tools")`）。 */
     globalTools?: () => any;
 }
@@ -52,17 +66,45 @@ export interface ToolsManager {
         sessionId?: string;
     }): Promise<ToolsListView>;
     /**
+     * 懒加载单个单元的工具 schema（`tools.inspect`）：**完整** description +
+     * 原始 `parameters` JSON Schema（不裁剪内容）。
+     *
+     * `unit` 接受裸 unit（= `tools.list` 的 `units[].unit`）或 `plugin:<unit>`
+     * 持久化键形态；成功 value = `{ unit, tools }`，业务失败 = `{ok:false,errors}`。
+     * `tools.list` 保持轻量（只 name + 200 码点 description），schema 只在这里取。
+     */
+    inspect(input: unknown): Promise<ToolsInspectResult>;
+    /**
      * 设置本会话的插件开关（**batch-first**；单条 = 长度 1 的数组）。
      *
      * `units` 只接受单元 id（不是工具名）：宿主自己重算 deny 名单。
      * `enabled` 三种取值语义见方案 §5.3。
      */
     setSessionEnabled(input: unknown): Promise<ToolsSetSessionResult>;
+    /**
+     * 设置**全局默认**（能力面板开关，所有会话；写 `tools-global.json`）。
+     *
+     * `{units, enabled}`；写成功后**异步扇出**到全部 live agent 重算 restrict
+     * （不等重算完成即返回，`tools.list` 读内存镜像即时反映新默认）。
+     * 会话首屏的开关仍走 {@link setSessionEnabled}（只写本会话覆盖）。
+     */
+    setGlobalEnabled(input: unknown): Promise<ToolsSetGlobalResult>;
     /** 本会话的显式开关快照（诊断；键带 `plugin:` 前缀）。 */
     sessionToggleState(sessionId?: string): Record<string, boolean>;
     /** 卸载：移除生命周期监听、解除已应用的 restrict、清空内存状态。 */
     dispose(): void;
 }
+/**
+ * 单元在某个会话的**生效值**：`effective = 会话覆盖 ?? 全局默认`。
+ *
+ * 两层语义的唯一口径（用户澄清：能力面板 = 全局默认、会话首屏 = 本会话覆盖）。
+ * 纯函数，不读任何存储；`applyForAgent`（R2 预留）与 manager 共用。
+ *
+ * @param unit 裸 unit id
+ * @param toggles 该会话的显式覆盖（`plugin:<unit>` → boolean；缺省 = 无覆盖）
+ * @param globallyDisabled 全局默认关闭的 unit 集合（`tools-global.json`）
+ */
+export declare function effectiveEnabled(unit: string, toggles: ReadonlyMap<string, boolean> | undefined, globallyDisabled: ReadonlySet<string>): boolean;
 /** 对某个 agent 的一次性应用结果（R2 预留形态的返回值）。 */
 export interface ApplyForAgentResult {
     /** 本会话要关闭的单元（空 = 无需屏蔽）。 */
@@ -82,12 +124,17 @@ export interface ApplyForAgentResult {
  *
  * @param agent 目标 agent（需要 `agent.ctx`；stub 直接返回空结果）
  * @param sessionId 目标会话 id（仅诊断/日志）
- * @param toggles 该作用域的开关表（`plugin:<unit>` → boolean；仅 false 参与 deny）
+ * @param toggles 该作用域的会话覆盖表（`plugin:<unit>` → boolean）
  * @param options.globalTools 全局视图访问器（缺省从 agent.ctx 反查 root）
+ * @param options.globallyDisabled 全局默认关闭的 unit 集合（缺省空 = 全部启用）。
+ *   传入后按 `effective = 会话覆盖 ?? 全局默认` 计算；**不从全局存储读**（R2
+ *   子 agent 继承时由调用方投影父级/全局集合进来即可）。
+ * @param options.logger 降级 warning 日志
  */
 export declare function applyForAgent(agent: any, sessionId: string, toggles: ReadonlyMap<string, boolean>, options?: {
     globalTools?: () => any;
     logger?: ToolsLogger;
+    globallyDisabled?: ReadonlySet<string>;
 }): ApplyForAgentResult;
 /**
  * 创建 Tools 域管理器（组合根单例）。

@@ -1,7 +1,8 @@
-// 06-panel-tools.js — v13 帧 06：能力面板 · Tools（全局，插件级）
-// 两栏布局：中间=插件行（插件名 / `插件` 标签 / 工具数 / 整插件开关），右侧=插件详情（工具清单只读）。
-// 不显示左导航（Tools 全局注册，无 scope/工作区维度）；header 显示「全局工具注册 · 不区分项目 / 工作区」。
-// 四 Tab：Skills / MCP / Tools / Jev 模型（Jev 不高亮）。
+// 06-panel-tools.js — v13 帧 06：能力面板 · Tools（全局默认，插件级）
+// 两层语义：能力面板 = 全局默认（「默认」开关，作用于所有会话）；单会话可在对话首屏覆盖。
+// 两栏：中间=插件行（插件名 / `插件` 标签 / 工具数 / 「默认」开关），右侧=插件详情（可滚动 · 工具清单手风琴：
+//   名称 + N 个参数 → 展开为 说明 + 参数表（参数/类型/必填/说明）+ 可折叠原始 JSON；schema 由 tools.inspect 懒加载）。
+// 无左导航（无 workspace / 项目维度）；header 显示「全局默认 · 所有会话 · 不区分项目 / 工作区」。
 // 前置：00-init.js；幂等（先删 base-* 与 v13/，再从 42:3433 克隆后重绘）
 const PAGE_NAME = 'Capability Panel · 全局开关与派生 v13';
 const FRAME_NAME = '06 · 能力面板 · Tools（全局）';
@@ -16,7 +17,7 @@ const F = {
 };
 for (const k of ['r', 'm', 'sb', 'code']) await figma.loadFontAsync(F[k]);
 
-const C = { rail: '#1B1F27', rowOn: '#222A35', rowOff: '#1B1F27', tabOn: '#2E3540', blue: '#61AFEF', blueLt: '#8FBCFF', t1: '#E3E6EA', t2: '#9DA5B4', t3: '#7F8794', purple: '#B79CFF', green: '#98C379', warn: '#D19A66' };
+const C = { rail: '#1B1F27', rowOn: '#222A35', rowOff: '#1B1F27', box: '#1F232B', tabOn: '#2E3540', blue: '#61AFEF', blueLt: '#8FBCFF', t1: '#E3E6EA', t2: '#9DA5B4', t3: '#7F8794', purple: '#B79CFF', green: '#98C379' };
 const rgb = (h) => { h = h.replace('#', ''); return { r: parseInt(h.slice(0, 2), 16) / 255, g: parseInt(h.slice(2, 4), 16) / 255, b: parseInt(h.slice(4, 6), 16) / 255 }; };
 const paint = (h, o) => ({ type: 'SOLID', color: rgb(h), opacity: o == null ? 1 : o });
 function box(p, name, x, y, w, h, o) {
@@ -37,19 +38,14 @@ function text(p, name, x, y, w, h, chars, o) {
   return n;
 }
 function txtw(s, fs) { let w = 0; for (const ch of s) w += /[\u2e80-\u9fff\uff00-\uffef]/.test(ch) ? fs : fs * 0.55; return Math.ceil(w); }
-function tag(p, name, label, kind, x, y, maxW) {
+function tag(p, name, label, kind, x, y) {
   let fill, color, font = F.m, size = 10.5;
   if (kind === 'plugin') { fill = [C.purple, 0.18]; color = C.purple; }
   else if (kind === 'channel') { fill = ['#FFFFFF', 0.06]; color = C.t3; font = F.code; size = 10; }
-  else if (kind === 'green') { fill = [C.green, 0.12]; color = C.green; }
-  else if (kind === 'warn') { fill = [C.warn, 0.14]; color = C.warn; }
   else { fill = ['#FFFFFF', 0.06]; color = C.t3; }
-  let w = (font === F.code ? Math.ceil(label.length * size * 0.62) : txtw(label, size)) + 10;
-  const capped = maxW != null && w > maxW;
-  if (capped) w = maxW;
+  const w = (font === F.code ? Math.ceil(label.length * size * 0.62) : txtw(label, size)) + 10;
   const n = box(p, name, x, y, w, 16, { fill: fill[0], fillOp: fill[1], r: 4 });
-  const t = text(n, name + '/t', 0, 0, w, 16, label, { size, font, color, align: 'CENTER', lh: 16 });
-  if (capped) { try { t.textTruncation = 'ENDING'; } catch (e) {} }
+  text(n, name + '/t', 0, 0, w, 16, label, { size, font, color, align: 'CENTER', lh: 16 });
   return { n, w };
 }
 function sw(p, name, x, y, on) {
@@ -69,17 +65,17 @@ const src = await figma.getNodeByIdAsync(BASE_ID);
 const base = src.clone(); base.name = 'base-42-3433';
 fr.appendChild(base); base.x = 0; base.y = 0;
 
-// 只保留外壳（sidebar + header），其余旧列表/详情/左导航全部隐藏
+// 只保留外壳（sidebar + header）
 const keep = new Set(['sidebar', 'header/title', 'header/workspace', 'header/workspace-dd', 'header/line1', 'header/line2']);
 for (const c of [...base.children]) { if (!keep.has(c.name)) c.visible = false; }
 const ws = base.findOne((n) => n.name === 'header/workspace');
 const wsT = ws && ws.findOne((n) => n.type === 'TEXT');
-if (wsT) { wsT.characters = '全局工具注册 · 不区分项目 / 工作区'; wsT.resize(560, 22); }
+if (wsT) { wsT.characters = '全局默认 · 所有会话 · 不区分项目 / 工作区'; wsT.resize(620, 22); }
 const dd = base.findOne((n) => n.name === 'header/workspace-dd');
 const ddT = dd && dd.findOne((n) => n.type === 'TEXT');
-if (ddT) ddT.characters = '全局工具 ▾';
+if (ddT) ddT.characters = '全局默认 ▾';
 
-// 四 Tab：Skills / MCP / Tools / Jev 模型（Tools 激活，Jev 不高亮）
+// 四 Tab：Skills / MCP / Tools / Jev 模型（Tools 激活）
 const tabs = box(fr, 'v13/tabs', 276, 60, 560, 36, { fill: C.rail, r: 8 });
 const tabDefs = [
   { label: 'Skills', count: '15', active: false },
@@ -96,11 +92,11 @@ tabDefs.forEach((t, i) => {
 const search = box(fr, 'v13/search', 1096, 60, 320, 36, { fill: C.rail, r: 8, stroke: '#FFFFFF', strokeOp: 0.08 });
 text(search, 'v13/search/ph', 14, 0, 280, 36, '搜索插件或工具…', { size: 12.5, color: '#6F7787', lh: 36 });
 
-// ---------- 中间列表：插件行 ----------
+// ---------- 中间列表：插件行（全局默认 · 「默认」开关） ----------
 text(fr, 'v13/list/title', 280, 112, 150, 32, 'Tools', { size: 15, font: F.sb, color: C.t1, lh: 32 });
 const cnt = box(fr, 'v13/list/count', 330, 119, 30, 18, { fill: '#FFFFFF', fillOp: 0.06, r: 999 });
 text(cnt, 'v13/list/count/t', 0, 0, 30, 18, '6', { size: 10, font: F.m, color: C.t2, align: 'CENTER', lh: 18 });
-text(fr, 'v13/list/note', 368, 112, 320, 32, '· 3 启用 · 插件级开关（整插件生效）', { size: 10, color: C.t3, lh: 32 });
+text(fr, 'v13/list/note', 368, 112, 340, 32, '· 全局默认 3 启用 · 单会话可在对话首屏覆盖', { size: 10, color: C.t3, lh: 32 });
 
 const PLUGINS = [
   { name: 'dsh-univer-office', tools: 13, on: true, sel: true },
@@ -115,52 +111,78 @@ PLUGINS.forEach((p, i) => {
   const row = box(fr, 'v13/row/' + i, 280, y, 420, 76, { fill: p.on ? C.rowOn : C.rowOff, r: 9, stroke: '#FFFFFF', strokeOp: p.on ? 0.05 : 0.02 });
   if (p.sel) box(row, 'v13/row/' + i + '/sel', 8, 8, 2, 60, { fill: C.blue, r: 999 });
   box(row, 'v13/row/' + i + '/dot', 12, 13, 8, 8, { fill: p.on ? C.blue : C.t3, r: 999 });
-  const isPlugin = p.name !== '来源未识别';
-  text(row, 'v13/row/' + i + '/name', 24, 7, 240, 20, p.name, { size: isPlugin ? 12.5 : 12, font: isPlugin ? F.code : F.r, color: p.on ? C.t1 : C.t2, lh: 20, trunc: true });
-  if (isPlugin) tag(row, 'v13/row/' + i + '/tag', '插件', 'plugin', 24, 30, 40);
-  else tag(row, 'v13/row/' + i + '/tag', '未识别', 'warn', 24, 30, 60);
-  text(row, 'v13/row/' + i + '/tools', 24 + (isPlugin ? 40 : 56) + 8, 30, 120, 16, p.tools + ' 个工具', { size: 10, color: C.t3, lh: 16 });
+  text(row, 'v13/row/' + i + '/name', 24, 7, 200, 20, p.name, { size: 12.5, font: F.code, color: p.on ? C.t1 : C.t2, lh: 20, trunc: true });
+  tag(row, 'v13/row/' + i + '/tag', '插件', 'plugin', 24, 30);
+  text(row, 'v13/row/' + i + '/tools', 72, 30, 120, 16, p.tools + ' 个工具', { size: 10, color: C.t3, lh: 16 });
+  text(row, 'v13/row/' + i + '/default', 326, 29, 44, 18, '默认', { size: 10, color: C.t3, align: 'RIGHT', lh: 18 });
   sw(row, 'v13/row/' + i + '/switch', 378, 29, p.on);
 });
 
-// ---------- 右侧详情（插件级 + 只读工具清单） ----------
-text(fr, 'v13/detail/name', 744, 132, 300, 26, 'dsh-univer-office', { size: 20, font: F.code, color: C.t1, lh: 26 });
-const dt1 = tag(fr, 'v13/detail/tag-plugin', '插件', 'plugin', 1050, 135, null);
-tag(fr, 'v13/detail/tag-name', 'dsh-to-figma', 'channel', 1050 + dt1.w + 4, 135, null);
+// ---------- 右侧详情（整块可滚动 + 工具清单手风琴） ----------
+// 滚动条（整块详情一根）
+box(fr, 'v13/detail/scroll-track', 1404, 112, 4, 752, { fill: '#FFFFFF', fillOp: 0.05, r: 2, clip: false });
+box(fr, 'v13/detail/scroll-thumb', 1404, 112, 4, 300, { fill: '#FFFFFF', fillOp: 0.16, r: 2, clip: false });
 
+text(fr, 'v13/detail/name', 744, 132, 300, 26, 'dsh-univer-office', { size: 20, font: F.code, color: C.t1, lh: 26 });
+const dt1 = tag(fr, 'v13/detail/tag-plugin', '插件', 'plugin', 1050, 135);
+tag(fr, 'v13/detail/tag-name', 'dsh-univer-office', 'channel', 1050 + dt1.w + 4, 135);
 sw(fr, 'v13/detail/switch', 744, 176, true);
-text(fr, 'v13/detail/state-label', 782, 170, 120, 30, '已启用', { size: 11.5, font: F.m, color: C.green, lh: 30 });
+text(fr, 'v13/detail/state-label', 782, 170, 120, 30, '默认开启', { size: 11.5, font: F.m, color: C.green, lh: 30 });
 text(fr, 'v13/detail/copy', 1246, 170, 170, 30, '复制插件名', { size: 10.5, color: C.blueLt, align: 'RIGHT', lh: 30 });
 
-const meta = box(fr, 'v13/detail/meta', 744, 216, 672, 32, { fill: C.rail, r: 8 });
-text(meta, 'v13/detail/meta/t', 12, 0, 648, 32, '来源判定：前缀 univer_ → dsh-univer-office（插件清单映射表）· 注入方式：插件运行时注册的非 MCP 工具（不落盘）', { size: 10.5, color: C.t3, lh: 32 });
-text(fr, 'v13/detail/count', 744, 256, 600, 18, '工具数 13 · 开关为插件级：关闭后该插件全部工具在本会话不可见', { size: 10.5, color: C.t2, lh: 18 });
+const meta = box(fr, 'v13/detail/meta', 744, 216, 650, 32, { fill: C.rail, r: 8 });
+text(meta, 'v13/detail/meta/t', 12, 0, 626, 32, '来源判定：前缀 univer_ → dsh-univer-office（插件清单映射）· 注入方式：插件运行时注册的非 MCP 工具', { size: 10.5, color: C.t3, lh: 32 });
+text(fr, 'v13/detail/count', 744, 256, 650, 32, '工具数 13 · 开关为「默认」：关闭后所有会话默认不可用；单个会话仍可在对话首屏单独开启', { size: 10.5, color: C.t2, lh: 16 });
+text(fr, 'v13/detail/tools-title', 744, 292, 300, 20, '工具清单（13）· 展开查看参数', { size: 12, font: F.sb, color: C.t1, lh: 20 });
 
-text(fr, 'v13/detail/tools-title', 744, 286, 260, 20, '工具清单（13）· 只读', { size: 12, font: F.sb, color: C.t1, lh: 20 });
-const TOOLS = [
-  ['univer_new', '新建表格 / 文档 / 幻灯片 / 看板'],
-  ['univer_import', '导入 xlsx / csv / docx / pptx'],
-  ['univer_execute', '执行表格 / 文档 / 幻灯片操作'],
-  ['univer_export', '导出为 Office 或 PDF'],
-  ['univer_screenshot', '渲染整页预览为图片'],
+// 展开的第一项
+const acc = box(fr, 'v13/acc/0', 744, 318, 650, 160, { fill: C.box, r: 8, stroke: '#FFFFFF', strokeOp: 0.05 });
+text(acc, 'v13/acc/0/name', 12, 8, 240, 20, 'univer_new', { size: 11.5, font: F.code, color: C.t1, lh: 20 });
+text(acc, 'v13/acc/0/params', 260, 8, 120, 20, '2 个参数', { size: 10, color: C.t3, lh: 20 });
+text(acc, 'v13/acc/0/chevron', 608, 8, 30, 20, '▲', { size: 9.5, color: C.t3, align: 'RIGHT', lh: 20 });
+text(acc, 'v13/acc/0/desc', 12, 32, 626, 18, '新建表格 / 文档 / 幻灯片 / 看板；支持指定类型与标题。', { size: 10, color: C.t2, lh: 18 });
+text(acc, 'v13/acc/0/th1', 12, 55, 120, 16, '参数', { size: 9.5, color: C.t3, lh: 16 });
+text(acc, 'v13/acc/0/th2', 150, 55, 80, 16, '类型', { size: 9.5, color: C.t3, lh: 16 });
+text(acc, 'v13/acc/0/th3', 240, 55, 50, 16, '必填', { size: 9.5, color: C.t3, lh: 16 });
+text(acc, 'v13/acc/0/th4', 310, 55, 320, 16, '说明', { size: 9.5, color: C.t3, lh: 16 });
+box(acc, 'v13/acc/0/line1', 12, 72, 626, 1, { fill: '#FFFFFF', fillOp: 0.07, clip: false });
+text(acc, 'v13/acc/0/r1a', 12, 75, 120, 16, 'type', { size: 10, font: F.code, color: C.t1, lh: 16 });
+text(acc, 'v13/acc/0/r1b', 150, 75, 80, 16, 'string', { size: 10, font: F.code, color: C.t2, lh: 16 });
+text(acc, 'v13/acc/0/r1c', 240, 75, 50, 16, '否', { size: 10, color: C.t3, lh: 16 });
+text(acc, 'v13/acc/0/r1d', 310, 75, 320, 16, 'sheet | doc | slide | board', { size: 10, color: C.t2, lh: 16 });
+text(acc, 'v13/acc/0/r2a', 12, 95, 120, 16, 'title', { size: 10, font: F.code, color: C.t1, lh: 16 });
+text(acc, 'v13/acc/0/r2b', 150, 95, 80, 16, 'string', { size: 10, font: F.code, color: C.t2, lh: 16 });
+text(acc, 'v13/acc/0/r2c', 240, 95, 50, 16, '否', { size: 10, color: C.t3, lh: 16 });
+text(acc, 'v13/acc/0/r2d', 310, 95, 320, 16, '新文档标题', { size: 10, color: C.t2, lh: 16 });
+box(acc, 'v13/acc/0/line2', 12, 114, 626, 1, { fill: '#FFFFFF', fillOp: 0.05, clip: false });
+text(acc, 'v13/acc/0/json-toggle', 12, 119, 160, 16, '原始 JSON ▾', { size: 9.5, color: C.blueLt, lh: 16 });
+text(acc, 'v13/acc/0/json-preview', 150, 119, 480, 16, '{ "type": "string", "enum": ["sheet", "doc", "slide", "board"] }', { size: 9, font: F.code, color: C.t3, lh: 16 });
+text(acc, 'v13/acc/0/hint', 12, 140, 500, 14, 'schema 由 tools.inspect 懒加载；tools.list 只返回名称 / 参数个数', { size: 9, color: C.t3, lh: 14 });
+
+// 其余折叠项
+const more = [
+  ['univer_import', '3 个参数'],
+  ['univer_execute', '4 个参数'],
+  ['univer_export', '2 个参数'],
+  ['univer_screenshot', '1 个参数'],
 ];
-TOOLS.forEach((t, i) => {
-  const y = 312 + i * 36;
-  const r = box(fr, 'v13/tools/' + i, 744, y, 672, 32, { fill: i % 2 === 0 ? '#1F232B' : null, r: 6 });
-  text(r, 'v13/tools/' + i + '/name', 12, 0, 260, 32, t[0], { size: 11, font: F.code, color: C.t1, lh: 32, trunc: true });
-  text(r, 'v13/tools/' + i + '/desc', 286, 0, 370, 32, t[1], { size: 10, color: C.t3, lh: 32, trunc: true });
+more.forEach((t, i) => {
+  const y = 486 + i * 34;
+  const r = box(fr, 'v13/acc/' + (i + 1), 744, y, 650, 32, { fill: i % 2 === 0 ? '#1F232B' : null, r: 6 });
+  text(r, 'v13/acc/' + (i + 1) + '/name', 12, 0, 240, 32, t[0], { size: 11, font: F.code, color: C.t1, lh: 32, trunc: true });
+  text(r, 'v13/acc/' + (i + 1) + '/params', 260, 0, 120, 32, t[1], { size: 10, color: C.t3, lh: 32 });
+  text(r, 'v13/acc/' + (i + 1) + '/chevron', 608, 0, 30, 32, '▸', { size: 9.5, color: C.t3, align: 'RIGHT', lh: 32 });
 });
-
-const impact = box(fr, 'v13/detail/impact', 744, 506, 672, 44, { fill: C.warn, fillOp: 0.10, r: 8, stroke: C.warn, strokeOp: 0.25 });
-text(impact, 'v13/detail/impact/t1', 12, 6, 648, 16, '关闭影响', { size: 10.5, font: F.m, color: C.warn, lh: 16 });
-text(impact, 'v13/detail/impact/t2', 12, 24, 648, 14, '关闭该插件后，本会话模型看不到它的全部 13 个工具；能力决策（Jev）以插件整体计分，选中才会启用该插件全部工具；不改项目默认', { size: 10, color: C.t2, lh: 14 });
-
-text(fr, 'v13/detail/ro', 744, 560, 672, 32, '只读 / 不可关闭：插件级开关，不提供单工具开关；无法 restrict 的插件开关置灰并说明原因；宿主内建基础工具不进入本域。', { size: 10.5, color: C.t2, lh: 16 });
-text(fr, 'v13/detail/foot', 744, 596, 672, 18, '※ 本版不做参数表：插件直接注册的工具没有统一的 inputSchema 承诺；工具清单只读展示名称与说明', { size: 10, color: C.t3, lh: 18 });
+// 底部渐隐 + 滚动提示（详情整体一根滚动条）
+box(fr, 'v13/fade/0', 744, 600, 650, 44, { fill: '#1E222B', fillOp: 0.55 });
+box(fr, 'v13/fade/1', 744, 616, 650, 30, { fill: '#1E222B', fillOp: 0.75 });
+box(fr, 'v13/fade/2', 744, 632, 650, 18, { fill: '#1E222B', fillOp: 0.92 });
+text(fr, 'v13/detail/scroll-hint', 744, 646, 620, 14, '▾ 滚动查看其余 8 个工具（共 13 个）', { size: 9.5, color: C.t3, lh: 14 });
+text(fr, 'v13/detail/ro', 744, 676, 650, 32, '只读 / 不可关闭：插件级开关，不提供单工具开关；无法 restrict 的插件开关置灰并说明原因；宿主内建基础工具不进入本域。', { size: 10, color: C.t2, lh: 16 });
 
 // 帧注
-text(fr, 'v13/note', 280, 862, 1130, 16, '※ Tools（全局）：两栏（插件列表 + 插件详情）· 仅含插件直接注册的非 MCP 工具 · 插件级开关 + 只读工具清单 · 计数为示例，以运行时枚举为准', { size: 10.5, color: C.t3, lh: 16 });
+text(fr, 'v13/note', 280, 862, 1130, 16, '※ Tools（全局默认）：开关为「默认」（所有会话）；单会话可在对话首屏覆盖 · 详情整块可滚动 · 工具清单 = 手风琴（参数表 + 原始 JSON，schema 懒加载）', { size: 10, color: C.t3, lh: 15 });
 
-const out = { frame: fr.id, tabs: tabs.id, plugins: PLUGINS.length, tools: TOOLS.length };
+const out = { frame: fr.id, tabs: tabs.id, plugins: PLUGINS.length };
 console.log(JSON.stringify(out));
 return out;

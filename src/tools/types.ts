@@ -66,9 +66,27 @@ export interface ToolsUnitView {
     /** 包名（已识别才有）。 */
     packageName?: string;
   };
-  /** 本会话生效开关（显式覆盖 > 默认 true）。 */
+  /**
+   * 全局默认（能力面板开关）：true = 全局启用（默认）、false = 全局默认关闭。
+   *
+   * additive（v13 修复）：`effective = 会话覆盖 ?? defaultEnabled`；会话首屏
+   * 覆盖不影响该字段（它只反映 `tools-global.json` 的全局态）。
+   */
+  defaultEnabled: boolean;
+  /**
+   * 本会话**生效值** = 会话覆盖 ?? 全局默认（additive；推荐客户端用这个）。
+   *
+   * 等价于旧字段 {@link enabledInSession}；两者恒相等（保留旧字段仅为兼容）。
+   */
+  enabled: boolean;
+  /**
+   * 本会话生效开关（**legacy 别名**，恒等于 `enabled`）。
+   *
+   * v13 修复前它是唯一开关字段；为避免旧客户端/Jev 读不到值，继续下发同值，
+   * 文档口径以 `enabled` 为准。
+   */
   enabledInSession: boolean;
-  /** 是否有显式会话覆盖（「恢复默认」是否可点）。 */
+  /** 是否有显式会话覆盖（「恢复默认」是否可点；= 会话层是否被改过）。 */
   explicit: boolean;
   /**
    * 不可开关原因；正常缺省。第一批唯一可能来源 = 当前 agent 作用域缺少
@@ -110,5 +128,78 @@ export interface ToolsSetSessionInput {
 /** `tools.setSessionEnabled` 结果（业务失败收在 `ok:false`）。 */
 export type ToolsSetSessionResult = { ok: true; applied: number } | { ok: false; errors: string[] };
 
-/** 默认开启（Tools 域没有项目级默认，A3：键缺失 = 默认开启）。 */
+/**
+ * `tools.setGlobalEnabled` 入参：设置**全局默认**（能力面板开关，所有会话）。
+ *
+ * 与 `setSessionEnabled` 的区别：这个写 `tools-global.json`（影响所有会话与新
+ * 会话的默认态），不写会话覆盖；会话首屏的开关仍走 `setSessionEnabled`。
+ */
+export interface ToolsSetGlobalInput {
+  /** 开关单元 id 列表（兼容裸 unit 与 `plugin:<unit>` 两种写法）。 */
+  units: string[];
+  /** true=全局启用（移出 disabled）；false=全局默认关闭（加入 disabled）。 */
+  enabled: boolean;
+}
+
+/** `tools.setGlobalEnabled` 结果（业务失败收在 `ok:false`）。 */
+export type ToolsSetGlobalResult = { ok: true; applied: number } | { ok: false; errors: string[] };
+
+// ---------------------------------------------------------------------------
+// tools.inspect（懒加载单个单元的工具 schema）
+//
+// 背景：`tools.list` 每会话首屏都会拉，**必须保持轻量**（只 name + 200 码点
+// description）。完整的 `parameters` JSON Schema 只在用户打开插件详情时按需取
+// （对齐 dsh-context 的工具检视器），避免把 hero 请求放大。
+// ---------------------------------------------------------------------------
+
+/** `tools.inspect` 返回的单个工具：名称 + **完整**说明 + 原始参数 JSON Schema。 */
+export interface ToolsInspectedTool {
+  /** 完整工具名（`schemas()` 里的 `name`）。 */
+  name: string;
+  /** 完整说明（**不截断**，与 `tools.list` 的 200 码点不同：详情页要能读全）。 */
+  description?: string;
+  /**
+   * 原始参数 JSON Schema（`schemas()` 的 `parameters`，不裁剪内容）。
+   *
+   * 原样透传，不做结构解释；宿主没给 / 给了非对象时缺省。
+   */
+  parameters?: Record<string, unknown>;
+}
+
+/** `tools.inspect` 入参。 */
+export interface ToolsInspectInput {
+  /**
+   * 会话 id（可选；当前 inspect 只读全局注册表、不区分会话，保留给未来
+   * 「按会话可见性裁剪」扩展，宿主不校验也不使用）。
+   */
+  sessionId?: string;
+  /**
+   * 开关单元 id。接受两种写法并归一：
+   *   - 裸 unit（= `tools.list` 里的 `units[].unit`，如 `dsh-remote`、
+   *     `__unattributed__`）；
+   *   - 持久化键形态（带 `plugin:` 前缀，如 `plugin:dsh-remote`）。
+   */
+  unit: string;
+}
+
+/** `tools.inspect` 成功 value（注意：**成功支没有 `ok` 字段**，靠此判别）。 */
+export interface ToolsInspectView {
+  /** 归一后的裸 unit（与 `tools.list` 的 `units[].unit` 同形）。 */
+  unit: string;
+  /** 该单元当前可见工具（已按名称排序；含完整 description 与 parameters）。 */
+  tools: ToolsInspectedTool[];
+}
+
+/**
+ * `tools.inspect` 结果：成功 = {@link ToolsInspectView}（无 `ok` 字段）；
+ * 业务失败 = `{ok:false, errors}`（传输层信封仍恒 `{ok:true,value}`）。
+ */
+export type ToolsInspectResult = ToolsInspectView | { ok: false; errors: string[] };
+
+/**
+ * **legacy**：早期「Tools 无项目级默认、键缺失 = 开启」的常量。
+ *
+ * v13 修复后生效值改为 `会话覆盖 ?? 全局默认`（见 `effectiveEnabled`），本常量
+ * 不再参与计算；保留导出仅为旧代码/测试兼容。
+ */
 export const TOOLS_DEFAULT_ENABLED = true;

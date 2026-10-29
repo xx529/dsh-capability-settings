@@ -506,9 +506,22 @@ export interface ClientToolsUnit {
     /** 包名（已识别才有）。 */
     packageName?: string;
   };
-  /** 本会话生效开关（显式覆盖 > 默认 true）。 */
-  enabledInSession: boolean;
-  /** 是否有显式会话覆盖（「恢复默认」是否可点）。 */
+  /**
+   * **全局默认**开关（v13 两层语义；能力面板的 Tools 开关展示 / 写这个）。
+   * 关闭后所有会话默认不可用；单个会话仍可在对话首屏单独开启。
+   */
+  defaultEnabled?: boolean;
+  /**
+   * **本会话生效值**（会话覆盖 > 全局默认；首屏 / 能力 Tab 的开关展示 / 写这个）。
+   * 查询时没带 `sessionId`（主面板）或无会话上下文时，宿主按全局默认投影。
+   */
+  enabled?: boolean;
+  /**
+   * 旧字段（v13 单层语义）= 当时的「本会话生效值」。新宿主可能不再下发；
+   * 客户端统一按 {@link enabled} 读，保留该字段只为兼容旧宿主响应。
+   */
+  enabledInSession?: boolean;
+  /** 是否有显式会话覆盖（「恢复默认」是否可点、诊断用）。 */
   explicit: boolean;
   /** 不可开关原因（正常缺省）。 */
   lockedReason?: string;
@@ -529,11 +542,33 @@ export interface ClientToolsList {
   sessionId?: string;
 }
 
+/**
+ * `tools.inspect` 返回的一个工具（v13 修复：详情展示 schema）。
+ *
+ * 与 `tools.list` 的 `ClientToolBrief` 区别：这里是**按需**拉取的完整定义，
+ * 带 `parameters`（JSON Schema）。`tools.list` 仍然只下发 name/description，
+ * 避免把全部 schema 塞进列表响应。
+ */
+export interface ClientToolInspectTool {
+  name: string;
+  description?: string;
+  /** 工具的 JSON Schema（原样透传；UI 读 properties/required 渲染参数表）。 */
+  parameters?: Record<string, unknown>;
+}
+
+/** `tools.inspect {unit}` 的返回。 */
+export interface ClientToolsInspect {
+  /** 被检视的开关单元 id。 */
+  unit: string;
+  /** 该单元当前可见的工具（含 schema）。 */
+  tools: ClientToolInspectTool[];
+}
+
 /** Tools 域的面板 API。 */
 export interface ToolsApi {
   /**
-   * 列出插件单元。传 `sessionId` 时宿主投影 `enabledInSession` /
-   * `explicit` / `restriction`；不传则恒按默认值（主面板据此渲染）。
+   * 列出插件单元。始终返回 `defaultEnabled`（全局默认）与 `enabled`（本会话
+   * 生效值）；传 `sessionId` 时会话覆盖才生效（composer 的每会话 api 会带）。
    * 服务缺失 / `schemas()` 失败时返回 `{units:[],errors:[...]}`，不抛。
    */
   list(input?: { sessionId?: string }): Promise<ClientToolsList>;
@@ -543,6 +578,20 @@ export interface ToolsApi {
    * 业务失败抛 `Error(errors.join("; "))`（与 skills/mcp 单条一致）。
    */
   setSessionEnabled(input: { units: string[]; enabled: boolean | undefined; sessionId?: string }): Promise<{ ok: true; applied: number }>;
+  /**
+   * 设置一个或多个插件的**全局默认**开关（能力面板 Tools 页 / 所有会话的默认）。
+   *
+   * 与 {@link setSessionEnabled} 互不影响：全局关闭后，单个会话仍可在首屏
+   * 通过会话覆盖单独开启。batch-first（单条 = 长度 1 的数组）；业务失败抛错。
+   */
+  setGlobalEnabled(input: { units: string[]; enabled: boolean }): Promise<{ ok: true; applied: number }>;
+  /**
+   * 按需读取一个插件单元的工具定义（含 `parameters` JSON Schema）。
+   *
+   * 只在详情选中单元时调用（按 unit 缓存）；业务失败 `{ok:false,errors}` 时
+   * 适配器抛错，UI 降级为「仅名称 + 说明」并提示参数不可用。
+   */
+  inspect(input: { unit: string; sessionId?: string }): Promise<ClientToolsInspect>;
 }
 
 // ---------------------------------------------------------------------------
@@ -936,13 +985,6 @@ export interface CapabilityPanelApi {
   jev: JevApi;
   /** 面板头部的"项目作用域"目录标签。 */
   workspaceLabel(): string;
-  /**
-   * 解析当前会话 id（v13 A5：主面板 Tools 页要写会话开关，但主面板自身没有
-   * sessionId）。读客户端 `sessions.list` 快照，同步、不产生 RPC；解析不到时
-   * 返回 undefined（UI 降级为只读 + 提示「请在对话首屏设置本会话开关」）。
-   * 旧装配缺省时按 undefined 处理。
-   */
-  currentSessionId?(): string | undefined;
   /**
    * 当前显式钉选的项目目录；`undefined` 表示面板自动跟随
    * 当前 session / 最近工作区。

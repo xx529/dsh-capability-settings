@@ -20,6 +20,8 @@ import type {
   ClientOverrides,
   ClientSkillDetail,
   ClientSkillSummary,
+  ClientToolInspectTool,
+  ClientToolsInspect,
   ClientToolsList,
   ClientToolsUnit,
   CreateSkillInput,
@@ -71,11 +73,6 @@ export interface AdapterDeps {
    * 会多返回 `enabledInSession`，`mcp.setSessionEnabled` 也知道改哪个会话。
    */
   sessionId?: string;
-  /**
-   * 解析"当前会话" id（v13 A5：主面板没有 sessionId，Tools 页要写会话开关）。
-   * 同步读客户端 sessions 快照；解析不到返回 undefined（UI 降级只读）。
-   */
-  currentSessionId?(): string | undefined;
 }
 
 /** 构建传输无关的面板 API（RPC 实现）。 */
@@ -471,6 +468,46 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
         return toToolsList(result.value);
       },
 
+      /**
+       * 按需读取工具定义（含 parameters）：只在详情选中单元时调用，按 unit 缓存。
+       * 业务失败抛错，UI 降级为「仅名称 + 说明」并提示参数不可用。
+       */
+      async inspect(input): Promise<ClientToolsInspect> {
+        const sessionId = input.sessionId ?? deps.sessionId;
+        const result = await rpc("tools.inspect", {
+          unit: input.unit,
+          ...(sessionId !== undefined ? { sessionId } : {}),
+        });
+        // 业务失败必须抛错（否则会被 toToolsInspect 投影成空清单、静默降级成
+        // 「无参数」，掩盖 unit 失效 / 服务缺失）。`rpc()` 已把外层的
+        // `{ok:true,value:{ok:false,errors}}` 展平成 `{ok:false,errors}`；这里
+        // 再防御一次 value 自身带 `ok:false` 的旧/异常形状。
+        if (!result.ok) throw new Error(result.errors.join("; "));
+        const value = result.value;
+        if (value !== null && typeof value === "object" && (value as Record<string, unknown>).ok === false) {
+          const errors = (value as Record<string, unknown>).errors;
+          throw new Error(Array.isArray(errors) ? errors.join("; ") : "tools.inspect failed");
+        }
+        const inspected = toToolsInspect(value);
+        // 响应既无 unit 也无 tools = 非法结果；宁可让 UI 显示错误，也不假装「无参数」。
+        if (inspected.unit.length === 0 && inspected.tools.length === 0) {
+          throw new Error("tools.inspect 返回了空结果（unit/tools 缺失）");
+        }
+        return { unit: inspected.unit.length > 0 ? inspected.unit : input.unit, tools: inspected.tools };
+      },
+
+      /**
+       * 设置插件的**全局默认**开关（能力面板 Tools 页）：影响所有会话的默认，
+       * 不写任何会话覆盖。业务失败抛错（页面显示错误并回滚开关）。
+       */
+      async setGlobalEnabled(input) {
+        const result = unwrap(await rpc("tools.setGlobalEnabled", { units: input.units, enabled: input.enabled })) as
+          | { ok: true; applied?: unknown }
+          | { ok: false; errors: string[] };
+        if (!result.ok) throw new Error(result.errors.join("; "));
+        return { ok: true as const, applied: typeof result.applied === "number" ? result.applied : input.units.length };
+      },
+
       /** 按会话开关插件（batch-first）；业务失败抛错（与 skills/mcp 单条一致）。 */
       async setSessionEnabled(input) {
         const sessionId = input.sessionId ?? deps.sessionId;
@@ -607,10 +644,6 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
     },
 
     // 工作区相关方法直接透传注入的 deps（状态由 client.ts 持有）。
-    currentSessionId() {
-      return deps.currentSessionId?.();
-    },
-
     workspaceLabel() {
       return deps.currentWorkspaceCwd() ?? "（无工作区）";
     },
@@ -656,6 +689,12 @@ function toToolsList(value: unknown): ClientToolsList {
       const attribution = (unit.attribution ?? {}) as Record<string, unknown>;
       const matchedBy =
         attribution.matchedBy === "prefix" || attribution.matchedBy === "exact" ? attribution.matchedBy : ("unknown" as const);
+      // v13 两层语义：`defaultEnabled` = 全局默认，`enabled` = 本会话生效值。
+      // 旧宿主只有 `enabledInSession`（单层）→ 两个都回落到它；再缺省按默认开启。
+      const legacyEnabled = typeof unit.enabledInSession === "boolean" ? unit.enabledInSession : undefined;
+      const defaultEnabled =
+        typeof unit.defaultEnabled === "boolean" ? unit.defaultEnabled : (legacyEnabled ?? true);
+      const enabled = typeof unit.enabled === "boolean" ? unit.enabled : (legacyEnabled ?? defaultEnabled);
       const restriction = (unit.restriction ?? {}) as Record<string, unknown>;
       const restrictionState =
         restriction.state === "applied" || restriction.state === "skipped" || restriction.state === "failed"
@@ -675,7 +714,10 @@ function toToolsList(value: unknown): ClientToolsList {
             ? { packageName: attribution.packageName }
             : {}),
         },
-        enabledInSession: unit.enabledInSession !== false,
+        defaultEnabled,
+        enabled,
+        // 旧字段保留填值（旧代码/测试读 enabledInSession 时语义不变）。
+        enabledInSession: legacyEnabled ?? enabled,
         explicit: unit.explicit === true,
         ...(typeof unit.lockedReason === "string" && unit.lockedReason.length > 0 ? { lockedReason: unit.lockedReason } : {}),
         ...(restrictionState !== undefined
@@ -697,6 +739,28 @@ function toToolsList(value: unknown): ClientToolsList {
     errors: Array.isArray(raw.errors) ? raw.errors.filter((item): item is string => typeof item === "string") : [],
     ...(typeof raw.sessionId === "string" && raw.sessionId.length > 0 ? { sessionId: raw.sessionId } : {}),
   };
+}
+
+/** `tools.inspect` 的防御性投影（兼容 `{unit,tools}` / `{ok:true,unit,tools}` 两种外壳）。 */
+function toToolsInspect(value: unknown): ClientToolsInspect {
+  const raw = (value ?? {}) as Record<string, unknown>;
+  const inner = raw.value !== null && typeof raw.value === "object" ? (raw.value as Record<string, unknown>) : raw;
+  const unit = typeof inner.unit === "string" ? inner.unit : typeof raw.unit === "string" ? raw.unit : "";
+  const tools = (Array.isArray(inner.tools) ? inner.tools : [])
+    .map((item) => {
+      const tool = (item ?? {}) as Record<string, unknown>;
+      if (typeof tool.name !== "string" || tool.name.length === 0) return undefined;
+      const projected: ClientToolInspectTool = {
+        name: tool.name,
+        ...(typeof tool.description === "string" && tool.description.length > 0 ? { description: tool.description } : {}),
+        ...(tool.parameters !== null && typeof tool.parameters === "object" && !Array.isArray(tool.parameters)
+          ? { parameters: tool.parameters as Record<string, unknown> }
+          : {}),
+      };
+      return projected;
+    })
+    .filter((tool): tool is ClientToolInspectTool => tool !== undefined);
+  return { unit, tools };
 }
 
 /** `session.setBulk` 成功 value 的防御性投影（缺字段补 0 / 空表）。 */

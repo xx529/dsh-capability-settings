@@ -1575,7 +1575,9 @@ export function buildToolRows(snapshot: CapabilitySnapshot, pending: Record<stri
       tone: (unattributed ? "unattributed" : "plugin") as TagTone,
       description: `${toolCount} 个工具 · ${unattributed ? "来源未识别" : "插件注入"}`,
       meta: `${toolCount} 个工具`,
-      enabled: pending[id] ?? unit.enabledInSession,
+      // 首屏 = 本会话生效值（会话覆盖 ?? 全局默认）。adapter 已归一；旧宿主/夹具
+      // 缺新字段时按旧 `enabledInSession` 再按默认开启回落。
+      enabled: pending[id] ?? unit.enabled ?? unit.enabledInSession ?? unit.defaultEnabled ?? true,
       disabled: locked,
       unit: unit.unit,
       ...(locked ? { lockedReason: unit.lockedReason } : {}),
@@ -1636,8 +1638,8 @@ export function CapabilityCard({ row, busy, onToggle }: { row: Row; busy: boolea
       ? row.disabled
         ? (row.lockedReason ?? "该插件无法在当前会话切换")
         : row.enabled
-          ? "在当前会话关闭该插件（关闭后其全部工具不可见，不改项目默认）"
-          : "在当前会话开启该插件（恢复其全部工具）"
+          ? "关闭：本会话关闭此插件全部工具（全局默认不变）"
+          : "开启：本会话启用（覆盖全局默认）"
       : row.disabled
         ? "该能力无法在当前会话切换，请到能力面板管理"
         : row.name;
@@ -1995,7 +1997,7 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
           type="button"
           className="skp-dock-btn"
           disabled={resetBusy || bulkRunning}
-          title="清除本会话的显式开关，恢复默认（Skills / MCP / Tools 三域）"
+          title="清除本会话的显式开关，恢复默认（Skills / MCP / Tools 三域；Tools 回落到全局默认）"
           onClick={() => {
             setResetBusy(true);
             Promise.resolve(onReset()).finally(() => setResetBusy(false));

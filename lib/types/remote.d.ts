@@ -118,6 +118,19 @@ export interface PanelRpcService {
             sessionId?: string;
         }): Promise<unknown>;
         setSessionEnabled(input: unknown): Promise<unknown>;
+        /**
+         * 懒加载单个单元的工具 schema（`tools.inspect`）：完整 description + 原始
+         * `parameters` JSON Schema。成功 value = `{ unit, tools }`；业务失败 =
+         * `{ok:false, errors}`（信封仍恒 `{ok:true,value}`）。
+         */
+        inspect(input: unknown): Promise<unknown>;
+        /**
+         * 设置 **全局默认**（能力面板开关，所有会话；写 `tools-global.json` 并扇出）。
+         *
+         * `{units, enabled}` → `{ok:true, applied}` / `{ok:false, errors}`；
+         * 会话首屏的开关仍走 `tools.setSessionEnabled`（只写本会话覆盖）。
+         */
+        setGlobalEnabled(input: unknown): Promise<unknown>;
     };
     /**
      * R1 批量端点：三域一次开关（Skills / MCP / Tools），幂等、按会话串行、

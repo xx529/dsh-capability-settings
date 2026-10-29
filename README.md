@@ -35,14 +35,15 @@ Skills / MCP / Tools（Tools 以插件为单元），一次请求批量打 0–1
 |---|---|---|---|---|---|---|
 | **Skills** | ✅ 左导航「全局 / 项目」+ 头部搜索 + 项目按工作区下钻 + 详情（目录树 + `SKILL.md` 阅读器，预览/源码） | ✅ 上传 / 宿主路径 / URL 三种来源 | ✅ | ✅ 行尾「启用」开关（项目区启停；全局 = 在本项目禁用/恢复）+ 详情页模型/用户方向独立开关 | ✅ 确认对话框 | ✅ 导入到本项目（物理副本）/ 在本项目禁用（屏蔽占位）/ 下载 zip / 复制到宿主目录 |
 | **MCP** | ✅ 全局（含外部注入第二组）/ 项目按工作区下钻 + 实时挂载状态 + 行尾「默认」开关 + 工具与参数手风琴 | ✅ 表单新增（stdio/http）+ JSON 导入 | ✅ | ✅ 「默认」开关（新建对话）+ 当前对话开关（会话能力配置）+ 项目条目详情启停 | ✅ 两击确认 | ✅ 导入到本项目（引用，跟随全局）/ `.mcp.json` 与 Claude Code 格式兼容 |
-| **Tools**（插件工具） | ✅ 插件列表 + 搜索（按插件名 / 工具名 / 工具说明）+ 详情**只读工具清单**（工具名 + 一句话说明） | ❌ 由插件自带（插件注册即出现） | ❌ 工具清单只读 | ✅ **插件级**「启用」开关（仅当前会话；整插件全开 / 全关，无单工具开关） | ❌ | ❌ |
+| **Tools**（插件工具） | ✅ 插件列表 + 搜索（按插件名 / 工具名 / 工具说明）+ 详情**只读工具清单**（手风琴：参数表 + 原始 JSON，按需懒加载） | ❌ 由插件自带（插件注册即出现） | ❌ 工具清单只读 | ✅ **插件级**「启用」开关：**能力面板 = 全局默认**（所有会话）+ **会话首屏 = 本会话覆盖**；整插件全开 / 全关，无单工具开关 | ❌ | ❌ |
 
 > 上表前两个是**条目域**（Skills / MCP，有配置文件与写入操作）；**Tools 是全局工具
 > 注册视图**：只收「插件直接注册、且不是 `mcp__` 前缀」的工具，没有项目 / 工作区
-> 维度、没有配置文件、也没有编辑 / 删除——一个插件就是一个开关单元。`mcp__*` 工具
-> **恒归 MCP 域**，两域互斥、不重复收录。面板另有第四个域 Tab **「Jev 模型」**：
-> 它不是条目管理，而是 TypeSafe Jev 的全局配置页（无计数、无搜索、无左导航），
-> 并驱动首屏 **「✦ 能力决策」**。详见下文「Tools（插件工具）」与「Jev 能力决策」。
+> 维度、没有条目编辑 / 删除——一个插件就是一个开关单元。`mcp__*` 工具**恒归 MCP
+> 域**，两域互斥、不重复收录。Tools 自己的开关分两层（能力面板 = **全局默认**、
+> 会话首屏 = **本会话覆盖**，见下文）。面板另有第四个域 Tab **「Jev 模型」**：它
+> 不是条目管理，而是 TypeSafe Jev 的全局配置页（无计数、无搜索、无左导航），并
+> 驱动首屏 **「✦ 能力决策」**。详见下文「Tools（插件工具）」与「Jev 能力决策」。
 >
 > 表中「编辑 / 删除 / 导入」等写操作只作用于本插件**受管磁盘目录**下的技能；由宿主
 > registry 注入的技能（DSH 内置 / 插件运行时 / Agent 预设渠道）**内容只读**，只能
@@ -51,14 +52,15 @@ Skills / MCP / Tools（Tools 以插件为单元），一次请求批量打 0–1
 ## 配置文件位置
 
 本插件的配置文件**写入优先用 `.agents` 目录**，读取兼容旧位置与跨工具生态
-（例外：Jev 能力决策配置、项目级「默认关闭」声明统一存放在 dsh home 的插件
-目录，见下表）：
+（例外：Jev 能力决策配置、项目级「默认关闭」声明、会话级开关与 Tools 全局默认
+统一存放在 dsh home 的插件目录，见下表）：
 
 | 配置 | 写入目标 | 读取兼容（旧位置） |
 |---|---|---|
 | 项目级「默认关闭」声明（MCP 面板的「默认」开关 + 注入技能的「本项目启用」开关） | `<dshHome>/dsh-capability-settings/capability-overrides.json`（一个文件按**项目根**分 key：`projects.<项目根>.mcp` / `.skills`） | 旧项目内 `.agents/capability-overrides.json`（兼容 `.dsh` → `.claude`）：只读兼容，首次写入时把内容并入统一存储并删除旧文件 |
 | 项目级「全局能力引用」声明（MCP 的「导入到本项目」） | `<项目根>/.agents/capability-imports.json` | — |
 | 会话级能力开关（Skills / MCP / Tools 三域，按 sessionId） | `<dshHome>/dsh-capability-settings/session-capabilities.json`（`version: 1`，记录内 `skills` / `mcp` / `tools` 三个域） | — |
+| Tools **全局默认**（能力面板 Tools 页开关；所有会话 / 新会话） | `<dshHome>/dsh-capability-settings/tools-global.json`（`{"version":1,"disabled":["<unit>",…]}`；目录 `700` / 文件 `600`、原子写 + 文件锁；缺省 = 全部启用） | — |
 | 全局 MCP 服务器 | `~/.agents/mcp.json` | `~/.dsh` → `~/.claude` |
 | Skills（项目/全局） | `.agents/skills`、`~/.agents/skills` | `.dsh/skills`（可写）、`.claude/skills`（只读展示） |
 | 项目 MCP 服务器 | `<项目根>/.mcp.json`（Claude Code 标准，位置不变） | — |
@@ -142,6 +144,8 @@ v2 把手写文字按钮全部收进详情，**列表每行右端只有一个开
   - 全局条目：开/关表达**本项目**是否禁用——关 = 生成屏蔽占位
     （shadow stub，只影响本项目），开 = 删除占位恢复；
   - 项目屏蔽占位行：拨到开 = 恢复同名全局技能；
+  - **未钉选项目（「跟随当前会话」）时也能开关**：写操作落在**当前会话的工作区**
+    （`currentWorkspaceCwd()`），tooltip 会注明作用域；只有完全没有工作区时才置灰；
   - **置灰不可点**：只读来源（`.claude`）、全局条目已被项目副本遮蔽
     （`项目副本生效中`）、无可用工作区；tooltip 写明原因。
 - **MCP 行 =「默认」**：开 = 新建对话默认启用，关 = 默认关闭（写项目级
@@ -292,12 +296,24 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 前缀必须以 `_` / `-` 结尾（`rwx_*` 不会被 `rw_` 误吃）。识别不到就归「来源未识别」，
 **不猜成宿主内置**。
 
-**开关 = 整插件，只作用于当前会话**
+**两层语义：能力面板 = 全局默认，会话首屏 = 本会话覆盖**
 
-- 一个插件 = 一个开关单元，**没有单工具开关**；关闭 = 在该 agent 作用域调用
-  `tools.restrict({ deny: 该插件当前全部可继承工具名 })`，开启 = 解除（disposer）。
+- **能力面板 Tools 页 = 全局默认**（所有会话、含新建会话）：写
+  `<dshHome>/dsh-capability-settings/tools-global.json`
+  （`{"version":1,"disabled":["<unit>",…]}`；目录 `700` / 文件 `600`、原子写 + 文件锁）。
+  改一次即**扇出到所有 live 会话**（宿主异步重算 restrict，不阻塞开关操作）；
+  新会话在创建时按全局默认应用。
+- **会话首屏 /「能力」Tab = 本会话覆盖**：写 `session-capabilities.json` 的
+  `tools` 域（键 `plugin:<unit>`；按会话落盘、重启 / resume 恢复）。首屏行 3 的
+  「全部开启 / 全部关闭」**只写本会话覆盖**、不动全局默认；底栏「恢复默认」清除
+  本会话覆盖 → **回落到全局默认**。
+- **生效值**：`effective = 会话覆盖 ?? 全局默认`。所以**全局关闭的插件，该会话仍可
+  在首屏单独开启**（写会话覆盖 `true`）；全局开启时也可以单独关掉本会话。
+- 一个插件 = 一个开关单元，**没有单工具开关**；`effective === false` 时在该 agent
+  作用域调用 `tools.restrict({ deny: 该插件当前全部可继承工具名 })`，
+  `effective === true` 时解除（disposer）。
 - 持久化只存单元 id（`plugin:<插件展示名>`），**不存工具名**：插件升级增减工具后
-  deny 名单自动跟随；键缺失 = 默认开启（Tools **没有项目级默认**，见下）。
+  deny 名单自动跟随；两个文件都缺该键 = 跟随全局默认（全局默认缺省 = 开启）。
 - 工具集会变（MCP 连上、插件懒加载）：监听 `tools/change` 后微任务合并重算，
   deny 名单与上一代等价时直接短路（`restrict` 自身也会触发 `tools/change`，
   短路是刷新不形成循环的关键）。
@@ -305,25 +321,32 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   `lockedReason`，开关从一开始就置灰；名单为空（工具尚未注册）→ 不调用 restrict、
   状态记 `skipped`；restrict 抛错 → 状态 `failed` + warning，**不阻断**其它开关
   和另两域。工具注册表读不到 / 抛错 → Tools 页空态 + 说明，Skills / MCP 不受影响。
+  `tools-global.json` 缺失 / 损坏 / 未知 version → 按"全部启用"降级并 warning；
+  已卸载插件残留的 unit id 读取时忽略（不删文件里的用户数据）。
 - **注册在 agent 自身层的插件工具不会出现**：`tools.restrict` 只能过滤"继承层"，
   自身层工具既枚举不到也关不掉，所以 Tools 里**不显示**（不是显示后置灰）——
   这是相对早期交互稿的规格修正，避免给出一个"永远点不动"的开关。
 
 **面板 Tools 页（两栏、无左导航）**
 
-中列 = 插件行（插件名 + `插件` / `未识别` 标签 + `N 个工具` + 「启用」开关，本会话生效）；
-右侧详情 = 标题（插件名 + 两枚标签）+ `复制插件名` + 开关与状态 + `来源判定`
-（如 `前缀 univer_ → dsh-univer-office（插件清单映射表）`）+ `注入方式：插件运行时
-注册的非 MCP 工具（不落盘）` + 工具数 + **工具清单（只读）**（逐行工具名 + 一句话
-说明；无逐工具开关、无参数表）+ 关闭影响（`关闭该插件后，本会话模型看不到它的全部
-N 个工具；能力决策（Jev）以插件整体计分…；不改项目默认`）。主面板的开关在能解析
-到当前会话时可点（写 `tools.setSessionEnabled`），解析不到时置灰并提示
-「请在对话首屏设置本会话开关」。
+中列 = 插件行（插件名 + `插件` / `未识别` 标签 + `N 个工具` + 「启用」开关：
+**能力面板的开关 = 全局默认**，不需要当前会话，也不显示任何具体会话状态）；
+右侧详情（**整页纵向可滚动**，工具多时不会撑破布局）= 标题（插件名 + 两枚标签）+
+`复制插件名` + 开关与状态（`默认已启用 / 默认已关闭 · 本会话可在对话首屏单独覆盖`）+
+`来源判定`（如 `前缀 univer_ → dsh-univer-office（插件清单映射表）`）+
+`注入方式：插件运行时注册的非 MCP 工具（不落盘）` + 工具数 + **工具清单**：
 
-**为什么没有项目级默认**：Tools 是全局工具注册、与项目 / 工作区无关，UX 明确
-"不区分项目 / 工作区"；第一批**不做** `capability-overrides.json` 的 Tools 默认
-（否则同一个插件在不同项目默认不同，和 header 文案、会话级语义冲突）。「恢复默认」
-因此 = 清除该会话的显式覆盖 = 回到全开。
+- 手风琴（一次展开一个）：每行 = 工具名 + `N 个参数 / 无参数`；展开显示该工具的
+  一句话说明、**参数表**（参数 / 类型 / 必填 / 说明；`enum` 显示可选值）与
+  **可折叠的原始 JSON**（`parameters` 原文，等宽、横向可滚、自身纵向限高）；
+  无逐工具开关；
+- **schema 按需懒加载**：`tools.list` 只回 `name` + 200 码点说明（不带
+  `parameters`，首屏请求保持轻量），只有打开详情、选中插件时才调
+  `tools.inspect {unit}` 拉完整定义并按 plugin 缓存；读取失败降级为「仅名称 +
+  说明」并提示参数不可用；
+- 交付字段：`tools.list` 每单元有 `defaultEnabled`（全局默认）与 `enabled`
+  （本会话生效值；`enabledInSession` 为等名 legacy 别名）；能力面板写
+  `tools.setGlobalEnabled`，会话首屏写 `tools.setSessionEnabled`，两者互不影响。
 
 ### 🔌 MCP：改配置即热挂载，不重启、不改 preset
 
@@ -374,6 +397,8 @@ N 个工具；能力决策（Jev）以插件整体计分…；不改项目默认
 - **来源用两枚标签表达**（与 Skill 的「插件 + 渠道名」同形）：有插件展示名 →
   `插件` 紫标签 + 插件名小标签（如 `dsh-to-figma`，超宽省略、悬停全名）；
   命名空间合成但映射表未覆盖 → 只给 `未识别` 琥珀标签；其余 → 只给 `外部注入`。
+  列表行的名称行**只放状态点 + `serverName`**，来源两枚标签放在下方 meta 行——
+  两枚标签不再把名称挤没（`figma` 这类合成行现在能直接看到名称）。
   详情新增「来源判定」（`前缀 mcp__figma__ → dsh-to-figma（插件清单映射表）` /
   `运行时注入来源：{source} → {channel}` / `来源未识别（不是宿主内置）`）与
   「注入方式」；组内排序 = 有插件名的按展示名升序、无插件名的排后面。真实例优先
@@ -413,17 +438,20 @@ N 个工具；能力决策（Jev）以插件整体计分…；不改项目默认
   项目卸载，所以按 session 在该 agent 作用域上 deny 掉
   `mcp__<serverName>__*`——全局配置不动、其他项目不受影响；宿主不提供
   `restrict` 时降级（记 warning + 状态标 `skipped`，工具对本会话仍可见）；
-- **Tools 没有项目级维度（本版有意不做）**：Tools 是全局工具注册，插件工具与
-  项目 / 工作区无关，因此**不写** `capability-overrides.json` 的 Tools 默认名单；
-  开关只作用于会话（首屏 / 会话 Tab），「恢复默认」= 清除该会话覆盖 = 回到全开。
-  这样避免"同一插件在不同项目默认不同"与 header 文案、会话语义冲突。
+- **Tools 没有项目级维度，但有「全局默认 + 会话覆盖」两层**：Tools 是全局工具
+  注册，插件工具与项目 / 工作区无关，因此**不写** `capability-overrides.json`；
+  能力面板 Tools 页写全局默认（`tools-global.json`，所有会话），会话首屏写本会话
+  覆盖（`session-capabilities.json` 的 `tools` 域）。「恢复默认」= 清除本会话
+  覆盖 → 回落到全局默认。这样既保留"同一插件在所有项目行为一致"，又允许单会话
+  偏离（全局关闭时该会话仍可单独开启）。
 
 ### 🎛️ 会话能力配置：首屏内联 + 顶部「能力」Tab
 
-会话能力（Skills / MCP / Tools）的查看与开关分两个入口，**开关全部只作用于
+会话能力（Skills / MCP / Tools）的查看与开关分两个入口，**这里的开关只作用于
 当前会话、按会话落盘**（`<dshHome>/dsh-capability-settings/session-capabilities.json`；
-宿主重启 / resume 后恢复），优先级
-`显式会话覆盖 > 项目默认 > 配置 disabled`（Tools 无项目默认，键缺失 = 默认开启）。
+宿主重启 / resume 后恢复；Tools 的全局默认在能力面板设置，不在这里），优先级
+`显式会话覆盖 > 项目默认 > 配置 disabled`；**Tools 的两层是「会话覆盖 > 全局默认」**
+（全局默认存 `tools-global.json`、所有会话共享，缺省全部启用）。
 输入框工具栏的快捷按钮与底部能力条已按产品决定移除，会话内只保留下面两个入口：
 
 - **首屏（hero）默认展开**：新会话首屏在输入框卡片正下方直接展示能力面板
@@ -439,8 +467,11 @@ N 个工具；能力决策（Jev）以插件整体计分…；不改项目默认
 - **行 3「本会话控制条」（v13 新增）**：`全部开启` / `全部关闭` + `已启用 n / m`
   （m = 三域可开关单元总数，Skills 条数 + MCP 行数 + Tools 插件单元数）+
   `仅当前会话 · 不改项目默认`；作用范围 = `Skills · MCP · Tools` **三域整体**
-  （不按模块分）。**无二次确认、无提醒条**：点一下直接生效；全开 / 全关时对应按钮
-  禁用（tooltip「已全部开启 / 已全部关闭」）；执行中按钮变
+  （不按模块分）。批量**只写本会话覆盖**：不改 `capability-overrides.json`，也
+  **不改 Tools 的全局默认**（`tools-global.json`）；Tools 的「全部开启」会把全局
+  默认关闭的插件也在**本会话**打开（会话覆盖优先）。**无二次确认、无提醒条**：
+  点一下直接生效；全开 / 全关时对应按钮禁用（tooltip「已全部开启 / 已全部关闭」）；
+  执行中按钮变
   `全部开启中… / 全部关闭中…` 并显示域级进度（`正在关闭 2 / 3 个域…`）；部分失败
   显示 `n 项失败 · 重试`，点重试**只重放失败所在域**。
 - **卡片来源标签完整显示**：注入技能卡片底部是「来源类别 + 渠道名」两个小标签，
@@ -460,20 +491,28 @@ N 个工具；能力决策（Jev）以插件整体计分…；不改项目默认
   使该 skill 从「模型目录 / `skill` 工具 / `/name` 用户口令」三条链路消失；
   恢复即解除 shadow。**只可关闭、不能强制开启文件级已禁用项**；会话没有
   live agent 时开关置灰。
-- **Tools（插件级）**：关闭 = 对该插件在本会话的全部可继承工具
-  `tools.restrict`（deny 名单每次重算，持久化只存插件单元 id）；共享实例不卸载，
-  插件升级增减工具自动跟随。`lockedReason` 的单元开关置灰；冷会话（无 live agent）
-  仍可落盘，agent 创建后重算 restrict 生效。「来源未识别」单元同样可开关、计入
-  分母，但**不进 Jev 候选**。
+- **Tools（插件级，两层）**：首屏开关写**本会话覆盖**（`session-capabilities.json`
+  的 `tools` 域），只影响当前会话；`effective = 会话覆盖 ?? 全局默认`，当
+  `effective === false` 时对该插件的全部可继承工具 `tools.restrict`（deny 名单
+  每次重算，持久化只存插件单元 id），共享实例不卸载，插件升级增减工具自动跟随。
+  全局默认关闭的插件**仍可在本会话单独开启**；`lockedReason` 的单元开关置灰；
+  冷会话（无 live agent）仍可落盘，agent 创建后按 effective 重算 restrict。
+  「来源未识别」单元同样可开关、计入分母，但**不进 Jev 候选**。
 - **批量语义（`session.setBulk`）**：宿主自己枚举三域目标、**幂等**（重放只写差异）、
   **同会话串行**、**部分失败不回滚**（失败项在 `failed[]` 里带
   `domain / target / kind / error`，已成功项保留；重试 = 重放同一 action）；
   冷会话时 Skills 项跳过（需要 live agent），MCP / Tools 仍落盘。
+  **批量只写会话覆盖、不写任何全局默认**（Tools 全局默认只能从能力面板改）；
+  `reset` 清除本会话覆盖，Tools 回落到全局默认。
 - RPC：`skills.sessionList`（磁盘列表 + `enabledInSession` /
   `canToggleInSession`）、`skills.setSessionEnabled`；`mcp.list` 带上
-  `sessionId` 后由宿主投影 `enabledInSession`；`tools.list`（插件单元 + 会话开关）
-  与 `tools.setSessionEnabled`（batch-first）；三域一键开 / 关 /
-  `恢复默认` 走 `session.setBulk`（`reset` = 只清显式会话覆盖，不动项目默认）。
+  `sessionId` 后由宿主投影 `enabledInSession`；`tools.list`（每单元
+  `defaultEnabled` 全局默认 + `enabled` 本会话生效；`enabledInSession` 为等名
+  legacy 别名）、`tools.setSessionEnabled`（会话覆盖，batch-first）、
+  `tools.setGlobalEnabled`（全局默认，写 `tools-global.json` + 扇出所有会话）、
+  `tools.inspect {unit}`（懒加载工具 schema / `parameters`）；三域一键开 / 关 /
+  `恢复默认` 走 `session.setBulk`（`reset` = 只清显式会话覆盖；Skills / MCP 回项目
+  默认，Tools 回全局默认）。
 - **持久化与清理**：会话开关按 sessionId 落盘，切换会话 / 刷新页面 / 宿主重启 /
   resume 后都保持；写入失败只记 warning（本次运行内仍生效）。会话被删除后，插件
   按「存在性校验 + 24 小时两阶段」清理其记录——宿主没有会话删除事件，关机时的
@@ -536,12 +575,14 @@ N 个工具；能力决策（Jev）以插件整体计分…；不改项目默认
   取自宿主 additive 字段 `origin` / `channel`）；旧宿主没有这些字段时按原样不显示。
   冷会话评分集合**不含** preset 技能（无 live agent 选不中 preset 层），会话开始后
   可重新评分。
-- **Tools 参与评分与应用（插件级）**：候选 = 已识别的插件单元（`dsh-univer-office` /
-  `dsh-remote` / `dsh-im` / `dsh-better-sidebar` / `dsh-popout-window` /
-  `dsh-diff-approval` 等），`name` = 插件展示名、描述 = `N 个工具 · 插件注入`；
-  请求只带**工具名 + 一句话说明**（每题最多 8 个工具、总 500 码点；**不带参数
-  schema**、不带工具逐个开关）。「来源未识别」单元不进候选。旧宿主 / 未注入
-  `tools` 服务时枚举跳过 Tools 段（warn 一次），Skills / MCP 照常评分。
+- **Tools 参与评分与应用（插件级，按本会话 effective）**：候选 = **本会话生效
+  （`enabled === true`）** 的已识别插件单元（`dsh-univer-office` / `dsh-remote` /
+  `dsh-im` / `dsh-better-sidebar` / `dsh-popout-window` / `dsh-diff-approval` 等），
+  `name` = 插件展示名、描述 = `N 个工具 · 插件注入`；请求只带**工具名 + 一句话说明**
+  （每题最多 8 个工具、总 500 码点；**不带参数 schema**、不带工具逐个开关）。
+  全局默认关闭 / 本会话已关的插件**不进候选**，因此 Jev 不能把它们重新打开
+  （只收窄不扩权）；「来源未识别」单元不进候选。旧宿主 / 未注入 `tools` 服务时
+  枚举跳过 Tools 段（warn 一次），Skills / MCP 照常评分。
 - 评分请求**一次**发给 `POST {Base URL}/v1/systemone`：每个能力一条 `noul`，一个
   0–1 分；**不分片、不按能力拆请求**。单次最多 300 个能力（超出直接报错不请求）；
   超上下文返回「输入内容超出模型上下文上限」，不自动截断或分批。
@@ -634,14 +675,22 @@ N 个工具；能力决策（Jev）以插件整体计分…；不改项目默认
   项目卸载，于是按 session 对该 agent 作用域 deny 掉该 server 的全局工具
   （名单按 `mcp__<serverName>__` 前缀精确取；宿主没有 `restrict`、名字尚未
   注册或调用抛错时降级为 warning + 状态标 `skipped`/`failed`，不影响挂载）。
-- **Tools 域的开关也是 `tools.restrict`，但按"插件"聚合**：宿主工具注册表只有
-  `name / description / parameters`、没有注入方字段（`tools.register` 不接受来源
-  参数），所以插件归属靠命名约定表推断（见「Tools（插件工具）」）。一条插件单元
-  被关闭时，把该插件当前全部可继承工具名放进同一条 `deny`——**与 MCP 的 restrict
-  是两条独立 restriction**，宿主侧按交集合并，各自持有 disposer、各自幂等短路；
-  不得合并成一条（否则任一方重算都要动对方名单，`tools/change` 易互相触发）。
-  `tools/change` 时会重算（restrict 只能按当前已注册名字屏蔽，首轮名单可能漏掉
-  后注册的工具）。
+- **Tools 的开关也是 `tools.restrict`，但按"插件"聚合、且是两层默认**：宿主工具
+  注册表只有 `name / description / parameters`、没有注入方字段（`tools.register`
+  不接受来源参数），所以插件归属靠命名约定表推断（见「Tools（插件工具）」）。
+  `effective = 会话覆盖 ?? 全局默认`：全局默认存 `tools-global.json`（能力面板写，
+  写成功后**微任务扇出**所有 live agent 重算，不阻塞写 RPC），会话覆盖存
+  `session-capabilities.json` 的 `tools` 域（会话首屏写）；新 agent 在
+  `agent/created` 时按 effective 应用。`effective === false` 时把该插件当前全部
+  可继承工具名放进同一条 `deny`——**与 MCP 的 restrict 是两条独立 restriction**，
+  宿主侧按交集合并，各自持有 disposer、各自幂等短路；不得合并成一条（否则任一方
+  重算都要动对方名单，`tools/change` 易互相触发）。`tools/change` 时会重算（restrict
+  只能按当前已注册名字屏蔽，首轮名单可能漏掉后注册的工具）。
+- **`tools.inspect` 按需拉 schema、`tools.list` 保持轻量**：`schemas()` 里的
+  `parameters` 不塞进 list（首屏每会话都会拉 list）；详情选中插件时才调
+  `tools.inspect {unit}`，复用与 list 同一份枚举/归属逻辑（不二次扫描、不漂移），
+  返回**完整 description** 与**原始 parameters**（不裁剪内容；整包 >1 MiB 只记
+  warning）。前端缓存按 plugin 一份，读取失败降级为「仅名称 + 说明」。
 - **三域批量走单一宿主端点 `session.setBulk`**：宿主自己枚举三域目标（技能 /
   MCP / 插件单元），一次请求内批量写；幂等、同会话串行、部分失败不回滚。
   MCP 的批量写会合并成**一次**重挂（`loader.setSessionEnabledMany`），Tools /
@@ -735,15 +784,18 @@ src/
                   registry 桥（宿主注入技能合并 / 详情 fallback / 资源边界 / 导出快照）
   mcp/            MCP 域：.mcp.json 读写、全局单例 + 项目级每会话挂载、探测（测试连接）、
                   运行时注入发现（fiber / loader 条目 / 工具命名空间合成）
-  tools/          Tools 域（插件级）：全局工具枚举与插件聚合、会话记录与 hydrate、
-                  tools.restrict 应用 / 重算（types / manager / restrict）
+  tools/          Tools 域（插件级）：全局工具枚举与插件聚合、两层开关（全局默认
+                  tools-global.json + 会话覆盖 session-capabilities.tools）、
+                  tools.restrict 应用 / 重算、tools.inspect 懒加载 schema
+                  （types / manager / global-state / restrict）
   overrides/      项目级「默认关闭」声明：统一存储 <dshHome>/dsh-capability-settings/capability-overrides.json
   imports/        项目级「全局能力引用」：.agents/capability-imports.json（MCP）
   jev/            Jev 能力决策：配置读写/校验（config-file）、密钥解析与 RPC（manager）、
                   rank（systemone 请求/容错解析/排序）、apply（会话开关事务 + 冷会话排队，
                   含 Tools 插件级单元）
   client/         React 面板（四域 Tab + 左导航 + 工作区下钻 + 详情 + Tools 两栏页）、
-                  目录树/阅读器、工具参数手风琴、Jev 模型配置页（jev-panel）、
+                  目录树/阅读器、工具参数手风琴（tool-schema：参数表 / 原始 JSON）、
+                  Jev 模型配置页（jev-panel）、
                   会话内能力配置（三 Tab + 行 3 控制条）+ 首屏「✦ 能力决策」调度器、
                   入口外壳、zip 工具、零依赖 Markdown、自含样式
 ```
@@ -757,6 +809,9 @@ src/
 - v13 第一批实现方案（唯一权威）：
   [docs/architecture/v13-implementation.md](docs/architecture/v13-implementation.md)
   （RPC 契约附录 A / 文件矩阵附录 B / 存储 / restrict / 批量 / 测试用例 §10）
+  > 注：实现后用户澄清了 **Tools 两层语义**（能力面板 = 全局默认、会话首屏 =
+  > 本会话覆盖），方案里的 **A3**（Tools 无项目级默认）与 **A5**（主面板只读 /
+  > 仅会话级）**已被覆盖**；行为以本文与 CHANGELOG 为准。
 - v13 取证（宿主 0.2.1-rc.3 实读）：
   [docs/research/capability-v13-evidence.md](docs/research/capability-v13-evidence.md)
 - 注入技能来源与启停契约：[docs/architecture/skill-sources.md](docs/architecture/skill-sources.md)

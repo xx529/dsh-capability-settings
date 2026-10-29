@@ -429,17 +429,20 @@ v12 是**提案页 + 补丁并入**，不新建基线页。执行链（脚本都
 
 **页面**：`Capability Panel · 全局开关与派生 v13`（page id `106:2`，新建页，不改 v8/v11/v12 既有页面）。
 
+> **Tools 两层语义（v1.11）**：能力面板 Tools = **全局默认**（开关旁 `默认`，tooltip 说明「关闭后所有会话默认不可用；单会话仍可在对话首屏单独开启」，**无「本会话」字样**）；
+> 会话首屏 / 会话「能力」Tab Tools = **本会话覆盖**（全局关时该会话仍可单独开启；rail 批量只写本会话；「恢复默认」清除会话覆盖回全局默认）。无 workspace / 项目维度。
+
 > ⚠️ **R2 派生继承为设计提案、本版零渲染**：帧 01–05 的「派生 agent 整体继承三域 / 继承|不继承」只作后续设计参照；
 > 实现 UI 不出现该控件，验收按「R2 零渲染」执行，不按帧反推为缺陷。
 
 | 帧 | frame id | 预览 | 内容 |
 |---|---|---|---|
-| 01 · 首屏 hero · 本会话能力（Skills） | `106:5` | `preview/v13-01-hero-skills.png` | 三域 Tab（`Skills 8/15` / `MCP 5/9` / `Tools 3/6`）+ 行 3 控制条（全部开启/全部关闭、「已启用 16/30」、`派生 agent 整体继承三域` + 派生继承 继承/不继承，**无分型策略**；派生控件 ⚠️R2 提案未实现）+ Skills 卡片 |
+| 01 · 首屏 hero · 本会话能力（Skills） | `106:5` | `preview/v13-01-hero-skills.png` | 三域 Tab（`Skills 8/15` / `MCP 5/9` / `Tools 3/6`）+ 行 3 控制条（全部开启/全部关闭、「已启用 16/30」、`派生 agent 整体继承三域` + 派生继承 继承/不继承，**无分型策略**；派生控件 ⚠️R2 提案未实现）+ Skills 卡片；帧注含「会话覆盖 / rail 只改本会话 / 恢复默认回全局」 |
 | 02 · 首屏 hero · MCP（插件来源） | `106:229` | `preview/v13-02-hero-mcp.png` | `figma`（`插件`+`dsh-to-figma` 两枚标签，17 工具，命名空间合成行）/ `AnySearch` / `context7` / `tavily`（`全局`，tavily 关闭）；派生控件 ⚠️R2 提案未实现 |
-| 03 · 首屏 hero · Tools（插件级） | `106:453` | `preview/v13-03-hero-tools.png` | **6 张已知插件卡片（4 + 2 两行，仅非 MCP 插件工具）**：`dsh-univer-office 13` / `dsh-remote 19` / `dsh-im 8`（开）、`dsh-better-sidebar 1` / `dsh-popout-window 1` / `dsh-diff-approval 1`（关）；卡片 = 插件名 + `13 个工具 · 插件注入` + `插件` 标签 + 整插件开关；派生控件 ⚠️R2 提案未实现 |
+| 03 · 首屏 hero · Tools（插件级） | `106:453` | `preview/v13-03-hero-tools.png` | **6 张已知插件卡片（4 + 2 两行，仅非 MCP 插件工具）**：`dsh-univer-office 13` / `dsh-remote 19` / `dsh-im 8`（开）、`dsh-better-sidebar 1` / `dsh-popout-window 1` / `dsh-diff-approval 1`（关）；卡片 = 插件名 + `13 个工具 · 插件注入` + `插件` 标签 + 整插件开关；**会话覆盖语义**（帧注：全局关时本会话可单开 / rail 只改本会话 / 恢复默认回全局）；派生控件 ⚠️R2 提案未实现 |
 | 04 · 首屏 hero · 全部关闭后状态 | `106:677` | `preview/v13-04-hero-closed.png` | `0/15` `0/9` `0/6`、控制条 `已启用 0/30`（全部关闭禁用 / 全部开启可用）、三域卡片全关、底栏 `0 / 30`；**无二次确认、无提醒条 / 快捷按钮**；派生控件 ⚠️R2 提案未实现 |
 | 05 · 会话「能力」Tab 整页（宽屏） | `106:901` | `preview/v13-05-session-tab.png` | 1080 宽：三域 Tab + 同一控制条（16/30）+ **固定 4 列**卡片（250 宽 × 两行）；帧注含「1080 固定 4 列 + R2 零渲染」约束 |
-| 06 · 能力面板 · Tools（全局） | `106:1085` | `preview/v13-06-panel-tools.png` | 四 Tab（`Skills` / `MCP` / `Tools` / `Jev 模型`，Tools 激活）+ **两栏**：6 个已知插件行（插件名 / `插件` 标签 / 工具数 / 整插件开关）+ 右侧详情 `dsh-univer-office`（`univer_` 前缀、13 工具只读清单 / 关闭影响）；**无左导航** |
+| 06 · 能力面板 · Tools（全局） | `106:1085` | `preview/v13-06-panel-tools.png` | 四 Tab（`Skills` / `MCP` / `Tools` / `Jev 模型`，Tools 激活）+ **两栏**：6 个已知插件行（插件名 / `插件` 标签 / 工具数 / `默认` + 开关）+ 右侧详情（`dsh-univer-office`，`univer_` 前缀；**整块详情可滚动**；工具清单 = **手风琴**：名称 + N 参数 → 说明 + 参数表 + 可折叠原始 JSON，schema 懒加载）；**无左导航、无「本会话」、无琥珀关闭影响条、无「无参数表」** |
 | 07 · 能力面板 · Jev 配置 | `106:1485` | `preview/v13-07-jev-config.png` | 删 callout、副标题两行按**实现口径**（发送输入框草稿 + 能力名称/描述；草稿仅用于评分、不落盘）、Base URL 起上移；保留删密钥路径行 + API Key ⓘ；四 Tab（Jev 高亮）；卡片 672 为 740 宽示意值（1184 宽实测 1077，不校验固定高度） |
 | 08 · 能力决策 · 结果（含 Tools） | `113:7053` | `preview/v13-08-decision-results.png` | 阈值 0.50 + **4 行完整 + 第 5 行底部渐隐 + 滚动提示**（6 行仅展开示意；真实 900px 窗口约 3 行可见）+ `已选 4 / 30` + Tools 插件行（`dsh-univer-office` 13 工具选中 / `dsh-remote` 19 工具未选中）+ 底部 Tools 说明 |
 
@@ -456,7 +459,9 @@ v12 是**提案页 + 补丁并入**，不新建基线页。执行链（脚本都
 - **命名统一**：`Skills` / `MCP` / `Tools`（旧 `MCP 服务器` / `插件工具` / `技能` 不再出现）；主面板四 Tab 含 `Jev 模型`，会话面板三 Tab。
 - **计数 = 可开关单元**：Skills 8/15 + MCP 5/9 + Tools 3/6 ⇒ `已启用 16 / 30`；帧 04 全关 `0 / 30`。
   Tools Tab 分母是**插件数**（6），卡片描述显示插件内工具数；计数为示例口径，以运行时枚举为准。
-- **Tools 插件级开关**：hero 6 张已知插件卡片（4 + 2 两行；标题 / 工具数描述 / `插件` 标签 / 整插件开关），关闭插件 = 该插件全部工具本会话不可见；空态文案统一为 `尚未发现 Tools` / `无法列出 Tools`；
+- **Tools 两层语义**：能力面板 = **全局默认**（`默认` 开关；`tools-global.json`；`tools.list` 轻量字段——插件名/来源/工具数/globalDefault/sessionOverride/effective/restrictable，不返回 schema；`tools.setGlobalEnabled` 写全局；详情 schema 由 `tools.inspect` 懒加载）；会话首屏 / 能力 Tab = **本会话覆盖**（全局关可单开；rail 只写会话；恢复默认回全局）。空态文案 `尚未发现 Tools` / `无法列出 Tools`。
+- **5 项 UI 修复（v1.11）**：① Tools 详情整块一根滚动条；② 删除「关闭该插件后…」琥珀条与「无参数表」文案；③ 工具清单手风琴（说明 + 参数表 + 可折叠原始 JSON）；④ MCP 外部注入行名称第一行、两枚标签在 meta 行；⑤ 全局 Skills 跟随会话时允许会话级开关。
+- **Tools 插件级开关**：hero 6 张已知插件卡片（4 + 2 两行；标题 / 工具数描述 / `插件` 标签 / 整插件开关），关闭插件 = 该插件全部工具在**本会话**不可见；
   面板两栏插件列表 + 插件详情（只读工具清单），**不提供单工具开关、不做参数表**。
 - **无二次确认、无提醒条**：全部关闭 / 全部开启一步生效；全关态只体现控件与卡片状态，恢复入口是控制条「全部开启」。
 - **派生继承为布尔开关（⚠️设计提案，本版零渲染）**：只有一个 `继承 | 不继承` 分段（无分型链接 / 弹层 / 第三态），subagent 与 teammate 共用，整体作用于 Skills · MCP · Tools；首屏弱提示 `派生 agent 整体继承三域`，只影响之后派生。实现验收不要求该控件。
@@ -473,12 +478,12 @@ v12 是**提案页 + 补丁并入**，不新建基线页。执行链（脚本都
 
 | 文件 | nodes | bytes |
 |---|---|---|
-| `scenes/v13-01-hero-skills.scene.json` | 194 | 57899 |
+| `scenes/v13-01-hero-skills.scene.json` | 195 | 58485 |
 | `scenes/v13-02-hero-mcp.scene.json` | 157 | 46390 |
-| `scenes/v13-03-hero-tools.scene.json` | 171 | 50496 |
+| `scenes/v13-03-hero-tools.scene.json` | 172 | 51049 |
 | `scenes/v13-04-hero-closed.scene.json` | 194 | 56566 |
 | `scenes/v13-05-session-tab.scene.json` | 170 | 53154 |
-| `scenes/v13-06-panel-tools.scene.json` | 150 | 48976 |
+| `scenes/v13-06-panel-tools.scene.json` | 181 | 60508 |
 | `scenes/v13-07-jev-config.scene.json` | 333 | 102815 |
 | `scenes/v13-08-decision-results.scene.json` | 166 | 48955 |
 

@@ -43,6 +43,7 @@ import { createSessionState } from "./session-state.js";
 import { createSessionStateReconciler } from "./session-state-reconcile.js";
 import { createToolsManager } from "./tools/manager.js";
 import type { ToolsManager } from "./tools/manager.js";
+import { createToolsGlobalStore } from "./tools/global-state.js";
 import { createSessionBulk } from "./session-bulk.js";
 import type { SessionBulk } from "./session-bulk.js";
 import { findProjectRoot } from "./shared/project-root.js";
@@ -137,7 +138,10 @@ export function apply(ctx: any, config: Config = {}) {
   const sessionState = createSessionState({ dshHome: config.dshHome, logger: ctx.logger });
   // Tools 域（v13）：枚举全局工具注册表 → 按插件聚合成开关单元 → 按会话
   // restrict 该插件全部可继承工具。与会话存储共用同一实例（`tools` 域）。
-  const tools = createToolsManager(ctx, { state: sessionState, logger: ctx.logger });
+  // Tools 两层语义：全局默认（`tools-global.json`，能力面板开关） + 会话覆盖
+  // （`session-capabilities.json` 的 `tools` 域，会话首屏开关）。
+  const toolsGlobal = createToolsGlobalStore({ dshHome: config.dshHome, logger: ctx.logger });
+  const tools = createToolsManager(ctx, { state: sessionState, global: toolsGlobal, logger: ctx.logger });
   // R1 批量端点：延迟构造（依赖最终 service），同 session 串行由模块内部保证。
   const sessionBulkRef: { current?: SessionBulk } = {};
   // 项目级「全局能力引用」存储：MCP 管理器与 MCP loader 共用同一实例
@@ -319,6 +323,7 @@ export function apply(ctx: any, config: Config = {}) {
     () => skillsRegistry.dispose(),
     () => skillSessions.dispose(),
     () => tools.dispose(),
+    () => toolsGlobal.dispose(),
     () => jev.dispose(),
     () => reconciler.dispose(),
     () => sessionState.dispose(),
@@ -366,7 +371,14 @@ export { createMcpLoader } from "./mcp/loader.js";
 export { createMcpManager } from "./mcp/manager.js";
 export { scanInjectedMcpInstances, scanInjectedMcpEntries, scanInjectedMcpFibers, scanInjectedMcpNamespaces } from "./mcp/runtime.js";
 export type { InjectedMcpInstance } from "./mcp/runtime.js";
-export { createToolsManager, applyForAgent, TOOL_DESCRIPTION_LIMIT, LOCKED_RESTRICT_UNAVAILABLE } from "./tools/manager.js";
+export {
+  createToolsManager,
+  applyForAgent,
+  effectiveEnabled,
+  TOOL_DESCRIPTION_LIMIT,
+  TOOL_INSPECT_WARN_BYTES,
+  LOCKED_RESTRICT_UNAVAILABLE,
+} from "./tools/manager.js";
 export type { ToolsManager, ToolsManagerDeps, ToolsLogger, ApplyForAgentResult } from "./tools/manager.js";
 export { computeDenyNames, applyRestrict, sameDenyNames, TOOLS_RESTRICT_UNAVAILABLE, TOOLS_RESTRICT_NO_TOOLS } from "./tools/restrict.js";
 export type { RestrictOutcome, ToolsRestrictionState } from "./tools/restrict.js";
@@ -378,12 +390,20 @@ export {
   unitKeyOf,
   unitOfKey,
 } from "./tools/types.js";
+export { createToolsGlobalStore, toolsGlobalDir, toolsGlobalFile, TOOLS_GLOBAL_FILE_NAME, TOOLS_GLOBAL_VERSION } from "./tools/global-state.js";
+export type { ToolsGlobalStore, ToolsGlobalStoreDeps, ToolsGlobalLogger, ToolsGlobalSetResult } from "./tools/global-state.js";
 export type {
   HostToolBrief,
   ToolsUnitView,
   ToolsListView,
   ToolsSetSessionInput,
   ToolsSetSessionResult,
+  ToolsInspectedTool,
+  ToolsInspectInput,
+  ToolsInspectView,
+  ToolsInspectResult,
+  ToolsSetGlobalInput,
+  ToolsSetGlobalResult,
 } from "./tools/types.js";
 export { createSessionBulk } from "./session-bulk.js";
 export type {
