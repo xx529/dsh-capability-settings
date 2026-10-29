@@ -441,9 +441,9 @@ function skillTags(item: ClientSkillSummary, hasGlobal: boolean): Array<{ key: s
   } else if (!isProject && item.projectShadow === "stub") {
     tags.push({
       key: "disabled-in-project",
-      label: "本项目已禁用",
+      label: "本项目默认关闭",
       className: "skp-tag skp-tag-warn",
-      title: "本项目内已放置屏蔽占位，此 Skills 在本项目不可用（不影响其它项目）",
+      title: "本项目内已禁用同名全局 Skills；新会话默认不启用；可在会话中临时开启（不影响其它项目）",
     });
   } else if (!isProject && item.projectShadow === "skill") {
     tags.push({
@@ -939,7 +939,7 @@ function SkillsView({
     const dotText = isInjected
       ? checked
         ? "已启用"
-        : "本项目已禁用"
+        : "本项目默认关闭"
       : item.shadowStub === true
         ? "屏蔽占位"
         : item.readOnly
@@ -1057,6 +1057,9 @@ function SkillsView({
                 </>
               )}
             </div>
+            {scope === "global" && (
+              <div className="skp-pane-note">启停仅作用于当前项目 · 其它项目不受影响</div>
+            )}
             {scope === "global" ? (
               renderGlobalList()
             ) : pinned === undefined ? (
@@ -1353,8 +1356,8 @@ function SkillDetail({
           </span>
         )}
         {isGlobal && summary.projectShadow === "stub" && (
-          <span className="skp-badge" title="本项目内已放置屏蔽占位，此 Skills 在本项目不可用（不影响其它项目）">
-            本项目已禁用
+          <span className="skp-badge" title="本项目内已禁用同名全局 Skills；新会话默认不启用；可在会话中临时开启（不影响其它项目）">
+            本项目默认关闭
           </span>
         )}
         {isGlobal && summary.projectShadow === "skill" && (

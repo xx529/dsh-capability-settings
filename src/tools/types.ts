@@ -86,7 +86,16 @@ export interface ToolsUnitView {
    * 文档口径以 `enabled` 为准。
    */
   enabledInSession: boolean;
-  /** 是否有显式会话覆盖（「恢复默认」是否可点；= 会话层是否被改过）。 */
+  /**
+   * 本会话是否有**显式覆盖**（additive，供 UI 解释「全局关但本会话仍开」）。
+   *
+   * - `true` = `session-capabilities.json` 的 `tools` 域里存在该单元的键
+   *   （`plugin:<unit>`，值为 `true` 或 `false` 都算显式覆盖）；
+   * - `false` = 没有覆盖，`enabled` 完全由全局默认决定；
+   * - 未传 `sessionId`（主面板）时恒为 `false`（没有"本会话"可谈）。
+   *
+   * 「恢复默认」仅在 `explicit === true` 时可点（清除覆盖 → 回落到全局默认）。
+   */
   explicit: boolean;
   /**
    * 不可开关原因；正常缺省。第一批唯一可能来源 = 当前 agent 作用域缺少

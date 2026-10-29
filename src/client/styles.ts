@@ -575,6 +575,8 @@ button.skp-tag:focus-visible{outline:none;box-shadow:0 0 0 2px var(--skp-accent-
 .skp-pane-back:focus-visible{outline:none;box-shadow:0 0 0 2px var(--skp-border-strong);}
 .skp-pane-title{flex:none;display:flex;align-items:center;gap:8px;height:36px;padding:0 6px;min-width:0;font-size:13px;font-weight:600;color:var(--skp-text);overflow:hidden;white-space:nowrap;}
 .skp-pane-title-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* v13 修复：Skills「全局」作用域的启停范围说明（避免误读成全局关闭）。 */
+.skp-pane-note{flex:none;padding:0 6px 6px;font-size:11px;line-height:15px;color:var(--skp-text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .skp-workspace-row{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;min-width:0;padding:8px 10px;border:0;border-radius:8px;background:none;font:inherit;text-align:left;cursor:pointer;}
 .skp-workspace-row:hover{background:var(--skp-hover);}
 .skp-workspace-row:focus-visible{outline:none;box-shadow:inset 0 0 0 1px var(--skp-accent);}
@@ -752,6 +754,8 @@ button.skp-dock-rail-fail{cursor:pointer;text-decoration:underline;}
 button.skp-dock-rail-fail:hover{filter:brightness(.9);}
 /* Tools 域：来源未识别（琥珀）/ 行内工具数（灰）。 */
 .skp-dock-tag-unattributed{color:var(--dsw-alias-state-warn-primary,#c26a0a);background:color-mix(in srgb,var(--dsw-alias-state-warn-primary,#c26a0a) 14%,transparent);}
+/* v13 修复：首屏 Tools 卡片「本会话覆盖」小标签（蓝底，区别于插件紫 / 未识别琥珀）。 */
+.skp-dock-tag-override{color:var(--dsw-alias-state-business-primary,#4176e6);background:color-mix(in srgb,var(--dsw-alias-state-business-primary,#4176e6) 14%,transparent);}
 .skp-dock-tag-count{flex:none;padding:0 5px;border-radius:4px;font-size:9.5px;line-height:16px;color:var(--dsw-alias-label-tertiary,#8b95a1);background:color-mix(in srgb,var(--dsw-alias-label-primary,#1b1f26) 8%,transparent);}
 .skp-dock-chip-tool .skp-dock-chip-dot{background:var(--dsw-alias-state-warn-primary,#c26a0a);}
 /* 决策结果行：Tools 行（插件）标签 / N 个工具 / 底部说明。 */

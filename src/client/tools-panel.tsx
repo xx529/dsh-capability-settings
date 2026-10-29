@@ -427,34 +427,7 @@ export function ToolsView({
                   </button>
                 </div>
 
-                {/* 开关 = 全局默认（所有会话）；本会话可在首屏单独覆盖。 */}
-                <div className="skp-detail-actions">
-                  <span
-                    className="skp-row-toggle"
-                    style={{ marginLeft: 0 }}
-                    title={
-                      defaultEnabledOf(selected)
-                        ? "关闭：关闭后所有会话默认不可用；单个会话仍可在对话首屏单独开启"
-                        : "开启：所有会话默认可用（单个会话可在对话首屏单独关闭）"
-                    }
-                  >
-                    <span className="skp-row-default-label">默认</span>
-                    <span className="skp-switch">
-                      <input
-                        type="checkbox"
-                        role="switch"
-                        aria-label={`默认启用 ${selected.name}`}
-                        checked={defaultEnabledOf(selected)}
-                        disabled={selected.lockedReason !== undefined || busyUnit === selected.unit}
-                        onChange={(event) => void toggleDefault(selected, event.target.checked)}
-                      />
-                      <span className="skp-switch-track" />
-                    </span>
-                  </span>
-                  <span className="skp-note">
-                    {defaultEnabledOf(selected) ? "默认已启用" : "默认已关闭"} · 本会话可在对话首屏单独覆盖
-                  </span>
-                </div>
+                {/* 开关只在左侧列表行（详情不再重复操作行，也不出现「本会话」）。 */}
 
                 {/* 来源判定 / 注入方式（方案 §9.4 文案）。 */}
                 <div className="skp-detail-meta">

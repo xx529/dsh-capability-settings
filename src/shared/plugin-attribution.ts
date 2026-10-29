@@ -45,6 +45,10 @@ export const TOOL_RULES: readonly ToolRule[] = [
   // 基础工具名就是 `univer`（不带 `_`），不会被 `univer_` 前缀命中 ⇒ 精确规则兜底。
   { match: "exact", pattern: "univer", display: "dsh-univer-office", packageName: "dsh-univer-office" },
   { match: "prefix", pattern: "univer_", display: "dsh-univer-office", packageName: "dsh-univer-office" },
+  // dsh-to-figma 0.2.3 起直接注册 `figma_*` 工具（不再走 `mcp__figma__*` 命名空间）；
+  // 基础名 `figma` 也保留精确规则（与 univer 同理，前缀 `_` 边界命不中）。
+  { match: "exact", pattern: "figma", display: "dsh-to-figma", packageName: "dsh-to-figma" },
+  { match: "prefix", pattern: "figma_", display: "dsh-to-figma", packageName: "dsh-to-figma" },
   { match: "prefix", pattern: "rw_", display: "dsh-remote", packageName: "dsh-remote" },
   { match: "prefix", pattern: "dsh_im_", display: "dsh-im", packageName: "@xmanrui/dsh-im" },
   { match: "exact", pattern: "sidebar_open", display: "dsh-better-sidebar", packageName: "dsh-better-sidebar" },
@@ -55,6 +59,8 @@ export const TOOL_RULES: readonly ToolRule[] = [
     display: "dsh-diff-approval",
     packageName: "dsh-diff-approval",
   },
+  // 真机实际工具名是下划线形式（`diff_approval_annotate`），并非插件包名前缀。
+  { match: "exact", pattern: "diff_approval_annotate", display: "dsh-diff-approval", packageName: "dsh-diff-approval" },
   // 防御性前缀：未来该插件新增工具时自动归组（分隔符边界，不会吃掉 annotate 的精确规则）。
   { match: "prefix", pattern: "dsh-diff-approval-", display: "dsh-diff-approval", packageName: "dsh-diff-approval" },
 ];
@@ -183,6 +189,11 @@ const HOST_BUILTIN_EXACT: ReadonlySet<string> = new Set([
   "load_workspace_dependencies",
   "working_directory",
   "ask_user_question",
+  // 工作区 / MCP 资源（宿主基础 bundle 的内建工具，不进 Tools 域）
+  "create_worktree",
+  "list_mcp_resources",
+  "list_mcp_resource_templates",
+  "read_mcp_resource",
   // cordis / 工具检查
   "cordis_inspect_list",
   "cordis_inspect_query",

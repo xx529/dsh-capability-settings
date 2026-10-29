@@ -89,6 +89,13 @@ export interface ToolRow {
     disabled: boolean;
     /** 开关单元 id（`__unattributed__` = 来源未识别）。 */
     unit: string;
+    /**
+     * true = 本会话存在**显式覆盖**（`tools.list` additive 字段 `explicit`；
+     * 旧宿主缺省按 false）。卡片据此显示 `本会话覆盖` 小标签。
+     */
+    explicit: boolean;
+    /** 全局默认（覆盖标签的 title 用：`全局默认开启/关闭；本会话单独设置`）。 */
+    defaultEnabled: boolean;
     /** 不可开关原因（正常缺省）。 */
     lockedReason?: string;
 }

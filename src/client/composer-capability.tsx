@@ -148,6 +148,13 @@ export interface ToolRow {
   disabled: boolean;
   /** 开关单元 id（`__unattributed__` = 来源未识别）。 */
   unit: string;
+  /**
+   * true = 本会话存在**显式覆盖**（`tools.list` additive 字段 `explicit`；
+   * 旧宿主缺省按 false）。卡片据此显示 `本会话覆盖` 小标签。
+   */
+  explicit: boolean;
+  /** 全局默认（覆盖标签的 title 用：`全局默认开启/关闭；本会话单独设置`）。 */
+  defaultEnabled: boolean;
   /** 不可开关原因（正常缺省）。 */
   lockedReason?: string;
 }
@@ -1567,6 +1574,7 @@ export function buildToolRows(snapshot: CapabilitySnapshot, pending: Record<stri
     const unattributed = unit.kind === "unattributed";
     const locked = unit.lockedReason !== undefined;
     const toolCount = unit.toolCount;
+    const defaultEnabled = unit.defaultEnabled ?? unit.enabledInSession ?? true;
     return {
       id,
       kind: "tool" as const,
@@ -1580,6 +1588,8 @@ export function buildToolRows(snapshot: CapabilitySnapshot, pending: Record<stri
       enabled: pending[id] ?? unit.enabled ?? unit.enabledInSession ?? unit.defaultEnabled ?? true,
       disabled: locked,
       unit: unit.unit,
+      explicit: unit.explicit === true,
+      defaultEnabled,
       ...(locked ? { lockedReason: unit.lockedReason } : {}),
     };
   });
@@ -1680,6 +1690,14 @@ export function CapabilityCard({ row, busy, onToggle }: { row: Row; busy: boolea
       <p className="skp-dock-card-desc">{desc}</p>
       <div className="skp-dock-card-foot">
         <Tag label={row.tag} tone={row.tone} />
+        {row.kind === "tool" && row.explicit && (
+          <span
+            className="skp-dock-tag skp-dock-tag-override"
+            title={`全局默认${row.defaultEnabled ? "开启" : "关闭"}；本会话单独设置`}
+          >
+            本会话覆盖
+          </span>
+        )}
         {row.kind === "skill" && row.channel !== undefined && (
           <span className="skp-dock-tag-channel" title={`${row.channel} · 注入方 / 渠道名（内容只读，开关只作用于当前会话）`}>
             {row.channel}
