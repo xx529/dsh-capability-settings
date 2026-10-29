@@ -142,7 +142,7 @@ v2 把手写文字按钮全部收进详情，**列表每行右端只有一个开
   - 项目普通条目：开 = 模型与用户均可用；关 = 写入
     `user-invocable: false` + `disable-model-invocation: true`（一键禁用）；
   - 全局条目：开/关表达**本项目**是否禁用——关 = 生成屏蔽占位
-    （shadow stub，只影响本项目），开 = 删除占位恢复；
+    （shadow stub，只影响本项目；行标签显示 `本项目默认关闭`），开 = 删除占位恢复；
   - 项目屏蔽占位行：拨到开 = 恢复同名全局技能；
   - **未钉选项目（「跟随当前会话」）时也能开关**：写操作落在**当前会话的工作区**
     （`currentWorkspaceCwd()`），tooltip 会注明作用域；只有完全没有工作区时才置灰；
@@ -195,8 +195,20 @@ v2 把手写文字按钮全部收进详情，**列表每行右端只有一个开
 （全局 → 项目时若还没选工作区，会尝试自动进入当前会话工作区）：
 
 - 项目有同名副本 → 项目行 `覆盖全局`，全局行 `项目副本生效中`；
-- 全局被本项目禁用 → 全局行 `本项目已禁用`，项目组出现 `屏蔽占位` 行；
-- 全局行一律没有圆点（全局技能对所有项目可见），状态由标签与开关表达。
+- 全局被本项目禁用 → 全局行 `本项目默认关闭`，项目组出现 `屏蔽占位` 行；
+- 全局行一律没有圆点（全局技能对所有项目可见），状态由标签与开关表达；
+- 「全局」作用域列表上方常驻说明 `启停仅作用于当前项目 · 其它项目不受影响`——
+  这里的开关是**本项目默认**，不是"全局关闭所有项目"（见下文「三域默认层级对照」）。
+
+**会话投影：本项目默认关闭 → 会话首屏默认关**
+
+- 全局 Skills 被本项目**屏蔽占位**（shadow stub）关闭时，会话视图投影
+  `enabledInSession=false`：**新会话首屏默认不启用**，与能力面板的
+  「本项目默认关闭」一致；
+- 会话内仍可**显式开启**（显式会话覆盖优先于项目默认，`true` / `false` /
+  清除覆盖三态；清除后回到"本项目默认关"）；
+- 被**项目副本**遮蔽的全局重复行会从**会话视图**过滤（同名只保留项目副本那行），
+  首屏 / Jev 都不会出现同名两行，也不会把被遮蔽的全局行误报成"启用"。
 
 项目级控制全部落实为项目区里的**真实文件**（副本或屏蔽占位），启停只写
 skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布原生生效
@@ -270,8 +282,9 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 
 插件除了挂 MCP server，还可以**直接向宿主工具注册表注册工具**（本机实例：
 `dsh-univer-office` 的 `univer_*`、`dsh-remote` 的 `rw_*`、`@xmanrui/dsh-im` 的
-`dsh_im_*`、`dsh-better-sidebar` 的 `sidebar_open`、`dsh-popout-window` 的
-`open_in_popout`、`dsh-diff-approval` 的 `dsh-diff-approval-annotate` 等）。
+`dsh_im_*`、`dsh-to-figma` 的 `figma_*`（0.2.3 起直接注册，不再走 `mcp__figma__*`）、
+`dsh-better-sidebar` 的 `sidebar_open`、`dsh-popout-window` 的 `open_in_popout`、
+`dsh-diff-approval` 的 `diff_approval_annotate` 等）。
 这些工具此前只能"全部可见、无法按会话收起"；v13 把它们收进**第三个能力域 Tools**。
 
 **域边界（两域互斥，按序判定）**
@@ -280,8 +293,9 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
    也归 MCP，不进入 Tools）；
 2. 命中宿主内建清单 → **不入任何域**（`bash` / `read` / `write` / `edit` / `glob` /
    `grep` / `web_search` / `skill` / `todo_write` / `present` / `subagent` /
-   `workflow` / `ralph` / Agent Teams 工具组等；宿主不提供"危险等级"标注，这份
-   清单由本插件自维护，**升级宿主版本后需复核**）；
+   `workflow` / `ralph` / `create_worktree` / `list_mcp_resources` /
+   `list_mcp_resource_templates` / `read_mcp_resource` / Agent Teams 工具组等；
+   宿主不提供"危险等级"标注，这份清单由本插件自维护，**升级宿主版本后需复核**）；
 3. 命中插件映射表 → Tools 插件单元；
 4. 其余（非 mcp、非内建、无映射）→ 合并进唯一的 **「来源未识别」** 单元
    （`未识别` 琥珀标签；可开关、计入分母，但**不进 Jev 候选**——它可能混入未来
@@ -290,9 +304,10 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 **归属是启发式**：宿主工具注册表只有 `name / description / parameters`，**没有
 "哪个插件注入"的字段**（`tools.register` 不接受来源参数），所以 Tools 按已知命名
 约定归类（`univer_*` → `dsh-univer-office`、`rw_*` → `dsh-remote`、
-`dsh_im_*` → `dsh-im`、`sidebar_open` → `dsh-better-sidebar`、
-`open_in_popout` → `dsh-popout-window`、`dsh-diff-approval-annotate` →
-`dsh-diff-approval`；含基础工具名 `univer` 的精确规则）。精确优先、同层最长前缀、
+`dsh_im_*` → `dsh-im`、`figma_*` → `dsh-to-figma`、`sidebar_open` →
+`dsh-better-sidebar`、`open_in_popout` → `dsh-popout-window`、
+`dsh-diff-approval-annotate` / `diff_approval_annotate` → `dsh-diff-approval`；
+含基础工具名 `univer` / `figma` 的精确规则）。精确优先、同层最长前缀、
 前缀必须以 `_` / `-` 结尾（`rwx_*` 不会被 `rw_` 误吃）。识别不到就归「来源未识别」，
 **不猜成宿主内置**。
 
@@ -332,8 +347,7 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 中列 = 插件行（插件名 + `插件` / `未识别` 标签 + `N 个工具` + 「启用」开关：
 **能力面板的开关 = 全局默认**，不需要当前会话，也不显示任何具体会话状态）；
 右侧详情（**整页纵向可滚动**，工具多时不会撑破布局）= 标题（插件名 + 两枚标签）+
-`复制插件名` + 开关与状态（`默认已启用 / 默认已关闭 · 本会话可在对话首屏单独覆盖`）+
-`来源判定`（如 `前缀 univer_ → dsh-univer-office（插件清单映射表）`）+
+`复制插件名` + `来源判定`（如 `前缀 univer_ → dsh-univer-office（插件清单映射表）`）+
 `注入方式：插件运行时注册的非 MCP 工具（不落盘）` + 工具数 + **工具清单**：
 
 - 手风琴（一次展开一个）：每行 = 工具名 + `N 个参数 / 无参数`；展开显示该工具的
@@ -344,8 +358,13 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   `parameters`，首屏请求保持轻量），只有打开详情、选中插件时才调
   `tools.inspect {unit}` 拉完整定义并按 plugin 缓存；读取失败降级为「仅名称 +
   说明」并提示参数不可用；
-- 交付字段：`tools.list` 每单元有 `defaultEnabled`（全局默认）与 `enabled`
-  （本会话生效值；`enabledInSession` 为等名 legacy 别名）；能力面板写
+- **开关只在左侧列表行**：详情不再重复「默认开关 / 状态」行（同一个全局默认开关
+  只出现一次）；对话首屏的 Tools 卡片在该插件存在**本会话显式覆盖**时会多一枚
+  `本会话覆盖` 蓝标签（悬停说明 `全局默认开启/关闭；本会话单独设置`），用于解释
+  「能力面板显示全局默认关、本会话却开着」；
+- 交付字段：`tools.list` 每单元有 `defaultEnabled`（全局默认）、`enabled`
+  （本会话生效值；`enabledInSession` 为等名 legacy 别名）与 `explicit`
+  （本会话是否有显式覆盖，供 UI 显示上面的 `本会话覆盖` 标签）；能力面板写
   `tools.setGlobalEnabled`，会话首屏写 `tools.setSessionEnabled`，两者互不影响。
 
 ### 🔌 MCP：改配置即热挂载，不重启、不改 preset
@@ -445,6 +464,21 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   覆盖 → 回落到全局默认。这样既保留"同一插件在所有项目行为一致"，又允许单会话
   偏离（全局关闭时该会话仍可单独开启）。
 
+**三域「默认」层级对照**（三个域的"默认"不是同一层，别混读）：
+
+| 域 | 能力面板开关 = | 作用范围 | 会话首屏 |
+|---|---|---|---|
+| **Skills** | **本项目默认**（项目区启停；全局条目 = 在本项目禁用 / 恢复，写 shadow stub） | 仅当前项目，其它项目不受影响 | **本会话覆盖**（显式 > 项目默认）；项目默认关闭时首屏默认关，可会话内临时开 |
+| **MCP** | **本项目默认**（行尾「默认」开关写 `capability-overrides.json`；全局实例按项目 / 会话关闭走 `tools.restrict`） | 仅当前项目 | **本会话覆盖**（显式 > 项目默认） |
+| **Tools** | **全局默认**（`tools-global.json`，所有项目 / 所有会话共享） | **所有**项目与所有会话 | **本会话覆盖**（显式 > 全局默认；全局默认关时仍可本会话单独开） |
+
+> **Skills 没有「全局关闭所有项目」的开关**：面板里所有启停都只落在**当前项目**
+> （项目副本的 frontmatter，或屏蔽占位 stub）。要让某个 Skills 对所有项目都不
+> 可用，只能删除 / 修改技能本身，或让其来源（`.claude` 只读根、注入方）整体
+> 禁用——插件不提供第二层"全局默认"。MCP 同理没有"全局关闭"：全局实例共享，
+> 按项目 / 会话关闭是用 `tools.restrict` 屏蔽工具，不改全局配置文件。
+> Tools 是唯一有"全局默认"这一层的域（能力面板写所有会话共用的默认）。
+
 ### 🎛️ 会话能力配置：首屏内联 + 顶部「能力」Tab
 
 会话能力（Skills / MCP / Tools）的查看与开关分两个入口，**这里的开关只作用于
@@ -490,7 +524,9 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   agent 作用域**注册同名 runtime skill shadow（`invocation` 双向 false），
   使该 skill 从「模型目录 / `skill` 工具 / `/name` 用户口令」三条链路消失；
   恢复即解除 shadow。**只可关闭、不能强制开启文件级已禁用项**；会话没有
-  live agent 时开关置灰。
+  live agent 时开关置灰。**项目默认关闭的投影**：被本项目屏蔽占位关闭的全局
+  Skills 在会话首屏默认 `enabledInSession=false`（新会话默认关），会话内仍可
+  显式开启（显式覆盖优先于项目默认）。
 - **Tools（插件级，两层）**：首屏开关写**本会话覆盖**（`session-capabilities.json`
   的 `tools` 域），只影响当前会话；`effective = 会话覆盖 ?? 全局默认`，当
   `effective === false` 时对该插件的全部可继承工具 `tools.restrict`（deny 名单

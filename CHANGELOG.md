@@ -7,6 +7,26 @@
 
 ### 修复
 
+- **Skills 项目默认关闭没有投影到会话（真 bug）**：能力面板里「本项目默认关闭」的
+  全局 Skills（项目区有屏蔽占位 / shadow stub）在对话首屏仍显示为启用——会话
+  `list()` 用 runtime shadow 判断，漏掉了磁盘层的 stub 遮蔽。现在：
+  - 被本项目屏蔽占位关闭的全局磁盘技能，会话默认 `enabledInSession=false`
+    （新会话首屏默认关，与能力面板一致）；显式会话覆盖优先（`true` / `false` /
+    清除覆盖三态，会话内仍可临时开启）；
+  - 被项目副本遮蔽的全局重复行从**会话视图**过滤（同名只保留项目副本行），
+    首屏 / Jev 不再出现同名两行，也不会把被遮蔽的全局行误报为启用；
+  - UI：全局行标签「本项目已禁用」→「本项目默认关闭」，「全局」作用域顶部注明
+    `启停仅作用于当前项目 · 其它项目不受影响`。
+- **插件工具归属漏真实工具名（Tools 出现「来源未识别」）**：补 `figma_*` →
+  `dsh-to-figma`（desktop `dsh-to-figma` 0.2.3 起直接注册，无 `mcp__` 前缀）、
+  `diff_approval_annotate` → `dsh-diff-approval`（实际工具名是下划线形式，不是
+  包名前缀）；宿主内建排除清单补 `create_worktree` / `list_mcp_resources` /
+  `list_mcp_resource_templates` / `read_mcp_resource`（不再进 Tools、不再显示
+  「来源未识别」）。`mcp__*` 恒归 MCP 的优先级不变。
+- **Tools 面板去重与「本会话覆盖」标识**：能力面板 Tools 详情删除重复的「默认
+  开关 / 状态」行（开关只在左侧列表行出现一次）；对话首屏 Tools 卡片在该插件
+  存在本会话显式覆盖时显示 `本会话覆盖` 小标签（悬停说明全局默认值与本次覆盖），
+  用于解释「能力面板显示全局默认关、本会话却开着」。
 - **MCP「插件自注册的 MCP 命名空间」来源不可识别**：插件直接
   `ctx.tools.register(createMcpToolDefinition(...))` 注册 `mcp__<ns>__*` 时没有
   mcp-client 实例，`mcp.runtime` 原先只能把它当「无来源外部行」——本机 `figma`
@@ -221,6 +241,19 @@
 
 ### 内部
 
+- **`src/skills/session.ts` 会话投影**：`projectShadow === "stub"`（非 injected
+  磁盘全局行）在无显式覆盖时 `enabledInSession=false`，显式覆盖优先（true /
+  false / 清除三态）；`projectShadow === "skill"` 的全局重复行从会话视图过滤
+  （项目副本行保留）；冷会话（无 live agent）同规则。`canToggleInSession` 语义与
+  injected 行口径不变。
+- **`tools.list` 的 `explicit` 语义明确**（字段本已 additive 下发，未改名）：
+  `true` ⇔ `session-capabilities.json` 的 `tools` 域存在 `plugin:<unit>` 键
+  （值为 `true` / `false` 都算"本会话有覆盖"）；无覆盖或未传 `sessionId` 时恒
+  `false`。首屏 Tools 卡片据此显示「本会话覆盖」标签。
+- **`src/shared/plugin-attribution.ts`**：`TOOL_RULES` 增 `figma`（exact）/
+  `figma_`（prefix）→ `dsh-to-figma`、`diff_approval_annotate`（exact）→
+  `dsh-diff-approval`；`HOST_BUILTIN_EXACT` 增 4 个宿主基础 bundle 工具名
+  （工作区 / MCP 资源类），避免落进「来源未识别」或被误当插件单元。
 - **Tools 两层生效 + 扇出（`src/tools/manager.ts`）**：全局默认镜像按需 hydrate；
   `effectiveEnabled(unit, sessionToggles, globalDisabled)` 为唯一口径（已导出纯函数，
   供 R2 复用）；`tools.restrict` 目标 = 所有 effective=false 单元；
