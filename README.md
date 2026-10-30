@@ -605,6 +605,9 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   **同会话串行**、**部分失败不回滚**（失败项在 `failed[]` 里带
   `domain / target / kind / error`，已成功项保留；重试 = 重放同一 action）；
   冷会话时 Skills 项跳过（需要 live agent），MCP / Tools 仍落盘。
+  三域写入都走批量端点：Skills 用 `setEnabledBatch`（整批一次技能目录发现 +
+  一次落盘；逐条写 150 条会触发 O(N²) 的宿主 catalog 全量发现），MCP 用
+  `setSessionEnabledMany`（一次落盘 + 一次重挂），Tools 一次 `restrict` 重算。
   **批量只写会话覆盖、不写任何全局默认**（Tools 全局默认只能从能力面板改）；
   `reset` 清除本会话覆盖，Tools 回落到全局默认。
 - RPC：`skills.sessionList`（磁盘列表 + `enabledInSession` /
@@ -707,9 +710,12 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   项、关闭 Y 项（仅当前会话）」，重复应用只写差异；冷会话排队完整 ops（含关闭），
   提示「已加入本会话，发送首条消息后生效（启用 X · 关闭 Y）」；失败尽力按前态回滚
   （启用 / 关闭均恢复，含 Tools 的显式覆盖前态）。未勾选任何能力时也可直接应用
-  （按钮「应用（关闭全部）」），等于关闭本会话全部可应用能力。应用为批量写入
-  （skills 同 tick、MCP 并发 ≤4、Tools 并发 ≤4），通常 <1s；实际耗时取决于本会话
-  能力数与宿主状态。
+  （按钮「应用（关闭全部）」），等于关闭本会话全部可应用能力。应用为**批量写入**：
+  筛选语义一次会写约 150 条技能会话开关，旧实现逐条写入时每条都要触发 3 次宿主
+  skill catalog 全量发现（145 条 ≈ 9s，用户侧「应用中…」5–10s 即此）；现在 skills 走
+  `setEnabledBatch`（整批一次目录发现 + 一次落盘 + 一次 read-after 校验）、MCP 走
+  `setSessionEnabledMany`（一次落盘 + 一次重挂）、Tools 分组写，失败回滚同样批量，
+  通常 <1s；实际耗时仍取决于本会话能力数与宿主状态。
 
 **输入停顿自动触发（默认关闭）**
 

@@ -5,7 +5,61 @@
 
 ## [Unreleased]
 
-（暂无）
+### 修复
+
+- **能力决策「应用所选」要卡 5–10 秒**（用户反馈：点「应用所选」后「应用中…」
+  至少 5 秒；认为只是记录筛选、不该有大计算）：根因是**筛选语义一次要把约 150 条
+  技能的会话开关全部落地**，而旧实现逐条 `skills.setSessionEnabled`，每条都会
+  ① `prepareShadow` 做 2 次宿主 skill catalog 全量发现、② `skills.register` 让宿主
+  `collectCache` 整体失效、③ `verifyShadow` 再做 1 次全量发现、④ 一次
+  `session-capabilities.json` 读改写。本机 145 个 SKILL.md 时单次全量发现实测
+  ≈22ms，145×3 ≈ 435 次 ≈ 9.5s（用户侧 5–10s 即此）。现在新增宿主批量能力：
+  `skills.setEnabledBatch`（整批 **1 次目录发现 + 1 次落盘**，read-after 用一次
+  快照校验整批；ghost shadow / 同层 runtime 冲突仍判真假成功）、
+  `skills.registry.prepareShadows / verifyShadows` 批量桥；`jev.apply` 的 live 路径
+  按阶段走批量：skills 批量端点、MCP `setSessionEnabledMany`（一次落盘 + 一次重挂）、
+  Tools 分组写；失败回滚同样批量；冷会话激活路径保留逐条 + 就绪重试语义。
+  独立基准（真实编译产物 + fake 宿主，150 skills / 勾 8 / 写 142 条，目录发现
+  20ms 每次）：apply **9785.7ms → 73.3ms**、目录发现 **426 → 3 次**、落盘
+  **142 次 setSkill → 1 次 setToggles（142 键）**，结果逐项一致（applied=142 /
+  disabled=142 / skipped=8）；失败回滚 **13531.5ms → 142.6ms**（发现 566 → 6、
+  落盘 282 → 2），回滚终态与基线逐键一致。另：apply 总耗时 ≥800ms 时 warn 一次并
+  带「枚举 / 写入」耗时分解，便于后续定位。验证：host-apply 122/122、
+  session-skills 11/11、session-state 8/8、session-restore 2/2；既有客户端套件
+  的失败为本次改动前 v14 重构遗留的陈旧断言（`src/client/**` 本次零改动）。
+
+### 变更
+
+- **Tools 写入改为阶段级分组批量**：`jev.apply` 的 Tools 写入从「每 unit 一次
+  调用」改为「同一阶段（启用 / 关闭）合并为一次
+  `tools.setSessionEnabled({units})`」。宿主该端点是阶段级原子（任一条校验失败 →
+  整批 `ok:false`，不产生部分写入），因此单条 unit 失败时该阶段全部 Tools 项按
+  失败处理、并回滚其它域已写项；`JevApplyResult.failed` 仍只报一个失败 id（此时
+  为该阶段稳定排序后的第一个失败项，不再保证是"触发失败的那条 unit"）。最终状态
+  与旧实现一致（旧实现失败时同样整批回滚）。
+
+### 内部
+
+- **`skills/session.ts` 新增批量会话开关原语 `setEnabledBatch`**：
+  `{sessionId, entries:[{name, enabled}]}` → `{ok, errors, outcomes:[{name, ok,
+  errors?}]}`；单条失败不影响其它条目；`enabled: undefined` = 清除显式覆盖（回项目
+  默认），语义与单条 `setEnabled` 一致。单条路径抽出 `registerShadowCore` /
+  `releaseShadowCore` 纯簿记核心（无目录发现）供批量复用；仅对**本次新建**的
+  shadow 做 read-after（与单条幂等短路一致），校验失败按项回滚并恢复 `explicit`
+  前态；批量落盘用一次 `state.setToggles`（含 `undefined` 键清除）；旧装配
+  （无 registry / 无批量端点）保持逐条路径，单条返回形状与旧实现一致。
+- **`skills/registry.ts` 新增 `prepareShadows / verifyShadows` 批量桥**：整批共用
+  一次（prepare 为 global + scoped 两次）`skills.snapshot()`，返回本批注入元数据与
+  ghost shadow 集合 / 整批胜者映射；单条 `prepareShadow / verifyShadow` 改为其
+  单名封装，行为不变。
+- **`session.setBulk` 的 skills 域改用批量端点**：能力面板「全部开启 / 全部关闭 /
+  恢复默认」写 150 条技能时同样从 O(N²) 目录发现降为一次；三域（skills / mcp /
+  tools）现在都是「一次落盘 + 一次重算 / 重挂」。
+- **MCP 批量会话开关暴露到 manager**：新增 `mcp.setSessionEnabledMany`（转发
+  loader 的批量实现），供 `jev.apply` 的 MCP 阶段使用。
+- **本地验证夹具更新**：`notes/verify/v13-jev-tools.mjs` 的 Tools fake 改为批量
+  语义（units 数组 / 阶段级原子），J-04/J-05/J-06 断言同步分组写入契约（J-06 改为
+  验证「失败批零部分写入 + 同阶段 skills 按前态回滚」）。
 
 ## [1.6.0] - 2026-10-30
 

@@ -59,6 +59,13 @@ export type SkillsService = ReturnType<typeof createService> & {
     sessionList: (cwd?: string, sessionId?: string) => Promise<SessionSkillView[]>;
     /** 设置本会话开关（按会话落盘；重启/resume 后恢复）。 */
     setSessionEnabled: SkillSessionRegistry["setEnabled"];
+    /**
+     * 批量设置本会话开关（性能路径：整批一次目录发现 + 一次落盘）。
+     *
+     * `jev.apply` 的筛选语义一次要写约 150 条技能；逐条调用会触发 O(N²) 的
+     * 宿主 skill catalog 全量发现（见 `skills/session.ts` 的 `setEnabledBatch`）。
+     */
+    setSessionEnabledBatch: SkillSessionRegistry["setEnabledBatch"];
 };
 /** 暴露给宿主调用方的传输无关服务：skills / mcp 两个域的合体 + 项目级禁用声明 + Jev。 */
 export interface CapabilityPanelService {

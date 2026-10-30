@@ -104,6 +104,15 @@ export declare function createMcpManager(deps: McpManagerDeps, loader: McpLoader
         kind: "project" | "server";
         enabled: boolean | undefined;
     }) => Promise<McpOpResult>;
+    setSessionEnabledMany: (input: {
+        sessionId: string;
+        cwd?: string;
+        entries: Array<{
+            target: string;
+            kind: "project" | "server";
+            enabled: boolean | undefined;
+        }>;
+    }) => Promise<McpOpResult>;
 };
 /** 管理服务的完整类型（构造函数的返回值）。 */
 export type McpManager = ReturnType<typeof createMcpManager>;

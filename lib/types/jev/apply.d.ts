@@ -43,6 +43,27 @@ export interface JevCapabilityService {
             name: string;
             enabled: boolean;
         }): Promise<SessionSkillOpResult>;
+        /**
+         * 可选：批量会话开关（性能路径，见 `skills/session.ts#setEnabledBatch`）。
+         *
+         * 筛选语义一次要写约 150 条技能；逐条 `setSessionEnabled` 会触发 O(N²) 的
+         * 宿主 skill catalog 全量发现。缺省（旧装配）时降级回逐条并发。
+         */
+        setSessionEnabledBatch?(input: {
+            sessionId: string;
+            entries: ReadonlyArray<{
+                name: string;
+                enabled: boolean | undefined;
+            }>;
+        }): Promise<{
+            ok: boolean;
+            errors: string[];
+            outcomes: Array<{
+                name: string;
+                ok: boolean;
+                errors?: string[];
+            }>;
+        }>;
     };
     mcp: {
         list(cwd?: string, sessionId?: string): Promise<McpListResult>;
@@ -56,6 +77,16 @@ export interface JevCapabilityService {
             target: string;
             kind: "project" | "server";
             enabled: boolean | undefined;
+        }): Promise<McpOpResult>;
+        /** 可选：批量会话开关（一次落盘 + 一次重挂；见 `mcp/loader.ts#setSessionEnabledMany`）。 */
+        setSessionEnabledMany?(input: {
+            sessionId: string;
+            cwd?: string;
+            entries: Array<{
+                target: string;
+                kind: "project" | "server";
+                enabled: boolean | undefined;
+            }>;
         }): Promise<McpOpResult>;
     };
     /**

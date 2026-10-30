@@ -71,6 +71,29 @@ export type SessionSkillOpResult = {
     ok: false;
     errors: string[];
 };
+/** 批量会话开关的一条目标（`enabled` 语义与 {@link SkillSessionRegistry.setEnabled} 相同）。 */
+export interface SessionSkillBatchEntry {
+    name: string;
+    enabled: boolean | undefined;
+}
+/** 批量会话开关的逐项结果（顺序与请求里的名字首次出现顺序一致）。 */
+export interface SessionSkillBatchOutcome {
+    name: string;
+    ok: boolean;
+    /** 仅失败时给出（与单条 `setEnabled` 的错误文案同源）。 */
+    errors?: string[];
+}
+/**
+ * 批量会话开关的结果。
+ *
+ * `ok=false` 只表示**整批**无法执行（会话不存在 / skills 服务不可用 / 参数
+ * 非法）；单条失败收在 `outcomes` 里，不影响其余条目的写入。
+ */
+export interface SessionSkillBatchResult {
+    ok: boolean;
+    errors: string[];
+    outcomes: SessionSkillBatchOutcome[];
+}
 /** 会话级 Skills 开关注册表（挂到 `capabilityPanel.skills` 上）。 */
 export interface SkillSessionRegistry {
     /**
@@ -92,6 +115,20 @@ export interface SkillSessionRegistry {
         name: string;
         enabled?: boolean;
     }): Promise<SessionSkillOpResult>;
+    /**
+     * 批量设置本会话开关（性能路径：整批只做**一次**技能目录发现 + **一次**落盘）。
+     *
+     * 逐条 `setEnabled` 在 N 条时会触发 3N 次宿主 skill catalog 全量发现
+     * （`prepareShadow` 2 次 + `verifyShadow` 1 次，且 `skills.register` 会让宿主
+     * `collectCache` 整体失效）与 N 次 session-capabilities.json 读改写；
+     * `jev.apply` 的筛选语义一次要写约 150 条，逐条 = 5–10 秒。本方法把发现收敛
+     * 到「整批 1 次 prepare + 1 次 verify」、落盘收敛到一次 `setToggles`，并保留
+     * 逐项失败（含 ghost shadow / 同层 runtime 冲突的判真假成功）。
+     */
+    setEnabledBatch(input: {
+        sessionId: string;
+        entries: ReadonlyArray<SessionSkillBatchEntry>;
+    }): Promise<SessionSkillBatchResult>;
     /** 项目默认变更后，对同项目的全部 live 会话增量 reconcile。 */
     reconcileProject(cwd?: string): Promise<SessionSkillOpResult>;
     /** 本会话被关闭的 skill 名（只读快照，测试/诊断用）。 */

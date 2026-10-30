@@ -193,6 +193,28 @@ export interface SkillRegistryBridge {
     prepareShadow(agent: unknown, sessionId: string | undefined, cwd: string | undefined, name: string): Promise<ClassifiedInjectedRow | undefined>;
     /** read-after-shadow：确认该名字当前胜者就是本插件的 shadow；无法判定返回 undefined。 */
     verifyShadow(agent: unknown, sessionId: string | undefined, cwd: string | undefined, name: string): Promise<boolean | undefined>;
+    /**
+     * 批量 read-before-shadow（性能关键，见 `jev.apply` 的批量写入）。
+     *
+     * 一次全量目录发现即可拿到整批名字的注入元数据，以及「注册表里已被本插件
+     * shadow 遮蔽、但本地没有 disposer」的 ghost 名字集合。逐条 `prepareShadow`
+     * 会让每次 toggle 都重新做 2 次全量发现（`skills.register` 会让宿主
+     * `collectCache` 整体失效），N 条 = O(N²) 磁盘扫描。
+     *
+     * registry 不可用 / snapshot 失败返回 undefined（调用方降级：不缓存元数据、
+     * 不判 ghost）。
+     */
+    prepareShadows(agent: unknown, sessionId: string | undefined, cwd: string | undefined, names: ReadonlySet<string>): Promise<{
+        rows: Map<string, ClassifiedInjectedRow>;
+        ownShadow: Set<string>;
+    } | undefined>;
+    /**
+     * 批量 read-after-shadow：一次 scope 快照校验整批名字的胜者是否本插件 shadow。
+     *
+     * 返回名字 → 是否仍是本插件 shadow；无法判定（registry 不可用 / agent 缺失 /
+     * snapshot 失败）返回 undefined。名字不在快照里按 `false`（胜者不是 shadow）。
+     */
+    verifyShadows(agent: unknown, cwd: string | undefined, names: ReadonlySet<string>): Promise<Map<string, boolean> | undefined>;
     /** 把「正被本插件 shadow 遮蔽」的元数据写回缓存（register 触发的 skills/change 会清掉它）。 */
     keepShadowed(agent: unknown, sessionId: string | undefined, row: ClassifiedInjectedRow): void;
     /** 该名字是否已知为注入条目（用于项目默认的热更新判定）。 */

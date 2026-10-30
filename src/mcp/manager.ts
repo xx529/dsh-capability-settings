@@ -526,7 +526,49 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
     return { ok: true };
   }
 
-  return { list, upsert, remove, setEnabled, importToProject, status, test, usage, runtime, setSessionEnabled };
+  /**
+   * 批量设置某个 session 的手动开关（性能路径）：一次 hydrate → 一次落盘 →
+   * **一次**重挂（逐条调用会排队 N 次 remount，150 条量级不可接受）。
+   *
+   * 与 `setSessionEnabled` 语义一致：`enabled === undefined` 清除显式覆盖。
+   * loader 侧逐条写入失败只 warn、不抛，因此这里只校验入参形状。
+   */
+  async function setSessionEnabledMany(input: {
+    sessionId: string;
+    cwd?: string;
+    entries: Array<{ target: string; kind: "project" | "server"; enabled: boolean | undefined }>;
+  }): Promise<McpOpResult> {
+    if (typeof input?.sessionId !== "string" || input.sessionId.length === 0) {
+      return { ok: false, errors: ["sessionId is required"] };
+    }
+    if (!Array.isArray(input.entries)) {
+      return { ok: false, errors: ["entries must be an array"] };
+    }
+    const entries = input.entries.filter(
+      (entry) => entry !== null && typeof entry === "object" && typeof entry.target === "string" && entry.target.length > 0,
+    );
+    if (entries.length === 0) return { ok: true };
+    await loader.setSessionEnabledMany({
+      sessionId: input.sessionId,
+      ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
+      entries,
+    });
+    return { ok: true };
+  }
+
+  return {
+    list,
+    upsert,
+    remove,
+    setEnabled,
+    importToProject,
+    status,
+    test,
+    usage,
+    runtime,
+    setSessionEnabled,
+    setSessionEnabledMany,
+  };
 }
 
 /** 管理服务的完整类型（构造函数的返回值）。 */

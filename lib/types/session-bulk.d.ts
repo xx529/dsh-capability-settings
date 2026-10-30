@@ -13,8 +13,9 @@
  *   - **部分失败不回滚**（A7）：某条失败只进 `failed[]`，已成功的保留；
  *     重试 = 重放同一 action（已成功项进 `unchanged`）。
  *   - **宿主自己枚举**：客户端不传目标列表（避免与宿主枚举口径漂移）。
- *   - 写盘批量化：mcp / tools 一次落盘（`state.setToggles` / loader 批量方法），
- *     skills 保持逐条（shadow 注册本来就必须逐条）；restrict 只重算一次。
+ *   - 写盘批量化：三个域都走批量端点——mcp/tools 由 loader/manager 一次落盘
+ *     （`state.setToggles`），skills 走 `skills/session.ts#setEnabledBatch`
+ *     （整批一次宿主目录发现 + 一次落盘）；restrict 只重算一次。
  *
  * @module dsh-capability-settings/session-bulk
  */
@@ -86,6 +87,27 @@ export interface SessionBulkServices {
             name: string;
             enabled?: boolean;
         }): Promise<SessionSkillOpResult>;
+        /**
+         * 可选：批量会话开关（`skills/session.ts#setEnabledBatch`）。
+         *
+         * 逐条写 150 条技能会触发 O(N²) 的宿主 skill catalog 全量发现；提供批量
+         * 端点时整批只做一次目录发现 + 一次落盘。
+         */
+        setSessionEnabledBatch?(input: {
+            sessionId: string;
+            entries: ReadonlyArray<{
+                name: string;
+                enabled: boolean | undefined;
+            }>;
+        }): Promise<{
+            ok: boolean;
+            errors: string[];
+            outcomes: Array<{
+                name: string;
+                ok: boolean;
+                errors?: string[];
+            }>;
+        }>;
     };
     mcp: {
         list(cwd?: string, sessionId?: string): Promise<McpListResult>;

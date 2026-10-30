@@ -62,6 +62,20 @@ export interface JevCapabilityService {
   skills: {
     sessionList(cwd?: string, sessionId?: string): Promise<SessionSkillView[]>;
     setSessionEnabled(input: { sessionId: string; name: string; enabled: boolean }): Promise<SessionSkillOpResult>;
+    /**
+     * 可选：批量会话开关（性能路径，见 `skills/session.ts#setEnabledBatch`）。
+     *
+     * 筛选语义一次要写约 150 条技能；逐条 `setSessionEnabled` 会触发 O(N²) 的
+     * 宿主 skill catalog 全量发现。缺省（旧装配）时降级回逐条并发。
+     */
+    setSessionEnabledBatch?(input: {
+      sessionId: string;
+      entries: ReadonlyArray<{ name: string; enabled: boolean | undefined }>;
+    }): Promise<{
+      ok: boolean;
+      errors: string[];
+      outcomes: Array<{ name: string; ok: boolean; errors?: string[] }>;
+    }>;
   };
   mcp: {
     list(cwd?: string, sessionId?: string): Promise<McpListResult>;
@@ -72,6 +86,12 @@ export interface JevCapabilityService {
       target: string;
       kind: "project" | "server";
       enabled: boolean | undefined;
+    }): Promise<McpOpResult>;
+    /** 可选：批量会话开关（一次落盘 + 一次重挂；见 `mcp/loader.ts#setSessionEnabledMany`）。 */
+    setSessionEnabledMany?(input: {
+      sessionId: string;
+      cwd?: string;
+      entries: Array<{ target: string; kind: "project" | "server"; enabled: boolean | undefined }>;
     }): Promise<McpOpResult>;
   };
   /**
@@ -153,6 +173,14 @@ const READY_RETRY_DELAYS_MS = [100, 300] as const;
 
 /** `jev.apply` 一次最多接受的计划条数。 */
 const MAX_APPLY_PLAN_ITEMS = 500;
+
+/**
+ * 慢 apply 的 warn 阈值（毫秒）。
+ *
+ * 批量写入后正常路径应在百毫秒级；超过该阈值才 warn 一次，带上「枚举 / 写入 /
+ * 技能条数」分解，便于下次定位（不刷日志、不改变返回值）。
+ */
+const SLOW_APPLY_WARN_MS = 800;
 
 /**
  * MCP 写入并发度上限（task-47）。
@@ -551,6 +579,154 @@ async function runWithConcurrency<T, R>(
   return results;
 }
 
+// ---------------------------------------------------------------------------
+// 批量写入（性能路径）：一次目录发现 + 一次落盘
+// ---------------------------------------------------------------------------
+
+/**
+ * 批量写一组 skills；服务未提供批量端点时返回 undefined（调用方降级逐条）。
+ *
+ * 筛选语义下一次要写约 150 条技能：逐条 `setSessionEnabled` 每条都会触发 3 次
+ * 宿主 skill catalog 全量发现（`register` 让 collectCache 失效），即 O(N²) 磁盘
+ * 扫描（本机实测 145 条 ≈ 9.5s）；批量端点把整批收敛成 1 次 prepare + 1 次
+ * verify + 1 次落盘。
+ */
+async function writeSkillsBatch(
+  service: JevCapabilityService,
+  sessionId: string,
+  ops: readonly PlannedOp[],
+): Promise<WriteResult[] | undefined> {
+  const batch = service.skills.setSessionEnabledBatch;
+  if (typeof batch !== "function") return undefined;
+  const entries = ops.map((op) => {
+    const write = op.cap.write as Extract<JevCapabilityWrite, { type: "skills" }>;
+    return { name: write.name, enabled: op.desired };
+  });
+  const failAll = (errors: string[]): WriteResult[] => ops.map(() => ({ ok: false, errors }));
+  try {
+    const result = await batch.call(service.skills, { sessionId, entries });
+    if (!result.ok) return failAll(result.errors.length > 0 ? result.errors : ["skills batch write failed"]);
+    const byName = new Map(result.outcomes.map((outcome) => [outcome.name, outcome]));
+    return entries.map((entry): WriteResult => {
+      const outcome = byName.get(entry.name);
+      // 批量端点必须对每个入参名字给出 outcome；缺失按失败处理（不做假成功）。
+      if (outcome === undefined) return { ok: false, errors: ["skills batch outcome missing"] };
+      if (outcome.ok) return { ok: true };
+      return { ok: false, errors: outcome.errors ?? ["skills batch item failed"] };
+    });
+  } catch (error) {
+    return failAll([redact(errMessage(error), [])]);
+  }
+}
+
+/** 批量写一组 MCP 会话开关；服务未提供批量端点时返回 undefined。 */
+async function writeMcpBatch(
+  service: JevCapabilityService,
+  sessionId: string,
+  cwd: string | undefined,
+  ops: readonly PlannedOp[],
+): Promise<WriteResult[] | undefined> {
+  const batch = service.mcp.setSessionEnabledMany;
+  if (typeof batch !== "function") return undefined;
+  const entries = ops.map((op) => {
+    const write = op.cap.write as Extract<JevCapabilityWrite, { type: "mcp" }>;
+    return { target: write.target, kind: write.targetKind, enabled: op.desired };
+  });
+  const failAll = (errors: string[]): WriteResult[] => ops.map(() => ({ ok: false, errors }));
+  try {
+    const result = await batch.call(service.mcp, {
+      sessionId,
+      ...(cwd !== undefined ? { cwd } : {}),
+      entries,
+    });
+    if (result?.ok === false) return failAll(result.errors ?? ["mcp batch write failed"]);
+    return ops.map((): WriteResult => ({ ok: true }));
+  } catch (error) {
+    return failAll([redact(errMessage(error), [])]);
+  }
+}
+
+/**
+ * 批量写一组 Tools 插件单元（同一阶段内目标态一致：整组启用或整组关闭）。
+ *
+ * 服务未提供（旧装配）或阶段内目标态不一致时返回 undefined。
+ */
+async function writeToolsBatch(
+  service: JevCapabilityService,
+  sessionId: string,
+  ops: readonly PlannedOp[],
+): Promise<WriteResult[] | undefined> {
+  const tools = service.tools;
+  if (tools === undefined) return undefined;
+  const desired = ops[0]?.desired;
+  if (desired === undefined || ops.some((op) => op.desired !== desired)) return undefined;
+  const units = ops.map((op) => (op.cap.write as Extract<JevCapabilityWrite, { type: "tools" }>).unit);
+  const failAll = (errors: string[]): WriteResult[] => ops.map(() => ({ ok: false, errors }));
+  try {
+    const result = await tools.setSessionEnabled({ sessionId, units, enabled: desired });
+    if (result?.ok === false) return failAll(result.errors ?? ["tools batch write failed"]);
+    return ops.map((): WriteResult => ({ ok: true }));
+  } catch (error) {
+    return failAll([redact(errMessage(error), [])]);
+  }
+}
+
+/** 回滚一组 skills（批量端点；未提供时返回 undefined）。 */
+async function restoreSkillsBatch(
+  service: JevCapabilityService,
+  sessionId: string,
+  applied: ReadonlyArray<{ cap: JevCapability; prev: JevPrevState }>,
+): Promise<string[] | undefined> {
+  const batch = service.skills.setSessionEnabledBatch;
+  if (typeof batch !== "function") return undefined;
+  const entries = applied.map((entry) => ({
+    name: (entry.cap.write as Extract<JevCapabilityWrite, { type: "skills" }>).name,
+    enabled: entry.prev.type === "skills" ? entry.prev.enabled : true,
+  }));
+  try {
+    const result = await batch.call(service.skills, { sessionId, entries });
+    if (!result.ok) return [`rollback: ${result.errors.join("; ") || "skills batch rollback failed"}`];
+    const errors: string[] = [];
+    for (const outcome of result.outcomes) {
+      if (outcome.ok) continue;
+      for (const message of outcome.errors ?? []) errors.push(`rollback ${outcome.name}: ${redact(message, [])}`);
+    }
+    return errors;
+  } catch (error) {
+    return [`rollback: ${redact(errMessage(error), [])}`];
+  }
+}
+
+/** 回滚一组 MCP 会话开关（批量端点；未提供时返回 undefined）。 */
+async function restoreMcpBatch(
+  service: JevCapabilityService,
+  sessionId: string,
+  cwd: string | undefined,
+  applied: ReadonlyArray<{ cap: JevCapability; prev: JevPrevState }>,
+): Promise<string[] | undefined> {
+  const batch = service.mcp.setSessionEnabledMany;
+  if (typeof batch !== "function") return undefined;
+  const entries = applied.map((entry) => {
+    const write = entry.cap.write as Extract<JevCapabilityWrite, { type: "mcp" }>;
+    return {
+      target: write.target,
+      kind: write.targetKind,
+      enabled: entry.prev.type === "mcp" ? entry.prev.enabled : undefined,
+    };
+  });
+  try {
+    const result = await batch.call(service.mcp, {
+      sessionId,
+      ...(cwd !== undefined ? { cwd } : {}),
+      entries,
+    });
+    if (result?.ok === false) return [`rollback: ${(result.errors ?? []).join("; ") || "mcp batch rollback failed"}`];
+    return [];
+  } catch (error) {
+    return [`rollback: ${redact(errMessage(error), [])}`];
+  }
+}
+
 /** 回滚写入一条：把能力恢复成前态（skills 恒 boolean；MCP 可为 undefined=清显式覆盖）。 */
 async function restoreOne(
   deps: Pick<JevApplyEngineDeps, "service">,
@@ -604,33 +780,53 @@ async function rollback(
   sessionId: string,
   cwd: string | undefined,
   applied: Array<{ cap: JevCapability; prev: JevPrevState }>,
+  useBatch = false,
 ): Promise<string[]> {
   const reversed = [...applied].reverse();
   const skills = reversed.filter((entry) => entry.cap.write.type === "skills");
   const mcps = reversed.filter((entry) => entry.cap.write.type === "mcp");
   const tools = reversed.filter((entry) => entry.cap.write.type === "tools");
-  // 关键优化：skills 回滚调用也在同一 tick 全部发起，注册表 effect 只刷新一次。
-  const skillPromises = skills.map((entry) => restoreOne(deps, sessionId, cwd, entry.cap, entry.prev));
-  const mcpPromise = runWithConcurrency(mcps, MCP_WRITE_CONCURRENCY, (entry) =>
-    restoreOne(deps, sessionId, cwd, entry.cap, entry.prev),
-  );
-  const toolsPromise = runWithConcurrency(tools, TOOLS_WRITE_CONCURRENCY, (entry) =>
-    restoreOne(deps, sessionId, cwd, entry.cap, entry.prev),
-  );
-  const [skillSettled, mcpResults, toolsResults] = await Promise.all([
-    Promise.allSettled(skillPromises),
-    mcpPromise,
-    toolsPromise,
-  ]);
-  const errors: string[] = [];
-  for (const settled of skillSettled) {
-    if (settled.status === "rejected") errors.push(`rollback: ${redact(errMessage(settled.reason), [])}`);
-    else if (settled.value !== undefined) errors.push(settled.value);
-  }
-  for (const message of [...mcpResults, ...toolsResults]) {
-    if (message !== undefined) errors.push(message);
-  }
-  return errors;
+  const service = deps.service();
+
+  /** skills 回滚：优先批量端点（一次发现 + 一次落盘），否则整批同 tick 逐条。 */
+  const skillsTask = async (): Promise<string[]> => {
+    if (useBatch && service !== undefined) {
+      const batched = await restoreSkillsBatch(service, sessionId, skills);
+      if (batched !== undefined) return batched;
+    }
+    const settled = await Promise.allSettled(
+      skills.map((entry) => restoreOne(deps, sessionId, cwd, entry.cap, entry.prev)),
+    );
+    const errors: string[] = [];
+    for (const result of settled) {
+      if (result.status === "rejected") errors.push(`rollback: ${redact(errMessage(result.reason), [])}`);
+      else if (result.value !== undefined) errors.push(result.value);
+    }
+    return errors;
+  };
+
+  /** MCP 回滚：优先批量端点（一次落盘 + 一次重挂），否则并发限流逐条。 */
+  const mcpTask = async (): Promise<string[]> => {
+    if (useBatch && service !== undefined) {
+      const batched = await restoreMcpBatch(service, sessionId, cwd, mcps);
+      if (batched !== undefined) return batched;
+    }
+    const results = await runWithConcurrency(mcps, MCP_WRITE_CONCURRENCY, (entry) =>
+      restoreOne(deps, sessionId, cwd, entry.cap, entry.prev),
+    );
+    return results.filter((message): message is string => message !== undefined);
+  };
+
+  const toolsTask = async (): Promise<string[]> => {
+    const results = await runWithConcurrency(tools, TOOLS_WRITE_CONCURRENCY, (entry) =>
+      restoreOne(deps, sessionId, cwd, entry.cap, entry.prev),
+    );
+    return results.filter((message): message is string => message !== undefined);
+  };
+
+  // 三个域互不相干：并行执行（与写入侧一致）。
+  const [skillErrors, mcpErrors, toolErrors] = await Promise.all([skillsTask(), mcpTask(), toolsTask()]);
+  return [...skillErrors, ...mcpErrors, ...toolErrors];
 }
 
 // ---------------------------------------------------------------------------
@@ -807,8 +1003,11 @@ export function createJevApplyEngine(deps: JevApplyEngineDeps): JevApplyEngine {
    *   - 结果按原 `phaseOps` 顺序落位，失败判定取批次里**原顺序第一个**失败。
    */
   async function runWritePhase(
+    sessionId: string,
+    cwd: string | undefined,
     phaseOps: readonly PlannedOp[],
     write: (capability: JevCapability, desired: boolean) => Promise<WriteResult>,
+    useBatch: boolean,
   ): Promise<WriteResult[]> {
     const results = new Array<WriteResult>(phaseOps.length);
     const skillIndexes: number[] = [];
@@ -819,26 +1018,47 @@ export function createJevApplyEngine(deps: JevApplyEngineDeps): JevApplyEngine {
       else if (op.cap.write.type === "tools") toolsIndexes.push(index);
       else mcpIndexes.push(index);
     });
-    // skills：同步发起全部调用（同一 tick），不 await 单条。
-    const skillPromises = skillIndexes.map((index) => write(phaseOps[index]!.cap, phaseOps[index]!.desired));
-    const mcpPromise = runWithConcurrency(mcpIndexes, MCP_WRITE_CONCURRENCY, (index) =>
-      write(phaseOps[index]!.cap, phaseOps[index]!.desired),
-    );
+    const service = useBatch ? deps.service() : undefined;
+    const opsAt = (indexes: readonly number[]): PlannedOp[] => indexes.map((index) => phaseOps[index]!);
+
+    // skills：优先批量端点（整批一次目录发现 + 一次落盘）；否则整批同一 tick 逐条。
+    const skillsTask = async (): Promise<WriteResult[]> => {
+      const ops = opsAt(skillIndexes);
+      if (service !== undefined) {
+        const batched = await writeSkillsBatch(service, sessionId, ops);
+        if (batched !== undefined) return batched;
+      }
+      const settled = await Promise.allSettled(ops.map((op) => write(op.cap, op.desired)));
+      return settled.map((entry): WriteResult =>
+        entry.status === "fulfilled"
+          ? entry.value
+          : { ok: false, errors: [redact(errMessage(entry.reason), [])] },
+      );
+    };
+
+    // MCP：优先批量端点（一次落盘 + 一次重挂）；否则并发限流逐条。
+    const mcpTask = async (): Promise<WriteResult[]> => {
+      const ops = opsAt(mcpIndexes);
+      if (service !== undefined) {
+        const batched = await writeMcpBatch(service, sessionId, cwd, ops);
+        if (batched !== undefined) return batched;
+      }
+      return runWithConcurrency(ops, MCP_WRITE_CONCURRENCY, (op) => write(op.cap, op.desired));
+    };
+
     // Tools 单列一组：写入会触发 restrict 重算，不与 MCP 抢同一 tick。
-    const toolsPromise = runWithConcurrency(toolsIndexes, TOOLS_WRITE_CONCURRENCY, (index) =>
-      write(phaseOps[index]!.cap, phaseOps[index]!.desired),
-    );
-    const [skillSettled, mcpResults, toolsResults] = await Promise.all([
-      Promise.allSettled(skillPromises),
-      mcpPromise,
-      toolsPromise,
-    ]);
+    const toolsTask = async (): Promise<WriteResult[]> => {
+      const ops = opsAt(toolsIndexes);
+      if (service !== undefined) {
+        const batched = await writeToolsBatch(service, sessionId, ops);
+        if (batched !== undefined) return batched;
+      }
+      return runWithConcurrency(ops, TOOLS_WRITE_CONCURRENCY, (op) => write(op.cap, op.desired));
+    };
+
+    const [skillResults, mcpResults, toolsResults] = await Promise.all([skillsTask(), mcpTask(), toolsTask()]);
     skillIndexes.forEach((opIndex, resultIndex) => {
-      const settled = skillSettled[resultIndex]!;
-      results[opIndex] =
-        settled.status === "fulfilled"
-          ? settled.value
-          : { ok: false, errors: [redact(errMessage(settled.reason), [])] };
+      results[opIndex] = skillResults[resultIndex]!;
     });
     mcpIndexes.forEach((opIndex, resultIndex) => {
       results[opIndex] = mcpResults[resultIndex]!;
@@ -854,13 +1074,17 @@ export function createJevApplyEngine(deps: JevApplyEngineDeps): JevApplyEngine {
    * （enable/disable 均可还原）。
    *
    * 顺序语义不变：先 enable 后 disable；同阶段内按稳定 id 序发起
-   * （skills 整批先行、MCP 限流并发）；失败后不再进入下一阶段，直接回滚。
+   * （skills/MCP 优先批量端点、Tools 分组批量）；失败后不再进入下一阶段，直接回滚。
+   *
+   * @param useBatch true = 优先走批量端点（live 会话；冷会话激活路径保留逐条 +
+   *   就绪重试语义）。
    */
   async function applyPlannedOps(
     sessionId: string,
     cwd: string | undefined,
     ops: readonly PlannedOp[],
     write: (capability: JevCapability, desired: boolean) => Promise<WriteResult>,
+    useBatch: boolean,
   ): Promise<
     | { ok: true; written: PlannedOp[] }
     | { ok: false; written: PlannedOp[]; failedId: string; errors: string[]; rollbackFailed: boolean }
@@ -871,7 +1095,7 @@ export function createJevApplyEngine(deps: JevApplyEngineDeps): JevApplyEngine {
     const failures: Array<{ op: PlannedOp; errors: string[] }> = [];
     for (const phaseOps of [enableOps, disableOps]) {
       if (phaseOps.length === 0) continue;
-      const results = await runWritePhase(phaseOps, write);
+      const results = await runWritePhase(sessionId, cwd, phaseOps, write, useBatch);
       for (let index = 0; index < phaseOps.length; index += 1) {
         const result = results[index]!;
         if (result.ok) written.push(phaseOps[index]!);
@@ -881,7 +1105,7 @@ export function createJevApplyEngine(deps: JevApplyEngineDeps): JevApplyEngine {
       if (failures.length > 0) break;
     }
     if (failures.length > 0) {
-      const rollbackErrors = await rollback(deps, sessionId, cwd, written);
+      const rollbackErrors = await rollback(deps, sessionId, cwd, written, useBatch);
       return {
         ok: false,
         written,
@@ -897,8 +1121,13 @@ export function createJevApplyEngine(deps: JevApplyEngineDeps): JevApplyEngine {
   async function applyPending(plan: JevPendingPlan): Promise<void> {
     try {
       const { ops } = await resolvePlanned(plan);
-      const result = await applyPlannedOps(plan.sessionId, plan.cwd, ops, (capability, desired) =>
-        writeOneWithReadyRetry(plan.sessionId, plan.cwd, capability, desired),
+      const result = await applyPlannedOps(
+        plan.sessionId,
+        plan.cwd,
+        ops,
+        (capability, desired) => writeOneWithReadyRetry(plan.sessionId, plan.cwd, capability, desired),
+        // 冷会话激活路径保留逐条 + 就绪重试语义（批量端点没有逐条重试）。
+        false,
       );
       if (!result.ok) {
         const errors = result.errors.map((text) => redact(text, []));
@@ -1056,12 +1285,28 @@ export function createJevApplyEngine(deps: JevApplyEngineDeps): JevApplyEngine {
       return result;
     }
 
-    // 4) live：两阶段批量写（先 enable 后 disable；阶段内 skills 同 tick 批量、
-    //    MCP 并发限流 4）；任一失败按前态逆序批量回滚全部已写项。
-    const writeResult = await applyPlannedOps(sessionId, cwd, ops, (capability, desired) =>
-      writeOne(deps, sessionId, cwd, capability, desired),
+    // 4) live：两阶段批量写（先 enable 后 disable；skills/MCP 走批量端点 =
+    //    一次目录发现 + 一次落盘 + 一次重挂，Tools 分组批量）；任一失败按前态
+    //    逆序批量回滚全部已写项。
+    const enumerateMs = Math.round(performance.now() - applyStartedAt);
+    const writeStartedAt = performance.now();
+    const writeResult = await applyPlannedOps(
+      sessionId,
+      cwd,
+      ops,
+      (capability, desired) => writeOne(deps, sessionId, cwd, capability, desired),
+      true,
     );
+    const writeMs = Math.round(performance.now() - writeStartedAt);
     const outcome = consumePendingOutcome(sessionId);
+    // 慢 apply 诊断：>800ms 才 warn（正常路径批量写入应在百毫秒级）。
+    const totalMs = Math.round(performance.now() - applyStartedAt);
+    if (totalMs >= SLOW_APPLY_WARN_MS) {
+      const skillsCount = ops.filter((op) => op.cap.write.type === "skills").length;
+      logger?.warn?.(
+        `capability-panel: Jev apply 较慢 ${totalMs}ms（枚举 ${enumerateMs}ms / 写入 ${writeMs}ms，skills ${skillsCount} 条，写入 ${writeResult.written.length} 项）`,
+      );
+    }
     if (!writeResult.ok) {
       const errors = writeResult.errors.map((text) => redact(text, []));
       const failure: JevApplyResult = {

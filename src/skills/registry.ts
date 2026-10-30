@@ -193,6 +193,30 @@ export interface SkillRegistryBridge {
   prepareShadow(agent: unknown, sessionId: string | undefined, cwd: string | undefined, name: string): Promise<ClassifiedInjectedRow | undefined>;
   /** read-after-shadow：确认该名字当前胜者就是本插件的 shadow；无法判定返回 undefined。 */
   verifyShadow(agent: unknown, sessionId: string | undefined, cwd: string | undefined, name: string): Promise<boolean | undefined>;
+  /**
+   * 批量 read-before-shadow（性能关键，见 `jev.apply` 的批量写入）。
+   *
+   * 一次全量目录发现即可拿到整批名字的注入元数据，以及「注册表里已被本插件
+   * shadow 遮蔽、但本地没有 disposer」的 ghost 名字集合。逐条 `prepareShadow`
+   * 会让每次 toggle 都重新做 2 次全量发现（`skills.register` 会让宿主
+   * `collectCache` 整体失效），N 条 = O(N²) 磁盘扫描。
+   *
+   * registry 不可用 / snapshot 失败返回 undefined（调用方降级：不缓存元数据、
+   * 不判 ghost）。
+   */
+  prepareShadows(
+    agent: unknown,
+    sessionId: string | undefined,
+    cwd: string | undefined,
+    names: ReadonlySet<string>,
+  ): Promise<{ rows: Map<string, ClassifiedInjectedRow>; ownShadow: Set<string> } | undefined>;
+  /**
+   * 批量 read-after-shadow：一次 scope 快照校验整批名字的胜者是否本插件 shadow。
+   *
+   * 返回名字 → 是否仍是本插件 shadow；无法判定（registry 不可用 / agent 缺失 /
+   * snapshot 失败）返回 undefined。名字不在快照里按 `false`（胜者不是 shadow）。
+   */
+  verifyShadows(agent: unknown, cwd: string | undefined, names: ReadonlySet<string>): Promise<Map<string, boolean> | undefined>;
   /** 把「正被本插件 shadow 遮蔽」的元数据写回缓存（register 触发的 skills/change 会清掉它）。 */
   keepShadowed(agent: unknown, sessionId: string | undefined, row: ClassifiedInjectedRow): void;
   /** 该名字是否已知为注入条目（用于项目默认的热更新判定）。 */
@@ -967,6 +991,24 @@ export function createSkillRegistryBridge(deps: SkillRegistryBridgeDeps): SkillR
     cwd: string | undefined,
     name: string,
   ): Promise<ClassifiedInjectedRow | undefined> {
+    const prepared = await prepareShadows(agent, sessionId, cwd, new Set([name]));
+    return prepared?.rows.get(name);
+  }
+
+  /**
+   * 批量 read-before-shadow：**一次**全量目录发现完成整批的元数据缓存 + ghost 判定。
+   *
+   * 与 {@link prepareShadow} 的语义逐项对齐：缓存 scope 视图里**所有**注入行
+   * 的元数据（不只是本批名字，保持 `cachedMetas` 的展示口径不变），返回本批
+   * 名字的分类行；`ownShadow` = 快照里胜者已是本插件 shadow 的名字（本地没
+   * disposer 的 ghost，恢复/禁用都要据此判真假成功）。
+   */
+  async function prepareShadows(
+    agent: unknown,
+    sessionId: string | undefined,
+    cwd: string | undefined,
+    names: ReadonlySet<string>,
+  ): Promise<{ rows: Map<string, ClassifiedInjectedRow>; ownShadow: Set<string> } | undefined> {
     const skills = service();
     if (skills === undefined || typeof skills.snapshot !== "function") return undefined;
     const globalSnapshot = await safeSnapshot(skills, { cwd });
@@ -976,15 +1018,20 @@ export function createSkillRegistryBridge(deps: SkillRegistryBridgeDeps): SkillR
     if (viewSnapshot === undefined) return undefined;
     const globalByName = byName(globalSnapshot.skills);
     const scope = scopeKeyOf(sessionId !== undefined && agent !== undefined ? sessionId : undefined);
-    let target: ClassifiedInjectedRow | undefined;
+    const rows = new Map<string, ClassifiedInjectedRow>();
+    const ownShadow = new Set<string>();
     for (const entry of viewSnapshot.skills) {
-      if (!isUsableSummary(entry) || isOwnShadow(entry)) continue;
+      if (!isUsableSummary(entry)) continue;
+      if (isOwnShadow(entry)) {
+        if (names.has(entry.name)) ownShadow.add(entry.name);
+        continue;
+      }
       const row = classify(entry, globalByName, { agent, sessionId });
       if (row === undefined) continue;
       if (agent !== undefined) cacheMeta(scope, row);
-      if (row.name === name) target = row;
+      if (names.has(row.name) && !rows.has(row.name)) rows.set(row.name, row);
     }
-    return target;
+    return { rows, ownShadow };
   }
 
   /** read-after-shadow：胜者是否已是本插件的 shadow（无法判定返回 undefined）。 */
@@ -994,12 +1041,30 @@ export function createSkillRegistryBridge(deps: SkillRegistryBridgeDeps): SkillR
     cwd: string | undefined,
     name: string,
   ): Promise<boolean | undefined> {
+    const verified = await verifyShadows(agent, cwd, new Set([name]));
+    if (verified === undefined) return undefined;
+    return verified.get(name) === true;
+  }
+
+  /** 批量 read-after-shadow：一次 scope 快照校验整批名字的胜者。 */
+  async function verifyShadows(
+    agent: unknown,
+    cwd: string | undefined,
+    names: ReadonlySet<string>,
+  ): Promise<Map<string, boolean> | undefined> {
     const skills = service();
     if (skills === undefined || typeof skills.snapshot !== "function" || agent === undefined) return undefined;
     const snapshot = await safeSnapshot(skills, { cwd, scope: agent });
     if (snapshot === undefined) return undefined;
-    const winner = snapshot.skills.find((entry) => entry?.name === name);
-    return winner !== undefined && isOwnShadow(winner);
+    /** 快照按名字排序；同名取首个（与 `Array.find` 的旧实现一致）。 */
+    const winners = new Map<string, HostSkillSummary>();
+    for (const entry of snapshot.skills) {
+      if (entry === undefined || entry === null || typeof entry.name !== "string") continue;
+      if (!winners.has(entry.name)) winners.set(entry.name, entry);
+    }
+    const result = new Map<string, boolean>();
+    for (const name of names) result.set(name, isOwnShadow(winners.get(name)));
+    return result;
   }
 
   /** 把「正被本插件 shadow 遮蔽」的元数据写回缓存。 */
@@ -1047,6 +1112,8 @@ export function createSkillRegistryBridge(deps: SkillRegistryBridgeDeps): SkillR
     exportSnapshot,
     prepareShadow,
     verifyShadow,
+    prepareShadows,
+    verifyShadows,
     keepShadowed,
     knowsInjected,
     invalidateSession,
