@@ -746,11 +746,13 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
       const projectDisabled = new Set<string>(await projectDisabledOf(cwd));
       // 冷会话（agent 已释放）没有 record，但面板仍应显示落盘快照而不是默认全开。
       let persisted: Readonly<Record<string, boolean>> = {};
-      let derived = false;
+      // 只有「派生继承会话」的快照是"缺席即关闭"；派生继承工作区没有快照，
+      // 缺席名字应回落到工作区 / 项目默认（否则面板会把注入技能全显示成关闭）。
+      let derivedSessionSnapshot = false;
       if (sessionId !== undefined && deps.state !== undefined) {
         await deps.state.ready();
         persisted = deps.state.skills(sessionId);
-        derived = deps.state.entries()[sessionId]?.derivedMode !== undefined;
+        derivedSessionSnapshot = deps.state.entries()[sessionId]?.derivedMode === "session";
       }
       // 项目默认投影（fire-and-await；读路径允许触发一次幂等 reconcile）。
       if (record !== undefined) await runApply(record, 0, [...projectDisabled]);
@@ -812,7 +814,7 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
               ? false
               : persistedValue !== undefined
                 ? persistedValue
-                : derived
+                : derivedSessionSnapshot
                   ? false
                   : registered;
         return {
