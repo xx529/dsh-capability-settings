@@ -138,6 +138,23 @@ interface SessionRecord {
   restrictTargets: RestrictTarget[];
   /** 降级 warning 只打一次，避免 tools/change 刷新刷屏。 */
   restrictWarned?: boolean;
+  /**
+   * 本代已生效的「服务器指令段」影子：serverName → disposer。
+   *
+   * 增量维护（不是"一代全量重建"）：`tools/change` / 全局换代时只增补新目标、
+   * 只释放失效目标；换代（remount 前）才整表 dispose。
+   */
+  promptShadows: Map<string, () => void>;
+  /**
+   * 本代注册失败过的 serverName → 上次失败文案。
+   *
+   * 失败通常来自"外部按会话注入的实例已占用同名段"：这种目标会一直失败，
+   * 但重试是廉价的，所以每次 refresh 都静默重试（成功即转为影子）；只有失败
+   * 文案变化才再打一次 warning，避免 `tools/change` 刷屏。
+   */
+  promptShadowFailures: Map<string, string>;
+  /** 宿主没有 systemPrompt.section 时只告警一次。 */
+  promptWarned?: boolean;
   /** 重挂队列：串行化 reload，避免与 agent 初始化交错。 */
   queue: Promise<void>;
 }
@@ -205,6 +222,28 @@ const RESTRICT_UNAVAILABLE =
 /** 全局层尚无该 server 的已注册工具时的降级说明。 */
 const RESTRICT_NO_GLOBAL_TOOLS =
   "该 server 当前没有已注册的全局工具（可能尚未连接），本次未调用 restrict";
+
+/**
+ * MCP 桥接层注册「服务器指令」系统提示词段的段名前缀。
+ *
+ * 见宿主 `@deepseek-ai/dsh-mcp-client` 的 `registerServerContext()`：
+ * `name: \`mcp:${server}\``，`order: getSectionOrder("MCP_SERVERS")`。
+ * `server` 就是桥接配置里的 `serverName`（本项目由
+ * {@link sanitizeServerName} 从配置键推出），所以会话内屏蔽的 serverName
+ * 与段名一一对应。
+ */
+const MCP_INSTRUCTION_SECTION_PREFIX = "mcp:";
+
+/**
+ * `MCP_SERVERS` 段的兜底顺序（dsh-system-prompt 0.2.1-rc.3 的
+ * `SECTION_ORDERS.MCP_SERVERS = 3100`；0.1.2-alpha.2 的顺序表里没有该键、
+ * 0.1.0-rc.6 连 `getSectionOrder` 都没有，所以必须有兜底）。
+ *
+ * 宿主提供 `getSectionOrder` 时优先用宿主值；老宿主/精简装配缺少顺序表时
+ * 用该常量兜底——空文本影子段的顺序只影响它在被遮蔽段位置上的排序占位，
+ * 不影响遮蔽语义。
+ */
+const MCP_SERVERS_SECTION_ORDER = 3100;
 
 /**
  * 解析要挂载的 MCP 桥接插件实例（懒加载 + 缓存一次）。
@@ -590,6 +629,174 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
     }
   }
 
+  /** 释放本 session 上一代的全部「服务器指令段」遮蔽（同步；换代前调用）。 */
+  function disposePromptShadows(record: SessionRecord): void {
+    const shadows = record.promptShadows;
+    record.promptShadows = new Map();
+    record.promptShadowFailures.clear();
+    for (const [serverName, dispose] of shadows) {
+      try {
+        dispose();
+      } catch (error) {
+        logger.warn?.(
+          `capability-panel: 解除 MCP 指令段遮蔽失败（session ${record.agent?.id}，server ${serverName}）：${errMessage(error)}`,
+        );
+      }
+    }
+  }
+
+  /** 解析宿主 `MCP_SERVERS` 段的顺序；宿主缺顺序表时用兜底常量。 */
+  function mcpSectionOrder(systemPrompt: any): number {
+    try {
+      const order = systemPrompt?.getSectionOrder?.("MCP_SERVERS");
+      return typeof order === "number" && Number.isFinite(order) ? order : MCP_SERVERS_SECTION_ORDER;
+    } catch {
+      return MCP_SERVERS_SECTION_ORDER;
+    }
+  }
+
+  /**
+   * **确定挂在 root 侧**的 serverName 集合（本插件全局层 + Host 根作用域的外部
+   * 注入实例），作为「是否值得注册指令段影子段」的证据。
+   *
+   *  - 本插件全局层：直接看 `globalMounts`（含 `conflict`——实例实际在 Host
+   *    根作用域，同样需要按会话遮蔽）；
+   *  - 外部注入实例不在本插件簿记里，用全局工具注册表的 `mcp__<serverName>__*`
+   *    反推（与面板 `restrictable` 同一判据；serverName 受桥接层
+   *    `[A-Za-z0-9_-]{1,32}` 约束，前缀拆分可靠）。
+   *
+   * 认不出来的名字（按 agent 作用域注入的实例、或只存在于历史开关里的名字）
+   * 一律不遮蔽：那类实例的 `mcp:<serverName>` 段注册在**本会话作用域**，注册
+   * 同名影子段会撞名并可能拖垮它的挂载；`tools.restrict` 对它们本来也无效，
+   * 两边行为一致（都不动）。
+   */
+  function rootSideServerNames(): Set<string> {
+    const names = new Set<string>();
+    for (const mount of globalMounts) names.add(mount.serverName);
+    const tools = ctx.root?.get?.("tools") ?? ctx.get?.("tools");
+    if (typeof tools?.schemas !== "function") return names;
+    let schemas: unknown;
+    try {
+      schemas = tools.schemas();
+    } catch {
+      return names;
+    }
+    if (!Array.isArray(schemas)) return names;
+    for (const schema of schemas) {
+      const name = (schema as { name?: unknown } | undefined)?.name;
+      if (typeof name !== "string" || !name.startsWith("mcp__")) continue;
+      const rest = name.slice("mcp__".length);
+      const cut = rest.indexOf("__");
+      if (cut > 0) names.add(rest.slice(0, cut));
+    }
+    return names;
+  }
+
+  /**
+   * 遮蔽「本会话不可见」的全局/外部 server 注册在系统提示词里的服务器指令段。
+   *
+   * 为什么需要：`tools.restrict` 只过滤**工具表**；MCP 桥接层还会把每个
+   * server 的 `instructions` 注册成系统提示词段
+   * （`@deepseek-ai/dsh-mcp-client` 的 `registerServerContext()`：
+   * `name: \`mcp:${serverName}\``，注册在挂载它的作用域——本项目全局层是
+   * 插件 ctx ⇒ **全局作用域**）。于是「当前对话里关掉」的共享实例虽然工具
+   * 被屏蔽了，整段指令仍会进入本会话的系统提示词（白白占 token，还可能
+   * 干扰模型行为）。
+   *
+   * 做法：宿主 system-prompt 的契约是「A scoped section shadows a global
+   * section with the same name」，所以在 `agent.ctx`（本会话作用域）注册
+   * **同名、空文本**的段：本会话装配时同名段取到空文本，`renderPrompt`
+   * 渲染阶段把空文本段丢弃——等价于「这段不存在」；dispose 即恢复。
+   *
+   * 四条边界（与 restrict 同源的降级策略，任何失败都不得拖垮 session 挂载）：
+   *  - **本会话自己挂载的项目层 server 不遮蔽**：桥接层会把同名段注册在
+   *    **同一个 agent 作用域**，重复注册会抛
+   *    "prompt section ... is already registered in this scope"，可能连带
+   *    拖垮该 server 的挂载；这些条目在本会话里本就启用，无需遮蔽。
+   *  - **只遮蔽确定挂在 root 侧的 server**（本插件全局层 / Host 根作用域的外部
+   *    实例，见 {@link rootSideServerNames}）：认不出来的名字可能是按会话注入
+   *    的实例，影子段会和它的同名段抢注册。
+   *  - 外部按会话注入的实例若已占用同名段，逐条 catch + warn，不影响其余条目；
+   *    宿主没有 `systemPrompt.section`（headless / 旧装配）时整组降级为
+   *    warning（只打一次），不抛。
+   *
+   * 同步、增量、幂等：已生效的目标直接跳过；名单缩小只释放失效目标（保留仍
+   * 需要的影子段，不做全量重建）；注册失败的目标每次 refresh 静默重试，同一
+   * 失败文案只 warning 一次。这样 `tools/change` 的刷新不会产生无谓的
+   * dispose/re-register 抖动，也不会刷屏。
+   *
+   * @param mountedServerNames 本代在本会话（agent 作用域）成功挂载的 serverName。
+   */
+  function applyPromptShadows(record: SessionRecord, mountedServerNames: readonly string[]): void {
+    const mounted = new Set(mountedServerNames);
+    const rootSide = rootSideServerNames();
+    const wanted = [...new Set(record.restrictTargets.map((target) => target.serverName))].filter(
+      (serverName) => !mounted.has(serverName) && rootSide.has(serverName),
+    );
+    const wantedSet = new Set(wanted);
+    // 只释放不再需要的影子段；仍需要的保留（幂等，避免全量重建抖动）。
+    for (const [serverName, dispose] of [...record.promptShadows]) {
+      if (wantedSet.has(serverName)) continue;
+      record.promptShadows.delete(serverName);
+      try {
+        dispose();
+      } catch (error) {
+        logger.warn?.(
+          `capability-panel: 解除 MCP 指令段遮蔽失败（session ${record.agent?.id}，server ${serverName}）：${errMessage(error)}`,
+        );
+      }
+    }
+    // 名单缩表后清掉不再相关的失败记录；仍在名单里的保留，避免重复告警同一失败。
+    for (const serverName of [...record.promptShadowFailures.keys()]) {
+      if (!wantedSet.has(serverName)) record.promptShadowFailures.delete(serverName);
+    }
+    if (wanted.length === 0) return;
+    const systemPrompt = record.agent?.ctx?.get?.("systemPrompt");
+    if (typeof systemPrompt?.section !== "function") {
+      if (record.promptWarned !== true) {
+        record.promptWarned = true;
+        logger.warn?.(
+          `capability-panel: 宿主 systemPrompt 服务不可用，无法在本会话遮蔽 MCP 服务器指令段（session ${record.agent?.id}）：${wanted.join(", ")}`,
+        );
+      }
+      return;
+    }
+    const order = mcpSectionOrder(systemPrompt);
+    for (const serverName of wanted) {
+      // 已生效：跳过（幂等短路；名单没变时这一轮什么也不做）。
+      if (record.promptShadows.has(serverName)) continue;
+      try {
+        // 必须由 agent.ctx 调用（get 返回按调用方作用域绑定的服务视图）：
+        // 同名 scoped 段才会落进本会话层并覆盖全局层。
+        const dispose = systemPrompt.section({ name: `${MCP_INSTRUCTION_SECTION_PREFIX}${serverName}`, order, text: "" });
+        if (typeof dispose !== "function") throw new Error("systemPrompt.section() 没有返回 disposer");
+        record.promptShadows.set(serverName, dispose);
+        record.promptShadowFailures.delete(serverName);
+      } catch (error) {
+        const message = errMessage(error);
+        // 同一目标同一失败只告警一次（外部实例一直占着同名段时不会刷屏）；
+        // 失败目标不进入 promptShadows，下次 refresh 仍会静默重试。
+        if (record.promptShadowFailures.get(serverName) !== message) {
+          record.promptShadowFailures.set(serverName, message);
+          logger.warn?.(
+            `capability-panel: 遮蔽 MCP 服务器指令段失败（session ${record.agent?.id}，server ${serverName}）：${message}`,
+          );
+        }
+      }
+    }
+  }
+
+  /**
+   * 按当前挂载簿记重算某 session 的指令段遮蔽（同步、幂等）。
+   *
+   * 用于两类"证据后到"的收敛：全局层换代完成（`globalMounts` 变了）、
+   * `tools/change`（外部注入实例连上并注册工具后，`rootSideServerNames`
+   * 才认得它）。影子段名单没变时 `applyPromptShadows` 直接短路。
+   */
+  function refreshPromptShadows(record: SessionRecord): void {
+    applyPromptShadows(record, record.mounts.filter((mount) => mount.state === "mounted").map((mount) => mount.serverName));
+  }
+
   /** 刷新合并标记：同一轮同步工具变更只安排一次微任务重算。 */
   let restrictionRefreshQueued = false;
 
@@ -609,6 +816,7 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
       restrictionRefreshQueued = false;
       for (const record of sessions.values()) {
         if (record.restrictTargets.length > 0) applyRestrictions(record);
+        refreshPromptShadows(record);
       }
     });
   }
@@ -660,6 +868,9 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
       globalMounts = nextMounts;
       settling -= 1;
     }
+    // 指令段遮蔽放在 finally 之后：`rootSideServerNames` 的 root 侧证据来自
+    // 本代 `globalMounts`，必须等它换代完成再算（否则读到的还是旧一代）。
+    for (const record of sessions.values()) refreshPromptShadows(record);
   }
 
   /** 全局层重挂串行化：并发触发会落在队尾依次执行。 */
@@ -686,6 +897,9 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
       // 幂等，失败降级为"无显式覆盖"（跟随项目默认），不阻断挂载。
       await hydrateToggles(typeof record.agent?.id === "string" ? record.agent.id : undefined, metaOf(record));
       disposeRestrictions(record);
+      // 先解除上一代的指令段遮蔽：本代若挂载同名项目层 server，桥接层要在
+      // **同一** agent 作用域注册同名段，残留影子段会让它重复注册失败。
+      disposePromptShadows(record);
       const previous = record.fibers;
       record.fibers = [];
       // 上一代 fiber 并联释放（各 fiber 独立，失败不挡住新一代挂载）。
@@ -711,6 +925,12 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
       }
       // 全局屏蔽在项目层挂载之后重算：本代的 scoped 注册与全局可见性都已就位。
       applyRestrictions(record);
+      // 指令段遮蔽同样放在挂载之后：只用本代真正挂上的 serverName 做排除，
+      // 避免和项目层自挂实例的同名段抢注册（见 applyPromptShadows 注释）。
+      applyPromptShadows(
+        record,
+        nextMounts.filter((mount) => mount.state === "mounted").map((mount) => mount.serverName),
+      );
     } finally {
       record.mounts = nextMounts;
       settling -= 1;
@@ -739,6 +959,8 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
       restrictions: [],
       appliedDeny: [],
       restrictTargets: [],
+      promptShadows: new Map(),
+      promptShadowFailures: new Map(),
       queue: Promise.resolve(),
     };
     sessions.set(agent.id, record);

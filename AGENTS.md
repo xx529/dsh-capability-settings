@@ -166,6 +166,29 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
    agent 作用域屏蔽 `mcp__<serverName>__*`。契约：空名单 / 未知名字 / scope-local
    名字会**失败** ⇒ 必须先用 `ctx.root.get("tools").schemas()` 取确切工具名，
    找不到就降级成 `skipped`，绝不调用空 filter。
+   **同时必须遮蔽「服务器指令」系统提示词段**：`tools.restrict` 只过滤工具表，宿主
+   `@deepseek-ai/dsh-mcp-client` 的 `registerServerContext()` 还会把 server 的
+   `instructions` 注册成系统提示词段（`name: "mcp:<serverName>"`、`order =
+   getSectionOrder("MCP_SERVERS")`；全局实例挂在插件 ctx ⇒ 全局作用域），不遮蔽
+   的话「关掉」的 server 仍把整段指令塞进系统提示词。做法与契约：
+   `applyPromptShadows` 在 `agent.ctx.get("systemPrompt")` 上注册**同名、空文本**
+   的 scoped 段（system-prompt 契约：A scoped section shadows a global section
+   with the same name；空文本在 `renderPrompt` 阶段丢弃），dispose 即恢复。
+   四条硬边界：① **本会话自己挂载的项目层同名 server 不遮蔽**——桥接层会在同一
+   agent 作用域注册同名段，重复注册抛 `prompt section ... is already registered in
+   this scope`，可能拖垮该 server 挂载（按本代实际挂载的 `serverName` 排除）；
+   ② **只遮蔽「确定挂在 root 侧」的 server**（`globalMounts` 条目，或全局工具
+   注册表里按 `mcp__<serverName>__*` 认出来的外部实例——与面板 `restrictable`
+   同一判据；`rootSideServerNames`），认不出来的名字可能是按会话注入的实例、
+   影子段会抢注册；③ 外部按会话注入实例已占同名段时逐条 catch + warning；
+   ④ 宿主无 `systemPrompt.section` 时整组降级为一次性 warning，**绝不抛穿
+   session 挂载**。收敛点：`remount` 挂载后、`remountGlobal` 完成后、
+   `tools/change`（`refreshPromptShadows`）。
+   残留：`dsh-mcp-resources` 的 `mcp-resource-servers` 段（服务器名清单）不属于
+   本插件，仍会列出被关掉的 server 名；三个资源工具（`list_mcp_resources` /
+   `list_mcp_resource_templates` / `read_mcp_resource`）也仍能访问被关 server 的
+   resources（宿主无按名字移除 provider 的 API）。不要靠复刻宿主文本格式去修，
+   应向 `dsh-mcp-resources` 上游提案「按作用域抑制 / 从受限工具视图派生清单」。
 6. **外部注入的 MCP**（其它插件/profile 运行时挂的 mcp-client，不在本插件配置文件里）：
    通过 cordis `ctx.registry` 的 `Plugin.Runtime.fibers` 发现（`Fiber.name` =
    最近具名祖先插件 = 注入方），或 cordis `loader.entries()`（profile `insert:` 条目）；

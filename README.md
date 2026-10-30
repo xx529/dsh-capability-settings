@@ -521,6 +521,9 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   项目卸载，所以按 session 在该 agent 作用域上 deny 掉
   `mcp__<serverName>__*`——全局配置不动、其他项目不受影响；宿主不提供
   `restrict` 时降级（记 warning + 状态标 `skipped`，工具对本会话仍可见）；
+  **同时遮蔽该 server 的「服务器指令」系统提示词段**（见下文「实现细节」的
+  `applyPromptShadows`）：全局实例被本会话关掉后，指令段也不再进入本会话的
+  系统提示词；
 - **Tools 没有项目级维度，但有「全局默认 + 会话覆盖」两层**：Tools 是全局工具
   注册，插件工具与项目 / 工作区无关，因此**不写** `capability-overrides.json`；
   能力面板 Tools 页写全局默认（`tools-global.json`，所有会话），会话首屏写本会话
@@ -796,6 +799,33 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   项目卸载，于是按 session 对该 agent 作用域 deny 掉该 server 的全局工具
   （名单按 `mcp__<serverName>__` 前缀精确取；宿主没有 `restrict`、名字尚未
   注册或调用抛错时降级为 warning + 状态标 `skipped`/`failed`，不影响挂载）。
+- **关闭后还要遮蔽「服务器指令」系统提示词段**：`restrict` 只过滤工具表；
+  宿主 `@deepseek-ai/dsh-mcp-client` 的 `registerServerContext()` 还会把每个
+  server 的 `instructions` 注册成系统提示词段（`name: "mcp:<serverName>"`，
+  `order = getSectionOrder("MCP_SERVERS")`，全局实例挂在插件 ctx ⇒ 全局作用域）。
+  因此本插件按 `restrictTargets` 在 `agent.ctx.get("systemPrompt")` 上注册
+  **同名、空文本**的 scoped 段：宿主契约是「A scoped section shadows a global
+  section with the same name」，本会话装配时取到空文本、`renderPrompt` 渲染
+  阶段丢弃 → 被关掉的 server 的指令不再进入本会话系统提示词；重新启用 /
+  换代时 dispose 即恢复。边界：**本会话自己挂载的项目层同名 server 不遮蔽**
+  （桥接层会在同一 agent 作用域注册同名段，重复注册会抛
+  "already registered in this scope" 并可能拖垮挂载，所以按本代实际挂载的
+  serverName 排除）；**只遮蔽「确定挂在 root 侧」的 server**（本插件
+  `globalMounts` 里的条目，或全局工具注册表里能按 `mcp__<serverName>__*`
+  认出来的外部注入实例——与面板 `restrictable` 同一判据），认不出来的名字
+  可能是按会话注入的实例、影子段会和它的同名段抢注册，故跳过；外部实例连上
+  并注册工具后由 `tools/change` 刷新收敛；宿主无 `systemPrompt.section`
+  （headless / 旧装配）时整组降级为一次性 warning，绝不抛穿到 session 挂载。
+  实现见 `src/mcp/loader.ts` 的 `applyPromptShadows` /
+  `disposePromptShadows` / `rootSideServerNames` / `refreshPromptShadows`。
+  **已知残留（本插件无法干净解决）**：`dsh-mcp-resources` 的
+  `mcp-resource-servers` 段（服务器名清单）不归本插件所有，仍会列出被关掉的
+  server 名；三个资源工具（`list_mcp_resources` /
+  `list_mcp_resource_templates` / `read_mcp_resource`）也仍能列出/读取被关
+  server 的 resources——宿主没有按名字移除 provider 的 API：整段 shadow 会连
+  保留的 server 一起从清单消失，重写文本则依赖宿主内部格式（跨版本易碎）。
+  要彻底解决需上游 `dsh-mcp-resources` 支持「按作用域抑制/从受限工具视图派生
+  清单」。
 - **Tools 的开关也是 `tools.restrict`，但按"插件"聚合、且是两层默认**：宿主工具
   注册表只有 `name / description / parameters`、没有注入方字段（`tools.register`
   不接受来源参数），所以插件归属靠命名约定表推断（见「Tools（插件工具）」）。

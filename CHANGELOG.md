@@ -5,7 +5,63 @@
 
 ## [Unreleased]
 
-（暂无）
+### 修复
+
+- **当前对话关掉 MCP 后，服务器指令仍进入系统提示词**（用户反馈：能力插件
+  只过滤了 MCP，但 MCP 的 prompt 还会出现在系统提示词里）：根因是「关闭」只调
+  `tools.restrict({ deny })` 过滤**工具表**，而宿主 `@deepseek-ai/dsh-mcp-client`
+  的 `registerServerContext()` 还会把每个 server 的 `instructions` 注册成系统
+  提示词段（`name: "mcp:<serverName>"`、`order =
+  getSectionOrder("MCP_SERVERS")`；全局实例挂在插件 ctx ⇒ 全局作用域）。
+  于是被本项目 / 本会话关掉的**全局或外部注入** server，整段指令仍随系统提示词
+  发给模型（占 token，也可能把 `instructions` 里的行为要求带进来）。
+  修复：`src/mcp/loader.ts` 新增 `applyPromptShadows`——按既有 `restrictTargets`
+  在同一 `agent.ctx.get("systemPrompt")` 上注册**同名、空文本**的 scoped 段，
+  依据宿主契约「A scoped section shadows a global section with the same name」
+  让本会话装配取到空文本、渲染阶段丢弃；重新启用 / 换代时 dispose 恢复。
+  与 restrict 同源同生命周期（`remount` 内换代前 dispose、挂载后重算；
+  `remountGlobal` 完成后与 `tools/change` 时 `refreshPromptShadows` 增量收敛
+  "证据后到"的条目：已生效跳过、失效释放、失败静默重试且同一失败只警告一次，
+  不会在每次刷新时全量重建或刷屏）。边界与降级：
+  - **本会话自己挂载的项目层同名 server 不遮蔽**（桥接层会在同一 agent 作用域
+    注册同名段，重复注册会抛 `prompt section ... is already registered in this
+    scope`，可能拖垮该 server 挂载）→ 按本代实际挂载的 `serverName` 排除；
+  - **只遮蔽「确定挂在 root 侧」的 server**（本插件 `globalMounts` 条目，或全局
+    工具注册表里能按 `mcp__<serverName>__*` 认出来的外部注入实例，与面板
+    `restrictable` 同一判据）；认不出来的名字可能是按会话注入的实例，影子段会
+    和它的同名段抢注册 → 跳过（与 `tools.restrict` 对这类实例无能为力一致）；
+  - 外部按会话注入实例已占用同名段 → 逐条 catch + warning，不影响其它条目；
+  - 宿主没有 `systemPrompt.section`（headless / 旧装配）→ 整组降级为一次性
+    warning，绝不抛穿到 session 挂载；
+  - 残留说明（实测确认，详见验证）：`dsh-mcp-resources` 的
+    `mcp-resource-servers` 段（服务器名清单）不归本插件所有，仍会列出被关掉的
+    server 名；更实质的是三个资源工具（`list_mcp_resources` /
+    `list_mcp_resource_templates` / `read_mcp_resource`）仍能列出/读取被关
+    server 的 resources（宿主没有按名字移除 provider 的 API；整段 shadow 会连
+    保留的 server 一起从清单消失，重写文本依赖宿主内部格式）。彻底解决需上游
+    `dsh-mcp-resources` 支持按作用域抑制或从受限工具视图派生清单。
+
+### 验证
+
+- `pnpm typecheck`、`pnpm build` 通过；
+- 用桌面应用 `app.asar` 内**运行版** DSH **0.2.1-rc.3** 的
+  `dsh-system-prompt@0.2.1-rc.3` + `dsh-scope@0.2.1-rc.3` + `cordis@4.0.5` 实测
+  （独立验证者脚本，T1 13/13 断言 PASS）：root 注册 `mcp:demo` 后，在 agent
+  scope 注册同名空文本段 → 该 scope 装配 `mcp:demo` 文本为空、`renderPrompt`
+  不含指令；另一 scope 与 root 不受影响；dispose 后恢复且幂等；并验证了
+  cordis traceable 服务（`this.ctx` = 调用方 ctx）这一前提；
+- 同作用域同名重复注册抛 `prompt section "mcp:demo" is already registered in
+  this scope`（跨作用域不冲突）——据此保留「先 dispose 影子 → 挂项目层 → 再补
+  影子」的换代顺序；
+- 版本漂移取证：`0.1.2-alpha.2` 的 `SECTION_ORDERS` 无 `MCP_SERVERS`、
+  `0.1.0-rc.6` 连 `getSectionOrder` 都没有（宿主兜底常量与 try/catch 必需）；
+  旧版 mcp-client 不注册 `mcp:*` 段，故影子只对宿主 ≥0.2.x 有意义；
+- 假 ctx 驱动的独立 harness 68/68 断言 PASS（`notes/verify/prompt-shadow*.mjs`，
+  不入库）：关闭 → 影子段注册/复原、项目层挂载不遮蔽、无 systemPrompt 降级、
+  部分禁用只遮蔽被禁用项、root 侧证据不足跳过、`remountGlobal`/`tools/change`
+  收敛（含"全程无重复注册尝试"负向控制）；
+- 旧 `status()` / 挂载行为基准 `notes/verify/loader-behavior.mjs` 81/81 通过，
+  不回归。
 
 ## [1.7.0] - 2026-10-30
 

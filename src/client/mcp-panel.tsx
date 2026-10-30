@@ -1016,7 +1016,7 @@ function McpExternalDetail({ api, server }: { api: McpApi; server: ClientMcpRunt
         <dt>默认 / 当前对话</dt>
         <dd>
           {server.restrictable
-            ? "面板列表里的「默认」开关决定新建对话是否启用；输入框的 MCP 弹层里可按当前对话单独开启/关闭（用 tools.restrict 屏蔽或恢复其工具，不卸载共享实例）。"
+            ? "面板列表里的「默认」开关决定新建对话是否启用；输入框的 MCP 弹层里可按当前对话单独开启/关闭（用 tools.restrict 屏蔽/恢复该 server 的全局工具，并在本会话系统提示词里遮蔽/恢复它的服务器指令段；不卸载共享实例）。"
             : "该实例按会话作用域注入，无法在当前对话里屏蔽。"}
           {server.disabledInProject === true ? "当前默认：关闭（新建对话不启用）。" : "当前默认：开启。"}
         </dd>

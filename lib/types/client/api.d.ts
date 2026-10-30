@@ -526,8 +526,9 @@ export interface McpApi {
     }): Promise<ClientMcpRuntimeView>;
     /**
      * 设置**当前 session** 的能力开关（按会话落盘，重启/resume 后恢复）：项目条目
-     * 按需挂载/卸载，全局与外部注入实例用 `tools.restrict` 屏蔽/恢复其工具
-     * （不卸载实例）。`enabled: undefined` = 清掉显式覆盖、重新跟随项目默认。
+     * 按需挂载/卸载，全局与外部注入实例用 `tools.restrict` 屏蔽/恢复其工具，并在
+     * 本会话系统提示词里遮蔽/恢复其服务器指令段（`mcp:<serverName>` 影子段；不卸载
+     * 实例）。`enabled: undefined` = 清掉显式覆盖、重新跟随项目默认。
      */
     setSessionEnabled(input: {
         target: string;
