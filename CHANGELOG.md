@@ -5,7 +5,46 @@
 
 ## [Unreleased]
 
-（暂无）
+### 修复
+
+- **MCP 资源服务器清单仍列出已关闭的 server 名**（1.7.1 的残留）：宿主
+  `dsh-mcp-resources` 的 `mcp-resource-servers` 段（`## MCP resource servers` +
+  段尾 JSON 名单）由资源 provider 注册表现算，`tools.restrict` 与
+  `mcp:<serverName>` 指令段影子都影响不到它——「当前对话」关掉 server 后，
+  它的名字仍出现在模型看到的资源服务器清单里。
+  修复：`src/mcp/loader.ts` 为每个会话挂一个 `system-prompt/assemble` 装配钩子
+  （`installResourceListFilter`），只对名为 `mcp-resource-servers` 的段做最小
+  文本手术（`filterResourceListNames`）：解析段尾 `server argument: [...]` JSON
+  名单 → 剔除命中的**字符串** serverName（非字符串项原样保留，防宿主未来扩展
+  名单结构）→ 用原前后缀拼回（保持顺序）。边界：
+  - **不整段删除**：全部被剔除时保留段、名单写作 `[]`（明确告知没有可用资源
+    服务器）；其它段（含 `mcp:<serverName>` 指令段）一律不动；
+  - **fail-open**：正则/JSON/数组形状不符时原样返回，宿主改文案只会退化为
+    「名单不隐藏」，绝不影响装配；
+  - 隐藏名单与指令段影子同源（每代 `applyPromptShadows` 重算），但**不要求**
+    root 侧证据：名字出现在宿主清单里就说明有 resource provider；
+  - 宿主 ctx 不支持 `on` / 注册抛错 → 一次性 warning + 降级，不拖垮 session
+    挂载；监听器每会话仅注册一次、随 agent ctx 释放。
+  剩余残留：三个资源工具（`list_mcp_resources` / `list_mcp_resource_templates`
+  / `read_mcp_resource`）仍能访问被关 server 的 resources（宿主无按名字移除
+  provider 的 API；需要上游支持）。
+
+### 验证
+
+- 真实运行版 DSH 0.2.1-rc.3（app.asar 内的 `dsh-system-prompt` + `cordis` +
+  `dsh-scope`）实测：scoped ctx 注册 `system-prompt/assemble` 钩子后，本会话
+  清单从 `["AnySearch","Serena","deepwiki"]` 过滤为
+  `["AnySearch","deepwiki"]`、另一会话不变、`mcp:*` 段不受影响、全剔时为
+  `[]`、非法 JSON fail-open；钩子 dispose 后恢复；
+- 独立 harness（假 ctx 模拟 waterfall）48/48 PASS：部分剔除、本会话 mounted 同名
+  不剔除（即使它也是 restrict target）、全剔时 `[]` 且段保留、fail-open
+  （正则不匹配/非法 JSON/非数组/text 非 string/缺段均返回原引用）、只改
+  `mcp-resource-servers` 段（含同样锚点的干扰段对象引用不变）、宿主 `on` 缺失/
+  抛错时恰好 1 条 warning 且不拖垮挂载、同步/Promise 两种 `next()` 形态、
+  动态开关与 session 隔离、每会话恰好 1 个 listener（remount 不重复注册）；
+  负向对照 5/5 变异可检出（漏过滤/丢失挂载排除/整段删除/fail-closed/挂错作用域）；
+- 旧基准 `loader-behavior` 81/81、`prompt-shadow` 68/68 不回归
+  （`prompt-shadow` 的 S6-1 断言随 1.7.1 的"静默重试 + 单次 warning"实现同步调整）。
 
 ## [1.7.1] - 2026-10-30
 

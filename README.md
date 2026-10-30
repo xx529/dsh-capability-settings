@@ -818,14 +818,20 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   （headless / 旧装配）时整组降级为一次性 warning，绝不抛穿到 session 挂载。
   实现见 `src/mcp/loader.ts` 的 `applyPromptShadows` /
   `disposePromptShadows` / `rootSideServerNames` / `refreshPromptShadows`。
-  **已知残留（本插件无法干净解决）**：`dsh-mcp-resources` 的
-  `mcp-resource-servers` 段（服务器名清单）不归本插件所有，仍会列出被关掉的
-  server 名；三个资源工具（`list_mcp_resources` /
-  `list_mcp_resource_templates` / `read_mcp_resource`）也仍能列出/读取被关
-  server 的 resources——宿主没有按名字移除 provider 的 API：整段 shadow 会连
-  保留的 server 一起从清单消失，重写文本则依赖宿主内部格式（跨版本易碎）。
-  要彻底解决需上游 `dsh-mcp-resources` 支持「按作用域抑制/从受限工具视图派生
-  清单」。
+  **资源清单的补充处理**：`dsh-mcp-resources` 的 `mcp-resource-servers` 段
+  （`## MCP resource servers` + 名字 JSON 清单）由宿主的资源 provider 注册表
+  现算、不归本插件，`tools.restrict` 与段影子都影响不到它。本插件在该会话的
+  `system-prompt/assemble` 装配钩子里做**最小文本手术**：只把本会话已关闭的
+  server 名从段尾 JSON 名单里剔除（只剔字符串名、非字符串项原样保留；名字顺序
+  不变；全部被剔除时保留段、名单写 `[]`；正则/JSON 解析失败则原样返回
+  fail-open），不整段删除、不碰其它段。
+  这是与宿主持久文本格式的耦合点——宿主改文案只会退化为「名单不隐藏」，不影响
+  装配；长期方案仍需上游 `dsh-mcp-resources` 支持「按作用域抑制/从受限工具
+  视图派生清单」。
+  **剩余残留**：三个资源工具（`list_mcp_resources` /
+  `list_mcp_resource_templates` / `read_mcp_resource`）仍能列出/读取被关
+  server 的 resources（宿主没有按名字移除 provider 的 API，工具层无法只删
+  单个 provider 的资源能力）。
 - **Tools 的开关也是 `tools.restrict`，但按"插件"聚合、且是两层默认**：宿主工具
   注册表只有 `name / description / parameters`、没有注入方字段（`tools.register`
   不接受来源参数），所以插件归属靠命名约定表推断（见「Tools（插件工具）」）。

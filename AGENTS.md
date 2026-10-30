@@ -184,11 +184,17 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
    ④ 宿主无 `systemPrompt.section` 时整组降级为一次性 warning，**绝不抛穿
    session 挂载**。收敛点：`remount` 挂载后、`remountGlobal` 完成后、
    `tools/change`（`refreshPromptShadows`）。
-   残留：`dsh-mcp-resources` 的 `mcp-resource-servers` 段（服务器名清单）不属于
-   本插件，仍会列出被关掉的 server 名；三个资源工具（`list_mcp_resources` /
-   `list_mcp_resource_templates` / `read_mcp_resource`）也仍能访问被关 server 的
-   resources（宿主无按名字移除 provider 的 API）。不要靠复刻宿主文本格式去修，
-   应向 `dsh-mcp-resources` 上游提案「按作用域抑制 / 从受限工具视图派生清单」。
+   资源清单补充：`dsh-mcp-resources` 的 `mcp-resource-servers` 段（服务器名 JSON
+   清单）由宿主按 provider 注册表现算，段影子影响不到它，所以在会话的
+   `system-prompt/assemble` 钩子里做**最小文本手术**（`installResourceListFilter`
+   / `filterResourceListNames`）：只剔除本会话已关闭的 server 名，顺序不变、
+   全剔时保留段写 `[]`、解析失败 fail-open 原样返回；不整段删、不碰其它段。
+   这是与宿主持久文案的耦合点（宿主改格式只会退化为不隐藏，不影响装配），
+   长期方案仍需上游 `dsh-mcp-resources` 提案「按作用域抑制 / 从受限工具视图
+   派生清单」。
+   剩余残留：三个资源工具（`list_mcp_resources` / `list_mcp_resource_templates`
+   / `read_mcp_resource`）仍能访问被关 server 的 resources（宿主无按名字移除
+   provider 的 API）。
 6. **外部注入的 MCP**（其它插件/profile 运行时挂的 mcp-client，不在本插件配置文件里）：
    通过 cordis `ctx.registry` 的 `Plugin.Runtime.fibers` 发现（`Fiber.name` =
    最近具名祖先插件 = 注入方），或 cordis `loader.entries()`（profile `insert:` 条目）；
