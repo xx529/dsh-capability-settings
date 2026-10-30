@@ -1,11 +1,10 @@
 /**
- * 输入框下方的「本会话能力」配置区（Composer Capability Dock）。
+ * 会话「本会话能力」配置区（首屏入口 + 配置弹窗 + 会话内整页）。
  *
  * 两个入口（在 src/client.ts 注册）：
- * 三个入口（在 src/client.ts 注册）：
- *   - 首屏（hero）：`conversation.input.dock` 里的零高锚点 + `position: fixed`
- *     面板，位置跟随输入卡（[data-composer-card] 的 rect + ResizeObserver），
- *     视觉上落在输入框下方、默认展开；active 相位该组件返回 null。
+ *   - 首屏（hero）：`conversation.input.left` 工具行预留位里的 icon+计数入口
+ *     （书/插头/工具箱 + ✦ + 滑杆），点击打开居中弹窗（55% 遮罩 + 10px 背景模糊）；
+ *     ✦ 仍触发能力决策，结果面板 fixed 落在输入卡下方。active 相位不渲染入口。
  *   - 会话中（conversation.view，顶部 Tab「能力」）：整页管理本会话能力；
  *     进入该 Tab 时会临时隐藏输入框（不需要对话输入），切回其它 Tab 恢复。
  *
@@ -21,7 +20,6 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
 import type {
   CapabilityPanelApi,
   ClientMcpRuntimeServer,
@@ -60,6 +58,55 @@ function ChevronIcon({ up = false, size = 12 }: { up?: boolean; size?: number })
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
       <path d={up ? "m5 10 3-3 3 3" : "m5 6 3 3 3-3"} stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/**
+ * 首屏入口三域图标（扁平单色，随 currentColor）：
+ * 书 = Skills、插头 = MCP、工具箱 = Tools（Figma v14 对齐）。
+ */
+function BookIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M3 7 11 9v11L3 18ZM21 7 13 9v11l8-2ZM11 9h2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function PlugIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 22v-5M9 8V2M15 8V2M6 8h12v3l-1.5 2.5L14.5 15 12 15.7 9.5 15 7.5 13.5 6 11Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ToolboxIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M3 9h18v11H3ZM8 9V5h8v4M3 12.5h18M9 14h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** 入口右侧「配置」：滑杆图标。 */
+function SlidersIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+      <path d="M1 2.6h10M1 6h10M1 9.4h10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <circle cx="3.6" cy="2.6" r="1.5" fill="var(--dsw-alias-bg-layer-1,#fff)" stroke="currentColor" strokeWidth="1.1" />
+      <circle cx="8.2" cy="6" r="1.5" fill="var(--dsw-alias-bg-layer-1,#fff)" stroke="currentColor" strokeWidth="1.1" />
+      <circle cx="5.4" cy="9.4" r="1.5" fill="var(--dsw-alias-bg-layer-1,#fff)" stroke="currentColor" strokeWidth="1.1" />
+    </svg>
+  );
+}
+
+/** 能力决策（填充四角星）。 */
+function DecisionStarIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8Z" fill="currentColor" />
     </svg>
   );
 }
@@ -402,7 +449,7 @@ function useComposerCardRect(active: boolean, hostRef: { current: HTMLDivElement
 export type PanelDomain = "skills" | "mcp" | "jev";
 
 /**
- * 宿主 `conversation.input.dock` 槽透传的 standardProps 子集。
+ * 宿主 `conversation.input.left` 槽透传的 standardProps 子集。
  *
  * 真机契约（app.asar 只读核对）：该槽 ownerProps 为 `InputZone { session, input }`，
  * standardProps 含 `useInput: SnapshotSelectorHook<InputState>`。旧外壳可能两者都
@@ -416,8 +463,8 @@ export interface HeroSlotProps {
   sessionId?: string;
 }
 
-/** `ComposerCapabilityHero` 的入参（由 `src/client.ts` 的槽注册回调装配）。 */
-export interface ComposerCapabilityHeroProps {
+/** 首屏入口的入参（由 `src/client.ts` 的槽注册回调装配）。 */
+export interface ComposerCapabilityEntryProps {
   api: CapabilityPanelApi;
   /** 打开能力面板；传 `"jev"` 时停在「Jev 模型」Tab。 */
   onManage?: (domain?: PanelDomain) => void;
@@ -1141,45 +1188,6 @@ function useDecision(options: UseDecisionOptions): DecisionController {
 // 「✦ 能力决策」入口与结果面板
 // ---------------------------------------------------------------------------
 
-/** 两态入口按钮（展开面板 tabs 行 / 收起能力条右侧，视觉必须一致）。 */
-function DecisionEntryButton({
-  inBar,
-  label,
-  tooltip,
-  disabled,
-  guide,
-  onClick,
-}: {
-  inBar: boolean;
-  label: string;
-  tooltip: string;
-  disabled: boolean;
-  guide: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className={`skp-decision-entry${inBar ? " skp-decision-entry-bar" : ""}`}
-      title={tooltip}
-      aria-label="根据输入框草稿为本会话能力做能力决策"
-      aria-disabled={disabled ? true : undefined}
-      onClick={(event) => {
-        // 收起态能力条本身是 role="button"（点击展开），入口不能触发它。
-        event.stopPropagation();
-        if (disabled) return;
-        onClick();
-      }}
-    >
-      <span className="skp-decision-entry-star" aria-hidden="true">
-        ✦
-      </span>
-      <span className="skp-decision-entry-label">{label}</span>
-      {guide && <i className="skp-decision-entry-dot" aria-hidden="true" />}
-    </button>
-  );
-}
-
 /** 评分中骨架（5 行，与结果行同高）。 */
 function DecisionSkeleton() {
   return (
@@ -1778,7 +1786,7 @@ export interface BulkState {
 const IDLE_BULK: BulkState = { phase: "idle", doneDomains: 0, totalDomains: BULK_DOMAINS.length, failed: [], failedDomains: [] };
 
 interface PanelProps {
-  mode: "dock" | "hero" | "overlay" | "view";
+  mode: "dock" | "hero" | "overlay" | "view" | "modal";
   loading: boolean;
   error?: string;
   snapshot: CapabilitySnapshot;
@@ -1799,10 +1807,6 @@ interface PanelProps {
   /** 重试只重放失败域。 */
   onRetryBulk: () => void;
   bulkState: BulkState;
-  /** 入口「✦ 能力决策」（展开态在 tabs 行右侧；仅 hero 传入）。 */
-  decisionEntry?: ReactNode;
-  /** 自动触发默认关闭的弱提示（与入口同排，窄容器隐藏）。 */
-  decisionHint?: string;
 }
 
 export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
@@ -1825,8 +1829,6 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
     onRetryBulk,
     bulkState,
     initialTab,
-    decisionEntry,
-    decisionHint,
   } = props;
   const [tab, setTab] = useState<TabId>(initialTab ?? "skills");
   const [query, setQuery] = useState("");
@@ -1876,7 +1878,12 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
           <SparkleIcon />
         </span>
         <span className="skp-dock-title">本会话能力</span>
-        {mode === "view" && <span className="skp-dock-subtitle">开关只作用于当前会话，不修改项目默认</span>}
+        {mode === "modal" && <span className="skp-dock-scope">仅当前会话</span>}
+        {(mode === "view" || mode === "modal") && (
+          <span className="skp-dock-subtitle">
+            {mode === "modal" ? "开关只作用于当前对话 · 不改项目默认" : "开关只作用于当前会话，不修改项目默认"}
+          </span>
+        )}
         <div className="skp-dock-head-right">
           <label className="skp-dock-search">
             <span className="skp-dock-search-icon">
@@ -1890,10 +1897,16 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
               onChange={(event) => setQuery(event.target.value)}
             />
           </label>
-          {mode !== "view" && (
-            <button type="button" className="skp-dock-icon-btn" title="收起" aria-label="收起" onClick={onCollapse}>
-              <ChevronIcon up />
+          {mode === "modal" ? (
+            <button type="button" className="skp-dock-modal-close" title="关闭" aria-label="关闭" onClick={onCollapse}>
+              ✕
             </button>
+          ) : (
+            mode !== "view" && (
+              <button type="button" className="skp-dock-icon-btn" title="收起" aria-label="收起" onClick={onCollapse}>
+                <ChevronIcon up />
+              </button>
+            )
           )}
         </div>
       </div>
@@ -1939,8 +1952,6 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
           </button>
         </div>
         <span className="skp-dock-spacer" />
-        {decisionHint !== undefined && <span className="skp-decision-hint">{decisionHint}</span>}
-        {decisionEntry}
         {onManage !== undefined && (
           <button type="button" className="skp-dock-link" onClick={onManage}>
             管理全部 ↗
@@ -2049,85 +2060,6 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
           </button>
         )}
       </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 收起态能力条
-// ---------------------------------------------------------------------------
-
-export function CapabilityBar({
-  skillRows,
-  mcpRows,
-  toolRows,
-  loading,
-  onExpand,
-  decisionEntry,
-}: {
-  skillRows: SkillRow[];
-  mcpRows: McpRow[];
-  /** Tools 域行（v13）：chips 与计数含第三域。 */
-  toolRows: ToolRow[];
-  loading: boolean;
-  onExpand: () => void;
-  /** 入口「✦ 能力决策」（紧邻「配置」左侧；仅 hero 传入）。 */
-  decisionEntry?: ReactNode;
-}) {
-  const mcpEnabled = mcpRows.filter((row) => row.enabled).map((row) => ({ id: row.id, name: row.name, kind: "mcp" as const }));
-  const toolEnabled = toolRows.filter((row) => row.enabled).map((row) => ({ id: row.id, name: row.name, kind: "tool" as const }));
-  const enabled = [
-    ...mcpEnabled.slice(0, 2),
-    ...skillRows.filter((row) => row.enabled).map((row) => ({ id: row.id, name: row.name, kind: "skill" as const })),
-    ...toolEnabled,
-    ...mcpEnabled.slice(2),
-  ];
-  const visible = enabled.slice(0, 5);
-  const overflow = enabled.length - visible.length;
-  const total = skillRows.length + mcpRows.length + toolRows.length;
-  return (
-    <div
-      className="skp-dock-bar"
-      role="button"
-      tabIndex={0}
-      aria-label="展开本会话能力配置"
-      onClick={onExpand}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onExpand();
-        }
-      }}
-    >
-      <span className="skp-dock-title-icon">
-        <SparkleIcon />
-      </span>
-      <span className="skp-dock-bar-title">本会话能力</span>
-      <span className="skp-dock-bar-divider" />
-      {loading && enabled.length === 0 ? (
-        <span className="skp-dock-bar-hint">加载中…</span>
-      ) : visible.length === 0 ? (
-        <span className="skp-dock-bar-hint">未启用任何能力</span>
-      ) : (
-        <span className="skp-dock-chips">
-          {visible.map((item) => (
-            <span key={item.id} className={`skp-dock-chip skp-dock-chip-${item.kind}`}>
-              <i className="skp-dock-chip-dot" />
-              {item.name}
-            </span>
-          ))}
-          {overflow > 0 && <span className="skp-dock-chip skp-dock-chip-more">+{overflow}</span>}
-        </span>
-      )}
-      <span className="skp-dock-spacer" />
-      <span className="skp-dock-count">
-        {enabled.length} / {total} 启用
-      </span>
-      {decisionEntry}
-      <button type="button" className="skp-dock-config-btn" onClick={onExpand}>
-        配置
-        <ChevronIcon />
-      </button>
     </div>
   );
 }
@@ -2372,23 +2304,30 @@ function rowIdOfBulkFailure(failure: SessionBulkFailure, snapshot: CapabilitySna
 }
 
 // ---------------------------------------------------------------------------
-// 首屏（hero）：fixed 面板（active 相位返回零高占位）
+// 首屏入口：收进输入框底部工具行（conversation.input.left）
+//
+// 设计（Figma v14）：
+//   - 收起态只在工具行预留位显示「书 8 / 插头 5 / 工具箱 3 + ✦ + 滑杆」，
+//     不再单独占输入框下方一条，也不再内联下拉展开；
+//   - 点击计数区 / 滑杆 → 居中弹窗（背景模糊），弹窗内复用 CapabilityPanel；
+//   - ✦ 仍是「能力决策」手动入口，结果面板沿用 v13（fixed 落在输入卡下方）。
+// hero 相位之外（active / settling）组件不渲染入口，但保留壳节点用于相位探测。
 // ---------------------------------------------------------------------------
 
-export function ComposerCapabilityHero(props: ComposerCapabilityHeroProps) {
+export function ComposerCapabilityEntry(props: ComposerCapabilityEntryProps) {
   const { api, onManage } = props;
   const slot = props.slotProps;
   if (slot !== undefined && typeof slot.useInput === "function") {
-    return <HeroWithSubscribedDraft api={api} onManage={onManage} slotProps={slot} useInput={slot.useInput} />;
+    return <EntryWithSubscribedDraft api={api} onManage={onManage} slotProps={slot} useInput={slot.useInput} />;
   }
-  return <HeroBody api={api} onManage={onManage} slotProps={slot} slotDraft={undefined} />;
+  return <EntryBody api={api} onManage={onManage} slotProps={slot} slotDraft={undefined} />;
 }
 
 /**
  * 槽 standardProps 可用分支：`useInput` 是订阅式 hook，草稿变化即重渲染。
- * 单独成组件是为了避免在 props 形态切换时改变 HeroBody 的 hooks 顺序。
+ * 单独成组件是为了避免在 props 形态切换时改变 EntryBody 的 hooks 顺序。
  */
-function HeroWithSubscribedDraft({
+function EntryWithSubscribedDraft({
   api,
   onManage,
   slotProps,
@@ -2400,10 +2339,10 @@ function HeroWithSubscribedDraft({
   useInput: NonNullable<HeroSlotProps["useInput"]>;
 }) {
   const draft = useInput((state: any) => (typeof state?.draft === "string" ? state.draft : ""));
-  return <HeroBody api={api} onManage={onManage} slotProps={slotProps} slotDraft={draft} />;
+  return <EntryBody api={api} onManage={onManage} slotProps={slotProps} slotDraft={draft} />;
 }
 
-function HeroBody({
+function EntryBody({
   api,
   onManage,
   slotProps,
@@ -2420,8 +2359,10 @@ function HeroBody({
   const workspace = useWorkspaceLabel(api);
   const controller = useCapabilityController(api, workspace, isHero);
   const rect = useComposerCardRect(isHero, ref);
-  const [open, setOpen] = useState(true);
+  const [modalOpen, setModalOpen] = useState(false);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const entryRef = useRef<HTMLDivElement | null>(null);
+  const modalRef = useRef<HTMLDivElement | null>(null);
   const titleRef = useRef<HTMLDivElement | null>(null);
 
   // 草稿三级降级：useInput（已订阅）→ input.draft（点时刻）→ DOM 兜底。
@@ -2451,7 +2392,7 @@ function HeroBody({
   const returnFocusToEntry = useCallback((returnFocus: boolean) => {
     if (!returnFocus) return;
     requestAnimationFrame(() => {
-      contentRef.current?.querySelector<HTMLButtonElement>(".skp-decision-entry")?.focus();
+      entryRef.current?.querySelector<HTMLButtonElement>(".skp-dock-entry-decision")?.focus();
     });
   }, []);
   const decision = useDecision({
@@ -2484,7 +2425,6 @@ function HeroBody({
 
   let entryDisabled = false;
   let entryGuide = jevConfig.state.status === "ready" && !configured;
-  let entryLabel = "能力决策";
   let entryTooltip = configured
     ? autoOff
       ? "自动触发默认关闭 · 可在 Jev 模型 Tab 开启"
@@ -2493,12 +2433,10 @@ function HeroBody({
   if (decision.state?.phase === "applying") {
     entryDisabled = true;
     entryGuide = false;
-    entryLabel = "应用中…";
     entryTooltip = "正在应用所选能力";
   } else if (decision.state?.phase === "loading") {
     entryDisabled = true;
     entryGuide = false;
-    entryLabel = "评分中…";
     entryTooltip = "正在评分，请稍候";
   } else if (jevConfig.state.status === "loading") {
     entryDisabled = true;
@@ -2543,32 +2481,139 @@ function HeroBody({
     decision.start();
   };
 
-  const decisionHint =
-    jevConfig.state.status === "ready" && jevConfig.state.view.hasApiKey && autoOff ? "自动触发默认关闭 · 可在 Jev 模型 Tab 开启" : undefined;
+  // 弹窗关闭：状态复位 + 焦点还给入口。
+  const closeModal = useCallback(() => {
+    setModalOpen(false);
+    requestAnimationFrame(() => entryRef.current?.querySelector<HTMLButtonElement>(".skp-dock-entry-config")?.focus());
+  }, []);
 
-  const entryButton = (inBar: boolean) => (
-    <DecisionEntryButton inBar={inBar} label={entryLabel} tooltip={entryTooltip} disabled={entryDisabled} guide={entryGuide} onClick={onEntryClick} />
-  );
+  // 相位切走（hero → active）时关闭弹窗，避免弹层残留在对话页。
+  useEffect(() => {
+    if (!isHero) setModalOpen(false);
+  }, [isHero]);
 
-  // 零高锚点：input.dock 里的真实 DOM（hero 时负责相位探测 + 定位面板）。
-  // 不用 portal：fixed 元素不受祖先 overflow 裁剪，且避免引入 react-dom 类型
-  // 依赖（本插件客户端 bundle 只外置 react / react-dom / jsx-runtime，源码
-  // 侧没有 @types/react-dom）。
-  const placeholder = <div ref={ref} className="skp-dock-hero-anchor" aria-hidden="true" />;
-  if (!isHero || rect === undefined) return placeholder;
+  // 弹窗 a11y：Esc 关闭 + Tab 焦点圈定在弹窗内（capture，避免被宿主输入框快捷键抢走）。
+  useEffect(() => {
+    if (!modalOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closeModal();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const root = modalRef.current;
+      if (root === null) return;
+      const focusables = Array.from(
+        root.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((node) => node.offsetParent !== null);
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    const frame = requestAnimationFrame(() => {
+      modalRef.current?.querySelector<HTMLButtonElement>(".skp-dock-modal-close")?.focus();
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [modalOpen, closeModal]);
+
+  // 入口三域计数（已启用数；加载中显示 —）。
+  const skillsOn = controller.skillRows.filter((row) => row.enabled).length;
+  const mcpOn = controller.mcpRows.filter((row) => row.enabled).length;
+  const toolsOn = controller.toolRows.filter((row) => row.enabled).length;
+  const countsLoading = controller.loading && totalCapabilities === 0;
+  const countText = (value: number) => (countsLoading ? "—" : String(value));
+  const countTitle = (label: string, on: number, total: number) => `${label}：已启用 ${on} / ${total} · 点击配置本会话能力`;
 
   const viewportHeight = typeof window === "undefined" ? 900 : window.innerHeight;
-  // FINDING-03：能力决策结果态不受 hero 能力面板的 340/360 视觉上限约束
-  // （帧 08 需要 6 行完整可见）；其余态沿用 180–360，保持 dock 的紧凑高度。
-  const decisionOpen = decision.state !== undefined;
-  const maxPanelHeight = decisionOpen ? 560 : 360;
-  const maxHeight = Math.max(180, Math.min(maxPanelHeight, viewportHeight - rect.top - 24));
-  const style = { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, maxHeight: `${maxHeight}px` };
+  const decisionStyle =
+    rect === undefined
+      ? undefined
+      : (() => {
+          const maxHeight = Math.max(180, Math.min(decision.state !== undefined ? 560 : 360, viewportHeight - rect.top - 24));
+          return { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, maxHeight: `${maxHeight}px` };
+        })();
 
   return (
-    <div ref={ref} className="skp-dock-hero-anchor">
-      <div ref={contentRef} className="skp-dock-fixed" style={style}>
-        {decision.state !== undefined ? (
+    <div ref={ref} className="skp-dock-entry-host">
+      {isHero && (
+        <div ref={entryRef} className="skp-dock-entry" role="group" aria-label="本会话能力">
+          <button
+            type="button"
+            className="skp-dock-entry-item"
+            title={countTitle("Skills", skillsOn, controller.skillRows.length)}
+            aria-label={`配置 Skills：已启用 ${skillsOn} / ${controller.skillRows.length}`}
+            onClick={() => setModalOpen(true)}
+          >
+            <span className="skp-dock-entry-icon">
+              <BookIcon />
+            </span>
+            <span className="skp-dock-entry-count">{countText(skillsOn)}</span>
+          </button>
+          <button
+            type="button"
+            className="skp-dock-entry-item"
+            title={countTitle("MCP", mcpOn, controller.mcpRows.length)}
+            aria-label={`配置 MCP：已启用 ${mcpOn} / ${controller.mcpRows.length}`}
+            onClick={() => setModalOpen(true)}
+          >
+            <span className="skp-dock-entry-icon">
+              <PlugIcon />
+            </span>
+            <span className="skp-dock-entry-count">{countText(mcpOn)}</span>
+          </button>
+          <button
+            type="button"
+            className="skp-dock-entry-item"
+            title={countTitle("Tools", toolsOn, controller.toolRows.length)}
+            aria-label={`配置 Tools：已启用 ${toolsOn} / ${controller.toolRows.length}`}
+            onClick={() => setModalOpen(true)}
+          >
+            <span className="skp-dock-entry-icon">
+              <ToolboxIcon />
+            </span>
+            <span className="skp-dock-entry-count">{countText(toolsOn)}</span>
+          </button>
+          <span className="skp-dock-entry-sep" aria-hidden="true" />
+          <button
+            type="button"
+            className="skp-dock-entry-btn skp-dock-entry-decision"
+            title={entryTooltip}
+            aria-label="能力决策"
+            aria-disabled={entryDisabled ? true : undefined}
+            onClick={onEntryClick}
+          >
+            <DecisionStarIcon />
+            {entryGuide && <i className="skp-dock-entry-guide-dot" aria-hidden="true" />}
+          </button>
+          <button
+            type="button"
+            className="skp-dock-entry-btn skp-dock-entry-config"
+            title="配置本会话能力"
+            aria-label="配置本会话能力"
+            onClick={() => setModalOpen(true)}
+          >
+            <SlidersIcon />
+          </button>
+        </div>
+      )}
+      {isHero && decision.state !== undefined && decisionStyle !== undefined && (
+        <div ref={contentRef} className="skp-dock-fixed" style={decisionStyle}>
           <DecisionPanel
             state={decision.state}
             config={jevConfig.state}
@@ -2584,50 +2629,47 @@ function HeroBody({
             onToggle={decision.toggleItem}
             onApply={decision.apply}
           />
-        ) : open ? (
-          <CapabilityPanel
-            mode="hero"
-            loading={controller.loading}
-            error={controller.error}
-            snapshot={controller.snapshot}
-            skillRows={controller.skillRows}
-            mcpRows={controller.mcpRows}
-            toolRows={controller.toolRows}
-            pending={controller.pending}
-            busy={controller.busy}
-            onToggle={(row) => void controller.toggle(row)}
-            onReset={controller.reset}
-            onBulk={controller.onBulk}
-            onRetryBulk={controller.retryBulk}
-            bulkState={controller.bulkState}
-            onRefresh={controller.refresh}
-            onCollapse={() => setOpen(false)}
-            {...(onManage !== undefined ? { onManage } : {})}
-            onRetry={controller.refresh}
-            decisionEntry={entryButton(false)}
-            {...(decisionHint !== undefined ? { decisionHint } : {})}
-          />
-        ) : (
-          <div className="skp-decision-bar-wrap">
-            <CapabilityBar
+          {decision.toast !== undefined && (
+            <div className={`skp-decision-toast skp-decision-toast-${decision.toast.tone}`} role="status">
+              {decision.toast.text}
+            </div>
+          )}
+        </div>
+      )}
+      {isHero && modalOpen && (
+        <div
+          className="skp-dock-modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeModal();
+          }}
+        >
+          <div ref={modalRef} className="skp-dock-modal" role="dialog" aria-modal="true" aria-label="本会话能力">
+            <CapabilityPanel
+              mode="modal"
+              loading={controller.loading}
+              error={controller.error}
+              snapshot={controller.snapshot}
               skillRows={controller.skillRows}
               mcpRows={controller.mcpRows}
               toolRows={controller.toolRows}
-              loading={controller.loading}
-              onExpand={() => setOpen(true)}
-              decisionEntry={entryButton(true)}
+              pending={controller.pending}
+              busy={controller.busy}
+              onToggle={(row) => void controller.toggle(row)}
+              onReset={controller.reset}
+              onBulk={controller.onBulk}
+              onRetryBulk={controller.retryBulk}
+              bulkState={controller.bulkState}
+              onRefresh={controller.refresh}
+              onCollapse={closeModal}
+              {...(onManage !== undefined ? { onManage } : {})}
+              onRetry={controller.refresh}
             />
           </div>
-        )}
-        {decision.toast !== undefined && (
-          <div className={`skp-decision-toast skp-decision-toast-${decision.toast.tone}`} role="status">
-            {decision.toast.text}
-          </div>
-        )}
-        <span className="skp-sr-only" role="status" aria-live="polite">
-          {decision.liveMessage}
-        </span>
-      </div>
+        </div>
+      )}
+      <span className="skp-sr-only" role="status" aria-live="polite">
+        {decision.liveMessage}
+      </span>
     </div>
   );
 }

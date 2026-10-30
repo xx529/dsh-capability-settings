@@ -25,7 +25,7 @@ import { createPanelApi } from "./client/api-adapter.js";
 import { setPanelDomain, type DomainTab } from "./client/panel.js";
 import { installStyles } from "./client/styles.js";
 import { CapabilityPanelNavIcon, CapabilityPanelPage } from "./client/panel-entry.js";
-import { ComposerCapabilityHero, SessionCapabilityView } from "./client/composer-capability.js";
+import { ComposerCapabilityEntry, SessionCapabilityView } from "./client/composer-capability.js";
 
 /** locale 字典的命名空间。 */
 const NS = "capabilityPanel";
@@ -223,14 +223,15 @@ export function apply(ctx: any) {
     if (typeof disposePanellist === "function") disposers.push(disposePanellist);
   }
 
-  // 会话内能力配置的三个入口：
-  //   1. **顶部 Tab「能力」**（conversation.view）：整页管理本会话 Skills / MCP，
-  //      与「对话 / 轨迹 / 上下文 / 编队」同级；进入该 Tab 时隐藏输入框；
-  //   2. 首屏（hero）输入框下方内联面板（input.dock 零高锚点 + fixed 面板）。
-  // 输入框工具栏的快捷按钮与底部能力条、以及后续加过的单个「能力」图标都已
-  // 按产品决定移除；快捷消息域已随本版整体下线（数据文件静默保留）。
+  // 会话内能力配置的两个入口：
+  //   1. **顶部 Tab「能力」**（conversation.view）：整页管理本会话 Skills / MCP /
+  //      Tools，与「对话 / 轨迹 / 上下文 / 编队」同级；进入该 Tab 时隐藏输入框；
+  //   2. 首屏（hero）工具行入口（conversation.input.left 预留位）：icon+计数 +
+  //      ✦ 能力决策 + 配置滑杆，点击打开背景模糊弹窗。
+  // 输入框下方独立能力条与内联展开已按产品决定移除；快捷消息域已随本版整体下线
+  // （数据文件静默保留）。
   //
-  // 三个入口一律用 `composerApiFor(props.sessionId)`（只跟随**所在 session** 的
+  // 两个入口一律用 `composerApiFor(props.sessionId)`（只跟随**所在 session** 的
   // 工作区，不含面板钉选、不退化成列表第一项），避免跨会话串味。
   // `conversation.view` 是 session 作用域 list 槽，标准 props 可能只给
   // inspectCall/openView 等，这里用 props.sessionId 优先、sessions 快照兜底。
@@ -260,22 +261,25 @@ export function apply(ctx: any) {
     );
     if (typeof disposeCapabilityView === "function") disposers.push(disposeCapabilityView);
 
-    // 首屏（hero）的能力配置区：外壳 hero 态没有会话 view，用
-    // conversation.input.dock 里的零高锚点 + fixed 面板覆盖到输入卡下方
-    // （见 composer-capability.tsx）。active 相位该组件返回 null。
+    // 首屏（hero）入口：收进输入框底部工具行的 UI 预留位（conversation.input.left，
+    // 排在 permission / plan / 其它 input.left occupant 之后）。收起态只显示
+    // 「书/插头/工具箱 + 已启用数 + ✦ 能力决策 + 滑杆配置」；点击打开背景模糊弹窗。
+    // active 相位组件不渲染入口（但外壳节点保留用于相位探测）。
     //
     // `slotProps` 必须透传：hero 要在首屏读输入框草稿 / 停顿自动触发，
     // 而草稿与 input 状态由外壳的 standardProps 注入，不能从 api 侧拿到。
-    const disposeCapabilityHero = ctx.slots.inject("conversation.input.dock", () =>
-      ctx.slots.register({ name: "conversation.input.dock", id: "capability-panel-hero", order: 60, label: "本会话能力（首屏）" }, (props: any) =>
-        ComposerCapabilityHero({
-          api: composerApiFor(props?.sessionId),
-          onManage: openCapabilityPanel,
-          slotProps: props,
-        }),
+    const disposeCapabilityEntry = ctx.slots.inject("conversation.input.left", () =>
+      ctx.slots.register(
+        { name: "conversation.input.left", id: "capability-panel-entry", order: 60, label: "本会话能力（首屏）" },
+        (props: any) =>
+          ComposerCapabilityEntry({
+            api: composerApiFor(props?.sessionId),
+            onManage: openCapabilityPanel,
+            slotProps: props,
+          }),
       ),
     );
-    if (typeof disposeCapabilityHero === "function") disposers.push(disposeCapabilityHero);
+    if (typeof disposeCapabilityEntry === "function") disposers.push(disposeCapabilityEntry);
   }
 
   ctx.effect?.(() => () => {

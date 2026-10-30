@@ -1,11 +1,10 @@
 /**
- * 输入框下方的「本会话能力」配置区（Composer Capability Dock）。
+ * 会话「本会话能力」配置区（首屏入口 + 配置弹窗 + 会话内整页）。
  *
  * 两个入口（在 src/client.ts 注册）：
- * 三个入口（在 src/client.ts 注册）：
- *   - 首屏（hero）：`conversation.input.dock` 里的零高锚点 + `position: fixed`
- *     面板，位置跟随输入卡（[data-composer-card] 的 rect + ResizeObserver），
- *     视觉上落在输入框下方、默认展开；active 相位该组件返回 null。
+ *   - 首屏（hero）：`conversation.input.left` 工具行预留位里的 icon+计数入口
+ *     （书/插头/工具箱 + ✦ + 滑杆），点击打开居中弹窗（55% 遮罩 + 10px 背景模糊）；
+ *     ✦ 仍触发能力决策，结果面板 fixed 落在输入卡下方。active 相位不渲染入口。
  *   - 会话中（conversation.view，顶部 Tab「能力」）：整页管理本会话能力；
  *     进入该 Tab 时会临时隐藏输入框（不需要对话输入），切回其它 Tab 恢复。
  *
@@ -19,7 +18,6 @@
  *
  * @module dsh-capability-settings/client/composer-capability
  */
-import type { ReactNode } from "react";
 import type { CapabilityPanelApi, ClientMcpRuntimeServer, ClientMcpServer, ClientSkillSummary, ClientToolsUnit, SessionBulkAction, SessionBulkDomain, SessionBulkFailure } from "./api.js";
 import { type MountInfo } from "./mcp-common.js";
 export interface CapabilitySnapshot {
@@ -105,7 +103,7 @@ export type Row = SkillRow | McpRow | ToolRow;
 /** 能力面板域 Tab（`onManage` 可指定打开哪个 Tab，由 src/client.ts 接线）。 */
 export type PanelDomain = "skills" | "mcp" | "jev";
 /**
- * 宿主 `conversation.input.dock` 槽透传的 standardProps 子集。
+ * 宿主 `conversation.input.left` 槽透传的 standardProps 子集。
  *
  * 真机契约（app.asar 只读核对）：该槽 ownerProps 为 `InputZone { session, input }`，
  * standardProps 含 `useInput: SnapshotSelectorHook<InputState>`。旧外壳可能两者都
@@ -120,8 +118,8 @@ export interface HeroSlotProps {
     };
     sessionId?: string;
 }
-/** `ComposerCapabilityHero` 的入参（由 `src/client.ts` 的槽注册回调装配）。 */
-export interface ComposerCapabilityHeroProps {
+/** 首屏入口的入参（由 `src/client.ts` 的槽注册回调装配）。 */
+export interface ComposerCapabilityEntryProps {
     api: CapabilityPanelApi;
     /** 打开能力面板；传 `"jev"` 时停在「Jev 模型」Tab。 */
     onManage?: (domain?: PanelDomain) => void;
@@ -158,7 +156,7 @@ export interface BulkState {
     error?: string;
 }
 interface PanelProps {
-    mode: "dock" | "hero" | "overlay" | "view";
+    mode: "dock" | "hero" | "overlay" | "view" | "modal";
     loading: boolean;
     error?: string;
     snapshot: CapabilitySnapshot;
@@ -179,25 +177,11 @@ interface PanelProps {
     /** 重试只重放失败域。 */
     onRetryBulk: () => void;
     bulkState: BulkState;
-    /** 入口「✦ 能力决策」（展开态在 tabs 行右侧；仅 hero 传入）。 */
-    decisionEntry?: ReactNode;
-    /** 自动触发默认关闭的弱提示（与入口同排，窄容器隐藏）。 */
-    decisionHint?: string;
 }
 export declare function CapabilityPanel(props: PanelProps & {
     initialTab?: TabId;
 }): import("react").JSX.Element;
-export declare function CapabilityBar({ skillRows, mcpRows, toolRows, loading, onExpand, decisionEntry, }: {
-    skillRows: SkillRow[];
-    mcpRows: McpRow[];
-    /** Tools 域行（v13）：chips 与计数含第三域。 */
-    toolRows: ToolRow[];
-    loading: boolean;
-    onExpand: () => void;
-    /** 入口「✦ 能力决策」（紧邻「配置」左侧；仅 hero 传入）。 */
-    decisionEntry?: ReactNode;
-}): import("react").JSX.Element;
-export declare function ComposerCapabilityHero(props: ComposerCapabilityHeroProps): import("react").JSX.Element;
+export declare function ComposerCapabilityEntry(props: ComposerCapabilityEntryProps): import("react").JSX.Element;
 export declare function SessionCapabilityView({ apiFor, sessionId: initialSessionId, onManage, }: {
     apiFor: (sessionId: string | undefined) => CapabilityPanelApi;
     sessionId?: string;
