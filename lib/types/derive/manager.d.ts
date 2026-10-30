@@ -28,6 +28,23 @@ export interface DeriveInheritanceLogger {
 export interface DeriveInheritanceDeps {
     state: SessionStateStore;
     logger?: DeriveInheritanceLogger;
+    /**
+     * 惰性取 skills 会话注册表：组合根里 derive 模块先于 skills 创建（监听器顺序），
+     * 因此用 getter，事件发生时再取。
+     */
+    getSkillSessions?: () => {
+        trackAgent(agent: any): void;
+        setEnabledBatch(input: {
+            sessionId: string;
+            entries: ReadonlyArray<{
+                name: string;
+                enabled: boolean;
+            }>;
+        }): Promise<{
+            ok: boolean;
+            errors: string[];
+        }>;
+    } | undefined;
 }
 /** 生命周期句柄。 */
 export interface DeriveInheritance {

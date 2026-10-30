@@ -165,9 +165,19 @@ export function apply(ctx: any, config: Config = {}) {
   // 派生继承（spawn-time snapshot）：必须**早于** tools / mcp / skills 的
   // `agent/created` 监听器创建，保证 child 的会话记录先写入快照，三个域随后
   // hydrate 时读到同一份结果（监听器被 cordis serial await）。
+  const deriveSkillSessionsRef: {
+    current?: {
+      trackAgent(agent: any): void;
+      setEnabledBatch(input: {
+        sessionId: string;
+        entries: ReadonlyArray<{ name: string; enabled: boolean }>;
+      }): Promise<{ ok: boolean; errors: string[] }>;
+    };
+  } = {};
   const deriveInheritance = createDeriveInheritance(ctx, {
     state: sessionState,
     logger: ctx.logger,
+    getSkillSessions: () => deriveSkillSessionsRef.current,
   });
   // Tools 域（v13）：枚举全局工具注册表 → 按插件聚合成开关单元 → 按会话
   // restrict 该插件全部可继承工具。与会话存储共用同一实例（`tools` 域）。
@@ -249,6 +259,7 @@ export function apply(ctx: any, config: Config = {}) {
     projectDisabled: async (cwd?: string) => (await overridesRaw.sets(cwd)).skills,
   });
   skillSessionsRef.current = skillSessions;
+  deriveSkillSessionsRef.current = skillSessions;
   reconcileProjectRef.current = (cwd: string) => skillSessions.reconcileProject(cwd);
   /**
    * 面板 `skills.list` 的组合视图：受管磁盘行 + 宿主 registry 注入行。

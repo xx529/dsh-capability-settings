@@ -133,6 +133,11 @@ export interface SkillSessionRegistry {
     reconcileProject(cwd?: string): Promise<SessionSkillOpResult>;
     /** 本会话被关闭的 skill 名（只读快照，测试/诊断用）。 */
     sessionState(sessionId: string): string[];
+    /**
+     * 确保该 agent 已被登记（派生继承在 seed 后、skills 域监听器之前调用，
+     * 再走 `setEnabledBatch` 一次性应用；幂等）。
+     */
+    trackAgent(agent: any): void;
     /** 按 sessionId 取 live agent（registry 桥的 scope 传参用）。 */
     agentOf(sessionId: string): any | undefined;
     /** 该名字当前是否被本插件的任一 shadow 遮蔽（registry 桥清缓存时保留元数据用）。 */
