@@ -28,7 +28,9 @@
   仍在输入卡下方 fixed 出现（v13 帧 08 行为不变）。未配置 Jev 时点击引导到
   「Jev 模型」Tab；草稿为空 / 能力未就绪时置灰。
 - **Figma 新增 `Capability Dock · 首屏入口 v14` 页**（4 帧：默认收起 / Skills 弹窗 /
-  Tools 弹窗 / 全部关闭），预览图在 `docs/figma/preview/v14-*`；旧 v13 页保留。
+  Tools 弹窗 / 全部关闭），预览图在 `docs/figma/preview/v14-*`；可重导入 scene JSON
+  已保存到 `docs/figma/scenes/v14-01..04*.scene.json`（97 / 283 / 205 / 97 节点，
+  VECTOR 图标需重画，见 docs/figma/README.md）；旧 v13 页保留。
 
 ### 修复
 

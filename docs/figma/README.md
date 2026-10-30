@@ -36,9 +36,11 @@
 
 > **v14 首屏交互（2026-10-30）**：入口从「输入框下方独立能力条 / 默认展开内联面板」迁到
 > `conversation.input.left` 工具行预留位；配置改为居中背景模糊弹窗。Figma 页 `134:8699`
-> 的 4 帧为当前基线；预览图 `preview/v14-*`。**scene JSON 暂未导出**（本页含 VECTOR
-> 图标，scene 契约会丢图标；如需重建可先 `import_scene` 其余图层再补 icon），
-> 交互以页面底部 notes 与预览图为准。
+> 的 4 帧为当前基线；预览图 `preview/v14-*`；**4 帧可重导入 scene JSON 已导出**
+> （`scenes/v14-*.scene.json`，97 / 283 / 205 / 97 节点，均 < 500，可逐帧 `import_scene`；
+> 见下方 v14 scene 表）。注意：scene 契约不含 VECTOR → 入口三个 icon（书/插头/工具箱）、
+> `✦` 与滑杆图标导入后会缺失，需用 `use_figma` 重画或 `upload_assets` 补 SVG；
+> 其余布局/文字/卡片/弹窗完整。交互以页面底部 notes 与预览图为准。
 
 > **v11 已导出可重导入 scene JSON（2026-10-24）**：`scenes/v11-01-entry.scene.json`、
 > `v11-02-pause.scene.json`、`v11-03-loading.scene.json`、`v11-04-results.scene.json`、
@@ -137,7 +139,12 @@ docs/figma/
 │   ├── v11-02-pause.scene.json
 │   ├── v11-03-loading.scene.json
 │   ├── v11-04-results.scene.json   ← 170 节点（v12 来源标签已并入）
-│   └── v11-05-config.scene.json
+│   ├── v11-05-config.scene.json
+│   ├── v13-01-hero-skills.scene.json … v13-08-decision-results.scene.json ← v13 八帧
+│   ├── v14-01-hero-entry.scene.json       ← v14 四帧（97 节点；入口 icon 为 VECTOR，导入后会缺）
+│   ├── v14-02-modal-skills.scene.json     ← 283 节点
+│   ├── v14-03-modal-tools.scene.json      ← 205 节点
+│   └── v14-04-hero-all-off.scene.json     ← 97 节点
 │   # v9/v10：scene JSON 未导出（只有 preview + prototype 脚本，见 §3.1）
 ├── preview/
 │   ├── 01-hero.png                ← v5 导出预览图（1440×900）
@@ -227,9 +234,10 @@ docs/figma/
 
 1. `figma_status` 确认 `dsh` 文档已连接；断连时 `figma_select_document <connectionId>` 重新绑定。
 2. 读取 `docs/figma/scenes/*.scene.json`，取 `scene.nodes`。
-   > 目前 `scenes/` 含 v5（`01-hero` / `02-capability-tab`）、v8（4 帧，v12 已并入 01/02）
-   > 与 v11（5 帧，v12 已并入 04）；**v9/v10 没有 scene JSON**，这两页改用 §3.1 的建稿脚本
-   > 重建；v11 可直接 `import_scene`（方法见 §3.1.2），v12 并入方式见 §3.1.3。
+   > 目前 `scenes/` 含 v5（`01-hero` / `02-capability-tab`）、v8（4 帧，v12 已并入 01/02）、
+   > v11（5 帧，v12 已并入 04）、v13（8 帧）与 v14（4 帧）；**v9/v10 没有 scene JSON**，
+   > 这两页改用 §3.1 的建稿脚本重建；v11/v13/v14 可直接 `import_scene`（v14 四帧
+   > 97 / 283 / 205 / 97 节点，逐帧导入）。
 3. 调用 Figma MCP 的 `import_scene`：
    ```jsonc
    {
@@ -506,3 +514,20 @@ v12 是**提案页 + 补丁并入**，不新建基线页。执行链（脚本都
 - 契约 `{ nodes: [FRAME] }`，单帧均 < 500 节点；已校验 `JSON.parse` 通过、`nodes.length === 1`、根节点 FRAME、节点数与画布可见节点一致。
 - 导出链：`prototype/v13/export-scene.js`（紧凑序列化，短键 + 十六进制色值，规避单次工具输出上限）→
   `prototype/v13/decode-scene.py`（本地还原为 scene 契约）。**scripts 仍是建稿唯一事实源**，scene 为快照。
+
+**v14 首屏入口 scene JSON（已导出，4/4）**：
+
+| 文件 | nodes | bytes |
+|---|---|---|
+| `scenes/v14-01-hero-entry.scene.json` | 97 | 110041 |
+| `scenes/v14-02-modal-skills.scene.json` | 283 | 342872 |
+| `scenes/v14-03-modal-tools.scene.json` | 205 | 241589 |
+| `scenes/v14-04-hero-all-off.scene.json` | 97 | 110035 |
+
+- 导入：逐帧 `import_scene({ nodes: v14_01.nodes, parentId: "134:8699" })`，四帧均 < 500 节点；
+  x/y 已保留（01/02 在 y=150，03/04 在 y=1200，x=0/1520）。
+- **已知缺失**：VECTOR 图标（入口书/插头/工具箱、✦、滑杆、卡片图标）不会随 scene 导入，
+  恢复后需用 `use_figma` 的 `createVector`/`vectorPaths` 重画，或从 `preview/v14-entry-icons.png`
+  对照补 `upload_assets`；除此之外的图层可完整重建。
+- 导出脚本：`use_figma` 内复用 `docs/figma/tools/export-scene.js` 的序列化函数，一次导出
+  四帧 JSON（结果超限落 spill 文件，本地解析后逐帧写入）。

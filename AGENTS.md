@@ -211,7 +211,9 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
 - **设计源**：Figma 本地文档 **`dsh`**。**当前基线**：
   - `Capability Dock · 首屏入口 v14`（page `134:8699`）：4 帧 `134:8700`（默认收起 · 工具行
     icon+计数入口）/ `134:8942`（Skills 配置弹窗 · 背景模糊）/ `134:9184`（Tools 弹窗）/
-    `134:9426`（全部关闭）。与代码 v14 首屏交互对齐；预览图 `docs/figma/preview/v14-*`。
+    `134:9426`（全部关闭）。与代码 v14 首屏交互对齐；预览图 `docs/figma/preview/v14-*`；
+    4 帧 scene JSON 已导出（`docs/figma/scenes/v14-*.scene.json`，97/283/205/97 节点，
+    可逐帧 `import_scene`；VECTOR 图标会缺，见 README）。
   - `Capability Panel · 能力决策 v11`（page `56:7043`）：5 帧 `56:7046` / `56:7257` / `56:7468` /
     `56:7679` / `56:7890`，与代码「能力决策」实现对齐（默认关闭 + 双阈值 + 新密钥路径）；
     5 帧可重导入 scene JSON 已导出（`docs/figma/scenes/v11-*.scene.json`）。
