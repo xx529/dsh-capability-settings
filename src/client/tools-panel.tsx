@@ -516,6 +516,9 @@ export function ToolsView({
                 {attributionIsSpeculative(selected) && (
                   <p className="skp-note skp-note-warn">来源为推测，请核对工具清单</p>
                 )}
+                {selected.description !== undefined && selected.description.trim().length > 0 && (
+                  <p className="skp-note">{selected.description}</p>
+                )}
 
                 <div className="skp-note">
                   工具数 {selected.toolCount} · 开关为插件级：关闭后该插件全部工具在所有会话默认不可见（不改已有会话的显式覆盖）

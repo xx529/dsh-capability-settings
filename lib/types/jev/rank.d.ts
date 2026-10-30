@@ -24,14 +24,25 @@ export declare const DESCRIPTION_LIMIT = 200;
 export declare const WHEN_TO_USE_LIMIT = 120;
 /** question 里 `capability.name` 的码点上限（防御性补充）。 */
 export declare const NAME_LIMIT = 120;
-/** 每题最多带多少个 MCP 工具。 */
+/** 每题最多带多少个**带描述的** MCP/工具清单项。 */
 export declare const TOOL_COUNT_LIMIT = 8;
+/** 额外携带的**仅名称**工具数（`moreTools`；覆盖大插件/大 server 的工具面）。 */
+export declare const TOOL_EXTRA_NAMES_LIMIT = 24;
 /** 每个工具描述的码点上限。 */
-export declare const TOOL_DESCRIPTION_LIMIT = 100;
-/** 每题工具名 + 工具描述的总码点上限。 */
+export declare const TOOL_DESCRIPTION_LIMIT = 120;
+/** 每题 `tools` 里工具名 + 工具描述的总码点上限。 */
 export declare const TOOLS_TOTAL_LIMIT = 500;
+/** 每题 `moreTools`（仅名称）的总码点上限。 */
+export declare const TOOL_EXTRA_NAMES_TOTAL_LIMIT = 600;
 /** 工具名的码点上限（防御性补充）。 */
 export declare const TOOL_NAME_LIMIT = 80;
+/**
+ * 请求体软上限（字符数）：超过则按降级档位重建请求（先丢 moreTools、
+ * 再丢工具描述、最后丢工具清单），避免能力数增长后撞 64k 上下文。
+ *
+ * 现状 152 条能力约 108 KB；150 KB 留出约 40% 余量，正常规模不会触发。
+ */
+export declare const REQUEST_SOFT_LIMIT_CHARS = 150000;
 /**
  * 共享判据：只放 `state.guidance` 一次（英文，控制 token）。
  *
@@ -62,8 +73,16 @@ export interface SystemOneCapability {
     name: string;
     description: string;
     whenToUse?: string;
-    /** MCP / Tools：工具名 + 简述；技能不带。 */
+    /** MCP / Tools：工具名 + 简述（≤{@link TOOL_COUNT_LIMIT} 个，带预算截断）。 */
     tools?: SystemOneTool[];
+    /**
+     * MCP / Tools：超出 `tools` 名额的**仅名称**工具（≤{@link TOOL_EXTRA_NAMES_LIMIT}）。
+     *
+     * 大插件（本机 `dsh-remote` 22 个工具）/ 大 server（playwright 等）只靠 8 条
+     * 带描述的清单会丢一半以上工具；名称本身就是很强的语义证据，单独放一个
+     * 数组比给每条都加 `{name}` 对象更省 token。
+     */
+    moreTools?: string[];
 }
 /** 逐能力的结构化 instructions（题目唯一性靠这里的 `capability`）。 */
 export interface SystemOneInstructions {
@@ -120,18 +139,31 @@ export declare function truncateCodepoints(text: string, limit: number): string;
 /** baseURL → systemone 绝对 URL。 */
 export declare function systemOneURL(baseURL: string): string;
 /**
- * 构造 question 里的 MCP 工具列表（已截断）。
+ * 构造 question 里的 MCP/插件工具列表（已截断；兼容旧调用）。
  *
- * 约束：最多 {@link TOOL_COUNT_LIMIT} 个；每个描述 ≤{@link TOOL_DESCRIPTION_LIMIT}
- * 码点；name + description 总码点 ≤{@link TOOLS_TOTAL_LIMIT}。超预算时按顺序截断
- * （后面的工具直接放弃），保证单题体积可控。
+ * 只返回带描述的 `tools`；额外仅名称工具见 {@link buildQuestionMoreTools}。
  */
 export declare function buildQuestionTools(tools: readonly {
     name: string;
     description?: string;
 }[] | undefined): SystemOneTool[] | undefined;
-/** 由能力集合与草稿构造一次批量请求。 */
-export declare function buildSystemOneRequest(config: Pick<JevConfig, "model">, capabilities: readonly JevCapability[], draft: string): SystemOneRequest;
+/** 构造 `moreTools`（超出 `tools` 名额的仅名称工具；旧调用不涉及）。 */
+export declare function buildQuestionMoreTools(tools: readonly {
+    name: string;
+    description?: string;
+}[] | undefined, extraLimit?: number): string[] | undefined;
+/**
+ * 由能力集合与草稿构造一次批量请求。
+ *
+ * **全局预算**：超过 {@link REQUEST_SOFT_LIMIT_CHARS} 时按 4 档降级
+ * （24 名额 → 8 名额 → 只留带描述的 8 条 → 只留 8 个名称 → 完全不带工具），
+ * 优先保住「每条能力仍有描述」，而不是让整个请求撞上下文上限。
+ *
+ * @param options.maxChars 覆盖软上限（测试/诊断用）。
+ */
+export declare function buildSystemOneRequest(config: Pick<JevConfig, "model">, capabilities: readonly JevCapability[], draft: string, options?: {
+    maxChars?: number;
+}): SystemOneRequest;
 /** `jev.test` 的探针能力 id（hash namespace 与真实能力不同，不会冲突）。 */
 export declare function probeCapabilityId(): string;
 /** `jev.test` 的最小成本探针请求。 */

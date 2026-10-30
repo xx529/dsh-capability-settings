@@ -32,6 +32,7 @@ import type { McpListResult, McpRuntimeView } from "../mcp/types.js";
 import type { SessionSkillOpResult, SessionSkillView } from "../skills/session.js";
 import type { ToolsListView, ToolsSetSessionResult } from "../tools/types.js";
 import { errMessage } from "../shared/errors.js";
+import { describeExternalMcp, describeMcpServer, describePluginUnit } from "./descriptors.js";
 import { redact } from "./config-file.js";
 import { capabilityId, DESCRIPTION_LIMIT, truncateCodepoints, WHEN_TO_USE_LIMIT } from "./rank.js";
 import type {
@@ -322,8 +323,15 @@ export async function enumerateCapabilities(options: {
       id: capabilityId(row.scope === "project" ? `mcp:project:${row.key}` : `mcp:server:${row.serverName}`),
       kind: "mcp",
       name: row.serverName,
+      // 描述来源：作者手填 > 从 command/args/url 推导 > 最小兜底。
+      // 注意 `row.summary` 只用于推导，绝不作为原文发送（可能含凭据）。
       description: truncateCodepoints(
-        row.summary.length > 0 ? row.summary : `MCP 服务器（${row.transport}）`,
+        describeMcpServer({
+          transport: row.transport,
+          ...(typeof row.entry?.description === "string" ? { description: row.entry.description } : {}),
+          ...(row.entry !== undefined ? { entry: row.entry } : {}),
+          ...(row.summary.length > 0 ? { summary: row.summary } : {}),
+        }),
         DESCRIPTION_LIMIT,
       ),
       source: row.scope === "project" ? "project" : "global",
@@ -352,7 +360,16 @@ export async function enumerateCapabilities(options: {
         id: capabilityId(`mcp:server:${view.serverName}`),
         kind: "mcp",
         name: view.serverName,
-        description: "外部注入的 MCP 实例",
+        // 外部实例：用注入方名字 + summary 的结构化推导；拿不到就给最小说法。
+        description: truncateCodepoints(
+          describeExternalMcp({
+            ...(view.summary !== undefined ? { summary: view.summary } : {}),
+            ...(view.channel !== undefined ? { channel: view.channel } : {}),
+            ...(view.source !== undefined ? { origin: view.source } : {}),
+            ...(view.transport !== undefined ? { transport: view.transport } : {}),
+          }),
+          DESCRIPTION_LIMIT,
+        ),
         source: "external",
         applicable,
         enabledInSession,
@@ -396,7 +413,14 @@ export async function enumerateCapabilities(options: {
         id: capabilityId(`tool:plugin:${unit.unit}`),
         kind: "tool",
         name: unit.name,
-        description: truncateCodepoints(`${unit.toolCount} 个工具 · 插件注入`, DESCRIPTION_LIMIT),
+        // 插件级语义：优先 npm 包描述（attribution 扫描/包根读取），否则旧占位。
+        description: truncateCodepoints(
+          describePluginUnit({
+            ...(unit.description !== undefined ? { description: unit.description } : {}),
+            toolCount: unit.toolCount,
+          }),
+          DESCRIPTION_LIMIT,
+        ),
         // 不在项目 / 全局配置文件里；语义与"外部注入"一致。
         source: "external",
         origin: "plugin",

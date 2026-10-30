@@ -24,6 +24,13 @@ export interface PackageRoot {
   dir: string;
   version: string;
   mtimeMs: number;
+  /**
+   * 包 `package.json` 的 `description`（additive）。
+   *
+   * 只留在内存（不写缓存），用于 Tools 单元的「插件用途」描述；与 version
+   * 同一次读取，因此即使包源码扫描超时失败也仍然可用。
+   */
+  description?: string;
 }
 
 /** 扫描限额（D8 性能预算）。 */
@@ -123,14 +130,19 @@ function baseUrlToPath(baseUrl: unknown): string | undefined {
   return value;
 }
 
-/** 读包根下的 package.json（version；读失败给 "unknown"）。 */
-async function readPackageVersion(dir: string): Promise<string> {
+/** 读包根下的 package.json（version + description；读失败给 "unknown"/undefined）。 */
+async function readPackageMeta(dir: string): Promise<{ version: string; description?: string }> {
   try {
     const raw = await readFile(join(dir, "package.json"), "utf8");
-    const parsed = JSON.parse(raw) as { version?: unknown };
-    return typeof parsed.version === "string" && parsed.version.length > 0 ? parsed.version : "unknown";
+    const parsed = JSON.parse(raw) as { version?: unknown; description?: unknown };
+    const version = typeof parsed.version === "string" && parsed.version.length > 0 ? parsed.version : "unknown";
+    const description =
+      typeof parsed.description === "string" && parsed.description.trim().length > 0
+        ? parsed.description.trim()
+        : undefined;
+    return description !== undefined ? { version, description } : { version };
   } catch {
-    return "unknown";
+    return { version: "unknown" };
   }
 }
 
@@ -211,11 +223,13 @@ export async function resolvePackageRoots(ctx: any): Promise<PackageRoot[]> {
       }
     }
     if (dir === undefined) continue;
+    const meta = await readPackageMeta(dir);
     roots.set(packageId, {
       packageId,
       dir: resolve(dir),
-      version: await readPackageVersion(dir),
+      version: meta.version,
       mtimeMs: await readDirMtime(dir),
+      ...(meta.description !== undefined ? { description: meta.description } : {}),
     });
   }
   return [...roots.values()];

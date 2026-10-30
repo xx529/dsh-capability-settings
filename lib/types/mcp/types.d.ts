@@ -45,6 +45,15 @@ export interface McpServerEntry {
     headers?: Record<string, string>;
     /** 单次工具调用超时（毫秒），映射到桥接层 toolCallTimeoutMs。 */
     timeoutMs?: number;
+    /**
+     * 用途描述（**本插件的扩展字段**，Claude Code 形状之外）。
+     *
+     * 只用于「能力面板 / Jev 能力决策」向模型解释这个 server 能做什么：
+     * 缺省时 Jev 会从 command/args/url 推导（如 `MCP 服务包 @playwright/mcp`），
+     * 手填后优先使用。**不要把密钥写进来**——该字段会进入第三方 Jev 请求
+     * （写入前仍会经过凭据掩码，但原文会留在本地配置文件里）。
+     */
+    description?: string;
     /** 为 true 时保留条目但不挂载。 */
     disabled?: boolean;
     /**

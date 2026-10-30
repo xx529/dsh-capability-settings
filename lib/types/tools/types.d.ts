@@ -39,6 +39,14 @@ export interface ToolsUnitView {
     unit: string;
     /** 展示名（卡片标题 / 详情标题）。 */
     name: string;
+    /**
+     * 插件用途描述（additive）。
+     *
+     * 来源 = 插件包根 `package.json` 的 `description`（attribution 扫描时读取）；
+     * 读不到（扫描超时/非 npm 包）时缺省。Jev 能力决策用它替代旧的
+     * 「N 个工具 · 插件注入」占位描述。
+     */
+    description?: string;
     /** plugin = 已识别插件；unattributed = 来源未识别。 */
     kind: "plugin" | "unattributed";
     /** 该单元当前可见的全部工具。 */

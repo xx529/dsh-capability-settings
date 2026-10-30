@@ -62,6 +62,13 @@ export interface AttributionResolver {
   resolveTool(toolName: string): ToolAttribution;
   /** MCP 命名空间 → 插件（R4 channel 用；T0' > T2 > 表兜底）。 */
   resolveNamespace(namespace: string): NamespaceAttribution | undefined;
+  /**
+   * 插件包描述（additive；`package.json.description`）。
+   *
+   * 扫描尚未完成 / 包根读不到时返回 undefined，调用方回退占位文案。
+   * 同步方法：只读内存映射，不触发 IO，不阻塞 `tools.list`。
+   */
+  packageDescription?(packageId: string): string | undefined;
   /** 后台扫描/缓存是否仍在进行（`tools.list.attributionSettling`）。 */
   settling(): boolean;
   /** 强制刷新（按需全量重扫；诊断/测试）。 */
@@ -138,6 +145,8 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
   const packages = new Map<string, PackageScanResult>();
   /** 包根（刷新时复用；只内存，不写缓存）。 */
   let roots: PackageRoot[] = [];
+  /** 包 id → package.json description（additive；只内存）。 */
+  const descriptionByPackage = new Map<string, string>();
 
   let settling = false;
   let scanDone = false;
@@ -431,6 +440,14 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
     try {
       const discovered = await resolvePackageRoots(ctx);
       roots = discovered;
+      // 包描述与扫描结果解耦：扫描超时/失败也保留（readPackageMeta 与 version 同读）。
+      descriptionByPackage.clear();
+      for (const root of discovered) {
+        const description = root.description?.trim();
+        if (description === undefined || description.length === 0) continue;
+        const packageId = normalizePackageId(root.packageId);
+        if (packageId.length > 0) descriptionByPackage.set(packageId, description);
+      }
       await rebuildDirMap(discovered);
       rebuildFiberMap();
       const targets = force ? discovered : discovered.filter((root) => !packages.has(normalizePackageId(root.packageId)));
@@ -650,6 +667,10 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
   return {
     resolveTool,
     resolveNamespace,
+    packageDescription(packageId: string): string | undefined {
+      if (typeof packageId !== "string" || packageId.length === 0) return undefined;
+      return descriptionByPackage.get(normalizePackageId(packageId));
+    },
     settling: settlingNow,
     refresh,
     requestScan,

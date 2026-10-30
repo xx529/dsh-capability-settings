@@ -37,6 +37,7 @@ import type {
   OpResult,
 } from "./api.js";
 import { summarizeEntry, transportOf, validateEntry } from "../mcp/entry-util.js";
+import { sanitizeDescriptorText, formatMaskedArgs } from "../shared/descriptor-text.js";
 import type { McpScope, McpServerEntry } from "../mcp/types.js";
 import { Modal } from "./modal.js";
 import { ToolParameterTable, toolParameters } from "./tool-schema.js";
@@ -1255,7 +1256,14 @@ function McpDetail({
       <dl className="skp-detail-fields">
         <dt>命名空间</dt>
         <dd>mcp__{server.serverName}__*</dd>
-        {/* 按传输方式展示不同字段：stdio 显示命令与参数，http 显示 URL。 */}
+        {typeof server.entry.description === "string" && server.entry.description.trim().length > 0 && (
+          <>
+            <dt>用途描述</dt>
+            <dd>{server.entry.description}</dd>
+          </>
+        )}
+        {/* 按传输方式展示不同字段：stdio 显示命令与参数，http 显示 URL。
+            参数/URL 里可能内联凭据（`--header "Bearer …"`），显示前统一掩码。 */}
         {server.transport === "stdio" ? (
           <>
             <dt>命令</dt>
@@ -1263,14 +1271,14 @@ function McpDetail({
             {(server.entry.args ?? []).length > 0 && (
               <>
                 <dt>参数</dt>
-                <dd className="skp-path">{(server.entry.args ?? []).join(" ")}</dd>
+                <dd className="skp-path">{formatMaskedArgs(server.entry.args ?? [])}</dd>
               </>
             )}
           </>
         ) : (
           <>
             <dt>URL</dt>
-            <dd className="skp-path">{server.entry.url}</dd>
+            <dd className="skp-path">{sanitizeDescriptorText(server.entry.url ?? "")}</dd>
           </>
         )}
         <dt>配置文件</dt>
@@ -1358,6 +1366,7 @@ function McpForm({
   const entry = server?.entry ?? {};
   const [scope, setScope] = useState<McpScope>(server?.scope ?? defaultScope ?? (workspace !== undefined ? "project" : "global"));
   const [key, setKey] = useState(server?.key ?? "");
+  const [description, setDescription] = useState(typeof entry.description === "string" ? entry.description : "");
   const [transport, setTransport] = useState<"stdio" | "http">(server?.transport ?? "stdio");
   const [command, setCommand] = useState(entry.command ?? "");
   const [args, setArgs] = useState((entry.args ?? []).join("\n"));
@@ -1393,12 +1402,15 @@ function McpForm({
     // 只把"有内容的可选字段"写进条目，保持配置文件最小化。
     // 「全局导入」标记随编辑保留（改字段不抹掉"来自全局导入"的身份）。
     const importMarker = entry.importedFromGlobal === true ? { importedFromGlobal: true as const } : {};
+    const descriptionValue = description.trim();
+    const descriptionField = descriptionValue.length > 0 ? { description: descriptionValue } : {};
     const next: McpServerEntry =
       transport === "stdio"
         ? {
             type: "stdio",
             command: command.trim(),
             args: linesToArray(args),
+            ...descriptionField,
             ...(Object.keys(envRecord).length > 0 ? { env: envRecord } : {}),
             ...(timeout !== undefined ? { timeoutMs: timeout } : {}),
             ...(disabled ? { disabled: true } : {}),
@@ -1407,6 +1419,7 @@ function McpForm({
         : {
             type: "http",
             url: url.trim(),
+            ...descriptionField,
             ...(Object.keys(headerRecord).length > 0 ? { headers: headerRecord } : {}),
             ...(timeout !== undefined ? { timeoutMs: timeout } : {}),
             ...(disabled ? { disabled: true } : {}),
@@ -1483,6 +1496,15 @@ function McpForm({
         <label className="skp-field">
           <span className="skp-field-label">名称</span>
           <input className="skp-input" value={key} disabled={!isNew} placeholder="github" onChange={(e) => setKey(e.target.value)} />
+        </label>
+        <label className="skp-field">
+          <span className="skp-field-label">用途描述（可选，供 Jev 能力判断）</span>
+          <textarea
+            className="skp-input skp-textarea"
+            value={description}
+            placeholder="例如：连接 GitHub 仓库，读写 issue / PR / 文件"
+            onChange={(e) => setDescription(e.target.value)}
+          />
         </label>
         <label className="skp-field">
           <span className="skp-field-label">传输方式</span>

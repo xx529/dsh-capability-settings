@@ -536,6 +536,12 @@ export interface ClientToolsUnit {
   unit: string;
   /** 展示名（卡片 / 列表 / 详情标题）。 */
   name: string;
+  /**
+   * 插件用途描述（additive；宿主读不到 package.json description 时缺省）。
+   *
+   * 详情页展示；Jev 能力决策也用它替代「N 个工具 · 插件注入」占位。
+   */
+  description?: string;
   /** plugin = 已识别插件；unattributed = 来源未识别。 */
   kind: "plugin" | "unattributed";
   /** 该单元当前可见的全部工具。 */

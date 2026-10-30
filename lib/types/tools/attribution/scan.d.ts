@@ -18,6 +18,13 @@ export interface PackageRoot {
     dir: string;
     version: string;
     mtimeMs: number;
+    /**
+     * 包 `package.json` 的 `description`（additive）。
+     *
+     * 只留在内存（不写缓存），用于 Tools 单元的「插件用途」描述；与 version
+     * 同一次读取，因此即使包源码扫描超时失败也仍然可用。
+     */
+    description?: string;
 }
 /** 扫描限额（D8 性能预算）。 */
 export interface ScanLimits {

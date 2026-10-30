@@ -34,6 +34,13 @@
 
 ### 修复
 
+- **MCP 凭据可能随能力描述外发（安全）**：`summarizeEntry` 原样拼接 `args`，本机
+  实测 `--header "Authorization: Bearer as_sk_…"` / `--api-key ctx7sk-…` 会进入
+  摘要，并被 `jev.rank` 当作能力描述原样发给第三方 Jev API（`collectJevSecrets`
+  只处理错误文本，不处理请求体）。新增 `src/shared/descriptor-text.ts`：按参数
+  边界掩码敏感 flag 的值（`--header` / `--api-key` / `-H` …），并兜底
+  Bearer / Basic / `KEY=value` / URL query / 常见 token 前缀；`summarizeEntry`、
+  MCP 详情的参数/URL 展示、Jev 请求体（最终防线）统一走它。
 - **Tools 归属被"工具注册拦截器"劫持（真 bug）**：能力面板把 28 个别家插件的工具
   （`rw_*` / `dsh_im_*` / `figma_*` / `diff_approval_annotate` / `open_in_popout`）
   全判给 `dsh-context` —— 本机 `dsh-context` 为标注自己的工具来源包装了宿主
@@ -105,6 +112,23 @@
 
 ### 新增
 
+- **Jev 能力描述层（MCP / 插件）**：新增 `src/jev/descriptors.ts` 与
+  `src/shared/descriptor-text.ts`，把「给模型判断用」的描述从原始配置里解耦：
+  - **MCP**：作者手填 `description` 优先；缺省从 `command/args/url` 推导
+    （远程 host / npm 包名 / 脚本名 / 命令名），外部注入实例用注入方名字 +
+    summary 推导；**不再把原始命令行当描述**，也不再依赖「已挂载工具」才有语义。
+  - **MCP 配置扩展字段 `description`**：编辑弹窗新增「用途描述（可选，供 Jev
+    能力判断）」，详情页展示；随条目落盘，不写项目级声明文件。
+  - **Tools 插件单元**：从插件 `package.json.description` 生成描述（归属扫描
+    读包元数据，源码扫描超时也能拿到）；`tools.list.units[].description`
+    additive，读不到时回退旧的「N 个工具 · 插件注入」。
+  - **工具清单扩容**：`tools` 仍为 8 条带描述（描述上限 120 码点），新增
+    `moreTools`（最多 24 个仅名称，总 600 码点）覆盖大插件/大 server；guidance
+    说明 `moreTools` 与「无工具时按描述判断」。
+  - **全局预算**：请求体超过 150k 字符时按 4 档降级（先减 `moreTools`，再丢
+    工具清单，最后完全不带工具），避免能力数增长后撞 64k 上下文。
+  - 本地回归：`notes/verify/jev-descriptor-pipeline.mjs`（脱敏/推导/打包/贯通）、
+    `notes/verify/jev-request-sample.mjs`（真实数据采样请求）。
 - **工具归属自动发现（T0–T4）**：新增 `src/tools/attribution/**`（unit-id /
   migrate / runtime / scan / cache / resolver）。T0 独立监听 `tools/change` 抓注册
   栈（`stackTraceLimit=48`，连续 3 次失败自动禁用）；T1 包扫描只读字面量（限额 +

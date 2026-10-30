@@ -740,11 +740,12 @@ Authorization: Bearer <resolvedKey>
       "instructions": {
         "task": "<英文：判断该能力对请求是否直接有用>",
         "capability": {
-          "kind": "skill" | "mcp",
+          "kind": "skill" | "mcp" | "tool",
           "name": "<≤120 码点>",
-          "description": "<≤200 码点>",
+          "description": "<≤200 码点；descriptors.ts 生成并脱敏>",
           "whenToUse": "<≤120 码点，仅 skill 且有值>",
-          "tools": [ { "name": "<≤80 码点>", "description": "<≤100 码点，可省>" } ]  // 仅 MCP
+          "tools": [ { "name": "<≤80 码点>", "description": "<≤120 码点，可省>" } ],  // MCP / tool，≤8 条
+          "moreTools": [ "<工具名，≤80 码点>" ]  // MCP / tool，≤24 个仅名称（v1.3）
         }
       },
       "criteria": { "true": "<英文>", "false": "<英文>" }
@@ -765,11 +766,18 @@ Authorization: Bearer <resolvedKey>
 
 能力元数据不再进 `state`，而是逐题内嵌到 `instructions.capability`（`SystemOneCapability`）：
 
-| 能力种类 | `kind` | `name` | `description` | `whenToUse` | `tools` |
+| 能力种类 | `kind` | `name` | `description` | `whenToUse` | `tools` / `moreTools` |
 |---|---|---|---|---|---|
 | skill（`skills.sessionList`） | `"skill"` | `row.name`（≤120） | `row.description \|\| "（无描述）"`（≤200） | `row.whenToUse`（≤120，空则不带） | 不带 |
-| MCP 配置条目（`mcp.list`） | `"mcp"` | `row.serverName`（≤120） | `row.summary \|\| "MCP 服务器（" + row.transport + "）"`（≤200） | 不带 | 宿主 `mcpTools(serverName)`（见下表） |
-| 外部注入实例（`mcp.runtime`） | `"mcp"` | `view.serverName`（≤120） | `"外部注入的 MCP 实例"`（≤200） | 不带 | `view.tools`（`name`/`description`） |
+| MCP 配置条目（`mcp.list`） | `"mcp"` | `row.serverName`（≤120） | `describeMcpServer()`：作者 `entry.description` > 从 `command/args/url` 推导（host / 包名 / 脚本名 / 命令名）> 最小兜底（≤200） | 不带 | `tools`（≤8 带描述）+ `moreTools`（≤24 仅名称），见下 |
+| 外部注入实例（`mcp.runtime`） | `"mcp"` | `view.serverName`（≤120） | `describeExternalMcp()`：`view.summary` 结构化推导 > `由 <channel> 注入的 MCP 实例`（≤200） | 不带 | `view.tools` |
+| Tools 插件单元（`tools.list`） | `"tool"` | `unit.name`（≤120） | `unit.description`（`package.json.description`）> `"N 个工具 · 插件注入"`（≤200） | 不带 | `unit.tools`（同上打包） |
+
+> **v1.3 描述层**：`description` 不再直接拼原始命令行 / 固定占位文案，改由
+> `src/jev/descriptors.ts` 统一生成；所有文本（含工具描述）在进请求体前还会做一次
+> `sanitizeDescriptorText()` 凭据掩码（`--header` / `--api-key` / Bearer / Basic /
+> `KEY=value` / URL query / 常见 token 前缀）。MCP 配置新增可选 `description`
+> 扩展字段（编辑弹窗「用途描述」）作为最高优先级来源。
 
 **MCP 工具来源（v1.1 新增；只用于 prompt，不跨 RPC 下发）**：
 
@@ -783,10 +791,15 @@ Authorization: Bearer <resolvedKey>
 - `description`：按 **Unicode 码点**截断到 200（`Array.from(s).slice(0,200).join("")`），不追加省略号（省 token）；
 - `whenToUse`：截断到 120 码点，空/空白则省略字段；
 - `name`：截断到 120 码点（防御性补充；超长名极少）；
-- MCP `tools`：最多 **8** 个；每个工具 `name` ≤80 码点、`description` ≤100 码点；每题
+- `tools`：最多 **8** 个；每个工具 `name` ≤80 码点、`description` ≤120 码点；每题
   `name + description` 总码点 ≤**500**；超预算时**按顺序截断**（后面的工具直接放弃，不缩词）；
-- 截断对模型判断影响可忽略；`JevRankItem.description` 回传的也是截断值（前端展示用，
-  需要完整描述时可回查既有快照；本期不额外传全文）。
+- `moreTools`：`tools` 之后的工具**仅名称**，最多 **24** 个、总码点 ≤**600**；
+  大插件（本机 `dsh-remote` 22 个工具）/ 大 server 不再只暴露前 8 个（v1.3）；
+- **全局预算降级**：请求体（`JSON.stringify(request).length`）超过
+  `REQUEST_SOFT_LIMIT_CHARS`（150_000）时按 4 档重建：完整 → `moreTools` 减到 8 →
+  丢弃 `moreTools` → `tools` 仅名称 → 完全不带工具；
+- 截断对模型判断影响可忽略；`JevRankItem.description` 回传的是同一份（已脱敏）
+  截断值（前端展示用，需要完整描述时可回查既有快照；本期不额外传全文）。
 
 ### 6.4 能力 ID（稳定、无特殊字符）
 

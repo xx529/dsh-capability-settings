@@ -21,6 +21,7 @@ import { performance } from "node:perf_hooks";
 
 import { redact } from "./config-file.js";
 import { errMessage } from "../shared/errors.js";
+import { sanitizeDescriptorText } from "../shared/descriptor-text.js";
 import type { JevCapability, JevConfig, JevErrorCode, JevRankItem, JevUsage } from "./types.js";
 
 /** `systemone` 端点路径（拼在 baseURL 后）。 */
@@ -35,17 +36,31 @@ export const WHEN_TO_USE_LIMIT = 120;
 /** question 里 `capability.name` 的码点上限（防御性补充）。 */
 export const NAME_LIMIT = 120;
 
-/** 每题最多带多少个 MCP 工具。 */
+/** 每题最多带多少个**带描述的** MCP/工具清单项。 */
 export const TOOL_COUNT_LIMIT = 8;
 
-/** 每个工具描述的码点上限。 */
-export const TOOL_DESCRIPTION_LIMIT = 100;
+/** 额外携带的**仅名称**工具数（`moreTools`；覆盖大插件/大 server 的工具面）。 */
+export const TOOL_EXTRA_NAMES_LIMIT = 24;
 
-/** 每题工具名 + 工具描述的总码点上限。 */
+/** 每个工具描述的码点上限。 */
+export const TOOL_DESCRIPTION_LIMIT = 120;
+
+/** 每题 `tools` 里工具名 + 工具描述的总码点上限。 */
 export const TOOLS_TOTAL_LIMIT = 500;
+
+/** 每题 `moreTools`（仅名称）的总码点上限。 */
+export const TOOL_EXTRA_NAMES_TOTAL_LIMIT = 600;
 
 /** 工具名的码点上限（防御性补充）。 */
 export const TOOL_NAME_LIMIT = 80;
+
+/**
+ * 请求体软上限（字符数）：超过则按降级档位重建请求（先丢 moreTools、
+ * 再丢工具描述、最后丢工具清单），避免能力数增长后撞 64k 上下文。
+ *
+ * 现状 152 条能力约 108 KB；150 KB 留出约 40% 余量，正常规模不会触发。
+ */
+export const REQUEST_SOFT_LIMIT_CHARS = 150_000;
 
 /**
  * 共享判据：只放 `state.guidance` 一次（英文，控制 token）。
@@ -62,6 +77,8 @@ export const SYSTEM_ONE_GUIDANCE = [
   "A capability that is only topically related but cannot execute the request is not relevant.",
   "For MCP servers, use the listed tools to judge what the server can actually do.",
   'For plugin tool groups (kind "tool"), use the listed tools to judge what the plugin can actually do; a plugin is enabled or disabled as a whole.',
+  'A capability may also list "moreTools": additional tool names of the same capability. Treat every tool name as evidence of what it can do.',
+  "If a capability lists no tools, judge from its description and name.",
   "Answer with a probability from 0 to 1: 1 = definitely useful now, 0 = definitely not.",
 ].join(" ");
 
@@ -92,8 +109,16 @@ export interface SystemOneCapability {
   name: string;
   description: string;
   whenToUse?: string;
-  /** MCP / Tools：工具名 + 简述；技能不带。 */
+  /** MCP / Tools：工具名 + 简述（≤{@link TOOL_COUNT_LIMIT} 个，带预算截断）。 */
   tools?: SystemOneTool[];
+  /**
+   * MCP / Tools：超出 `tools` 名额的**仅名称**工具（≤{@link TOOL_EXTRA_NAMES_LIMIT}）。
+   *
+   * 大插件（本机 `dsh-remote` 22 个工具）/ 大 server（playwright 等）只靠 8 条
+   * 带描述的清单会丢一半以上工具；名称本身就是很强的语义证据，单独放一个
+   * 数组比给每条都加 `{name}` 对象更省 token。
+   */
+  moreTools?: string[];
 }
 
 /** 逐能力的结构化 instructions（题目唯一性靠这里的 `capability`）。 */
@@ -169,65 +194,158 @@ function codepointLength(text: string): number {
   return Array.from(text).length;
 }
 
+/** 工具打包档位（预算降级用；0 = 完整，4 = 完全不带工具）。 */
+type ToolPackLevel = 0 | 1 | 2 | 3 | 4;
+
+/** 内部：一次打包的产物。 */
+interface PackedTools {
+  tools?: SystemOneTool[];
+  moreTools?: string[];
+}
+
 /**
- * 构造 question 里的 MCP 工具列表（已截断）。
+ * 打包一个能力的工具清单（`tools` 带描述 + `moreTools` 仅名称）。
  *
- * 约束：最多 {@link TOOL_COUNT_LIMIT} 个；每个描述 ≤{@link TOOL_DESCRIPTION_LIMIT}
- * 码点；name + description 总码点 ≤{@link TOOLS_TOTAL_LIMIT}。超预算时按顺序截断
- * （后面的工具直接放弃），保证单题体积可控。
+ * 约束：
+ *   - `tools` 最多 {@link TOOL_COUNT_LIMIT} 个；每条 name+description
+ *     ≤ {@link TOOL_DESCRIPTION_LIMIT}，总码点 ≤ {@link TOOLS_TOTAL_LIMIT}；
+ *   - `moreTools` 只放名称，最多 `extraLimit` 个、总码点
+ *     ≤ {@link TOOL_EXTRA_NAMES_TOTAL_LIMIT}；
+ *   - 超预算时按顺序放弃后面的条目（不缩词），保证单题体积可控。
+ */
+function packTools(
+  tools: readonly { name: string; description?: string }[] | undefined,
+  options: { namesOnly?: boolean; extraLimit?: number },
+): PackedTools {
+  if (tools === undefined || tools.length === 0) return {};
+  const namesOnly = options.namesOnly === true;
+  const extraLimit = Math.max(0, options.extraLimit ?? 0);
+  const entries: SystemOneTool[] = [];
+  let total = 0;
+  let cursor = 0;
+  for (; cursor < tools.length; cursor += 1) {
+    if (entries.length >= TOOL_COUNT_LIMIT) break;
+    const tool = tools[cursor];
+    if (tool === undefined) continue;
+    const name = truncateCodepoints(tool.name, TOOL_NAME_LIMIT).trim();
+    if (name.length === 0) continue;
+    const rawDescription = !namesOnly && typeof tool.description === "string" ? tool.description.trim() : "";
+    const description =
+      rawDescription.length > 0
+        ? truncateCodepoints(sanitizeDescriptorText(rawDescription), TOOL_DESCRIPTION_LIMIT)
+        : undefined;
+    const cost = codepointLength(name) + (description !== undefined ? codepointLength(description) : 0);
+    if (entries.length > 0 && total + cost > TOOLS_TOTAL_LIMIT) break;
+    entries.push(description !== undefined ? { name, description } : { name });
+    total += cost;
+  }
+
+  let moreTools: string[] | undefined;
+  if (extraLimit > 0) {
+    const names: string[] = [];
+    let extraTotal = 0;
+    for (; cursor < tools.length && names.length < extraLimit; cursor += 1) {
+      const tool = tools[cursor];
+      if (tool === undefined) continue;
+      const name = truncateCodepoints(tool.name, TOOL_NAME_LIMIT).trim();
+      if (name.length === 0) continue;
+      const cost = codepointLength(name);
+      if (names.length > 0 && extraTotal + cost > TOOL_EXTRA_NAMES_TOTAL_LIMIT) break;
+      names.push(name);
+      extraTotal += cost;
+    }
+    if (names.length > 0) moreTools = names;
+  }
+
+  const packed: PackedTools = {};
+  if (entries.length > 0) packed.tools = entries;
+  if (moreTools !== undefined) packed.moreTools = moreTools;
+  return packed;
+}
+
+/**
+ * 构造 question 里的 MCP/插件工具列表（已截断；兼容旧调用）。
+ *
+ * 只返回带描述的 `tools`；额外仅名称工具见 {@link buildQuestionMoreTools}。
  */
 export function buildQuestionTools(
   tools: readonly { name: string; description?: string }[] | undefined,
 ): SystemOneTool[] | undefined {
-  if (tools === undefined || tools.length === 0) return undefined;
-  const result: SystemOneTool[] = [];
-  let total = 0;
-  for (const tool of tools) {
-    if (result.length >= TOOL_COUNT_LIMIT) break;
-    const name = truncateCodepoints(tool.name, TOOL_NAME_LIMIT).trim();
-    if (name.length === 0) continue;
-    const rawDescription = typeof tool.description === "string" ? tool.description.trim() : "";
-    const description =
-      rawDescription.length > 0 ? truncateCodepoints(rawDescription, TOOL_DESCRIPTION_LIMIT) : undefined;
-    const cost = codepointLength(name) + (description !== undefined ? codepointLength(description) : 0);
-    if (result.length > 0 && total + cost > TOOLS_TOTAL_LIMIT) break;
-    result.push(description !== undefined ? { name, description } : { name });
-    total += cost;
-  }
-  return result.length > 0 ? result : undefined;
+  return packTools(tools, { extraLimit: 0 }).tools;
+}
+
+/** 构造 `moreTools`（超出 `tools` 名额的仅名称工具；旧调用不涉及）。 */
+export function buildQuestionMoreTools(
+  tools: readonly { name: string; description?: string }[] | undefined,
+  extraLimit: number = TOOL_EXTRA_NAMES_LIMIT,
+): string[] | undefined {
+  return packTools(tools, { extraLimit }).moreTools;
 }
 
 /** 构造一道题的 instructions（内嵌该能力定义，题目因此唯一）。 */
-function buildQuestionInstructions(capability: JevCapability): SystemOneInstructions {
+function buildQuestionInstructions(capability: JevCapability, level: ToolPackLevel): SystemOneInstructions {
   const spec: SystemOneCapability = {
     kind: capability.kind,
     name: truncateCodepoints(capability.name, NAME_LIMIT),
-    description: truncateCodepoints(capability.description, DESCRIPTION_LIMIT),
+    // 纵深防线：能力描述可能来自磁盘/配置/包元数据，统一再过一次凭据掩码。
+    description: truncateCodepoints(sanitizeDescriptorText(capability.description), DESCRIPTION_LIMIT),
   };
   if (capability.whenToUse !== undefined && capability.whenToUse.trim().length > 0) {
-    spec.whenToUse = truncateCodepoints(capability.whenToUse, WHEN_TO_USE_LIMIT);
+    spec.whenToUse = truncateCodepoints(sanitizeDescriptorText(capability.whenToUse), WHEN_TO_USE_LIMIT);
   }
-  const tools = buildQuestionTools(capability.tools);
-  if (tools !== undefined) spec.tools = tools;
+  if (level < 4) {
+    const extraLimit = level === 0 ? TOOL_EXTRA_NAMES_LIMIT : level === 1 ? 8 : 0;
+    const packed = packTools(capability.tools, { namesOnly: level >= 3, extraLimit });
+    if (packed.tools !== undefined) spec.tools = packed.tools;
+    if (packed.moreTools !== undefined) spec.moreTools = packed.moreTools;
+  }
   return { task: SYSTEM_ONE_TASK, capability: spec };
 }
 
-/** 由能力集合与草稿构造一次批量请求。 */
-export function buildSystemOneRequest(
+/** 按指定降级档位构造完整请求。 */
+function buildRequestAtLevel(
   config: Pick<JevConfig, "model">,
   capabilities: readonly JevCapability[],
   draft: string,
+  level: ToolPackLevel,
 ): SystemOneRequest {
   const questions: Record<string, SystemOneQuestion> = {};
   for (const capability of capabilities) {
     questions[capability.id] = {
       type: "noul",
-      instructions: buildQuestionInstructions(capability),
+      instructions: buildQuestionInstructions(capability, level),
       criteria: { true: SYSTEM_ONE_CRITERIA.true, false: SYSTEM_ONE_CRITERIA.false },
     };
   }
   // 能力不进 state：state 只放用户请求与共享判据，避免 155 份重复与干扰。
   return { model: config.model, state: { request: draft, guidance: SYSTEM_ONE_GUIDANCE }, questions };
+}
+
+/**
+ * 由能力集合与草稿构造一次批量请求。
+ *
+ * **全局预算**：超过 {@link REQUEST_SOFT_LIMIT_CHARS} 时按 4 档降级
+ * （24 名额 → 8 名额 → 只留带描述的 8 条 → 只留 8 个名称 → 完全不带工具），
+ * 优先保住「每条能力仍有描述」，而不是让整个请求撞上下文上限。
+ *
+ * @param options.maxChars 覆盖软上限（测试/诊断用）。
+ */
+export function buildSystemOneRequest(
+  config: Pick<JevConfig, "model">,
+  capabilities: readonly JevCapability[],
+  draft: string,
+  options: { maxChars?: number } = {},
+): SystemOneRequest {
+  const maxChars =
+    typeof options.maxChars === "number" && Number.isFinite(options.maxChars) && options.maxChars > 0
+      ? options.maxChars
+      : REQUEST_SOFT_LIMIT_CHARS;
+  let request = buildRequestAtLevel(config, capabilities, draft, 0);
+  for (const level of [1, 2, 3, 4] as const) {
+    if (JSON.stringify(request).length <= maxChars) return request;
+    request = buildRequestAtLevel(config, capabilities, draft, level);
+  }
+  return request;
 }
 
 /** `jev.test` 的探针能力 id（hash namespace 与真实能力不同，不会冲突）。 */

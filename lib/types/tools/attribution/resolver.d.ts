@@ -39,6 +39,13 @@ export interface AttributionResolver {
     resolveTool(toolName: string): ToolAttribution;
     /** MCP 命名空间 → 插件（R4 channel 用；T0' > T2 > 表兜底）。 */
     resolveNamespace(namespace: string): NamespaceAttribution | undefined;
+    /**
+     * 插件包描述（additive；`package.json.description`）。
+     *
+     * 扫描尚未完成 / 包根读不到时返回 undefined，调用方回退占位文案。
+     * 同步方法：只读内存映射，不触发 IO，不阻塞 `tools.list`。
+     */
+    packageDescription?(packageId: string): string | undefined;
     /** 后台扫描/缓存是否仍在进行（`tools.list.attributionSettling`）。 */
     settling(): boolean;
     /** 强制刷新（按需全量重扫；诊断/测试）。 */

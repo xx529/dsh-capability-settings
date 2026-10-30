@@ -9,6 +9,7 @@
  */
 
 import type { McpServerEntry } from "./types.js";
+import { formatMaskedArgs, sanitizeDescriptorText } from "../shared/descriptor-text.js";
 
 /**
  * 归类条目的传输方式：显式 `type` 优先；`url` 存在且无 command 视为 http。
@@ -20,11 +21,22 @@ export function transportOf(entry: McpServerEntry): "stdio" | "http" {
   return typeof entry.url === "string" && entry.url.length > 0 && entry.command === undefined ? "http" : "stdio";
 }
 
-/** 生成面板列表用的一行摘要：http 显示 URL，stdio 显示"命令 参数"。 */
+/**
+ * 生成面板列表用的一行摘要：http 显示 URL，stdio 显示"命令 参数"。
+ *
+ * **凭据掩码（P0 安全修复）**：args / URL 里常内联 token（本机活例
+ * `--header "Authorization: Bearer …"`、`--api-key …`）。该摘要在两处使用：
+ *   - 面板列表/详情直接显示；
+ *   - Jev 能力决策用它当能力描述（会把字符串原样发给第三方 Jev API）。
+ * 因此在**源头**就做脱敏；需要结构信息的地方（Jev 描述推导）再从条目
+ * 的 command/args/url 推导，绝不回拼原文。
+ */
 export function summarizeEntry(entry: McpServerEntry): string {
-  if (transportOf(entry) === "http") return entry.url ?? "(missing url)";
-  const args = (entry.args ?? []).join(" ");
-  return [entry.command ?? "(missing command)", args].filter((part) => part.length > 0).join(" ");
+  const raw =
+    transportOf(entry) === "http"
+      ? entry.url ?? "(missing url)"
+      : [entry.command ?? "(missing command)", formatMaskedArgs(entry.args ?? [])].filter((part) => part.length > 0).join(" ");
+  return sanitizeDescriptorText(raw);
 }
 
 /**
@@ -63,6 +75,9 @@ export function validateEntry(key: string, entry: McpServerEntry): string[] {
   }
   if (entry.timeoutMs !== undefined && (!Number.isFinite(entry.timeoutMs) || entry.timeoutMs <= 0)) {
     errors.push('"timeoutMs" must be a positive number');
+  }
+  if (entry.description !== undefined && typeof entry.description !== "string") {
+    errors.push('"description" must be a string');
   }
   return errors;
 }

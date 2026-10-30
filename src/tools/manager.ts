@@ -710,10 +710,14 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
       const defaultEnabled = !globalDisabled.has(unit.unit);
       const enabled = explicit ? toggles?.get(key) === true : defaultEnabled;
       const restriction = record?.restrictions.find((entry) => entry.unit === unit.unit);
+      // 插件用途描述（package.json description）：扫描未完成 / 包根读不到时缺省；
+      // 不阻塞列表（Jev 侧有占位兜底）。
+      const description = deps.resolver?.packageDescription?.(unit.unit);
       return {
         unit: unit.unit,
         name: unit.name,
         kind: unit.kind,
+        ...(description !== undefined && description.trim().length > 0 ? { description: description.trim() } : {}),
         tools: unit.tools.map((tool) => ({ ...tool })),
         toolCount: unit.tools.length,
         attribution: { ...unit.attribution },

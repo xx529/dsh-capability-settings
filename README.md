@@ -429,6 +429,12 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   `<projectRoot>/.mcp.json`，全局级 `~/.agents/mcp.json`（读取兼容旧位置
   `~/.dsh/mcp.json`），同名 key 项目级覆盖全局级；`env`/`headers`/`args`
   支持 `${VAR}` 环境变量插值。
+- **用途描述与凭据掩码**：新增/编辑弹窗新增「用途描述（可选，供 Jev 能力判断）」，
+  存条目 `description` 扩展字段（Claude Code 形状之外；详情页展示）。MCP 列表摘要、
+  详情里的参数 / URL 展示，以及发给 Jev 的能力描述统一做凭据掩码
+  （`--header` / `--api-key` / `-H` 的下一个参数，Bearer / Basic / `KEY=value` /
+  URL query / 常见 token 前缀 → `***`），不会把 `mcp-remote … --header "Bearer …"`
+  直接展示或外发。
 - 列表按**左导航 scope** 组织：**全局**（`~/.agents/mcp.json`；可导入到本项目 =
   登记引用、编辑、删除）+ 下方第二组**外部注入**（运行时由其它插件/profile
   挂载的实例，只读，仅在该组非空时出现）；**项目**（先选工作区，显示该工作区
@@ -663,8 +669,8 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   `已选 n / N`（N = 全部参与评分的 Skills + MCP + **Tools 插件单元**，含不可切换项；
   「来源未识别」单元不参与）；底栏「重新评分 / 取消 / 应用所选（n）」。
 - **Tools 结果行（插件级）**：插件名（等宽字体）+ `插件` 标签 + `N 个工具` 标签 +
-  描述（`N 个工具 · 插件注入`）+ 分数条；**不逐工具出行、不挂来源小标签**（名称即
-  插件名，避免重复）；列表下方补一行说明：
+  描述（优先取插件 `package.json.description`，读不到时回退 `N 个工具 · 插件注入`）+
+  分数条；**不逐工具出行、不挂来源小标签**（名称即插件名，避免重复）；列表下方补一行说明：
   `Tools 以插件整体计分与启用：选中即开启该插件全部工具；Jev 只收窄，不重新打开已关闭的能力。`
 - **注入技能参与评分与应用**：会话 `skills.sessionList` 含内置 / 插件 / preset 注入
   行后，Jev 枚举自动纳入它们（id 仍是 `skill:<name>`，应用写会话开关，逻辑与磁盘
@@ -675,14 +681,22 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 - **Tools 参与评分与应用（插件级，按本会话 effective）**：候选 = **本会话生效
   （`enabled === true`）** 的已识别插件单元（`dsh-univer-office` / `dsh-remote` /
   `dsh-im` / `dsh-better-sidebar` / `dsh-popout-window` / `dsh-diff-approval` 等），
-  `name` = 插件展示名、描述 = `N 个工具 · 插件注入`；请求只带**工具名 + 一句话说明**
-  （每题最多 8 个工具、总 500 码点；**不带参数 schema**、不带工具逐个开关）。
+  `name` = 插件展示名、描述 = 插件 `package.json.description`（读不到回退
+  `N 个工具 · 插件注入`）；请求带**工具名 + 一句话说明**：前 8 个带描述（命名上限
+  8 个 / 描述 ≤120 码点 / 总 500 码点），其余工具名放进 `moreTools`（最多 24 个 /
+  总 600 码点）；**不带参数 schema**、不带工具逐个开关。
   全局默认关闭 / 本会话已关的插件**不进候选**，因此 Jev 不能把它们重新打开
   （只收窄不扩权）；「来源未识别」单元不进候选。旧宿主 / 未注入 `tools` 服务时
   枚举跳过 Tools 段（warn 一次），Skills / MCP 照常评分。
+- **MCP / 插件描述（P0+P1）**：MCP 配置项支持可选的 `description`「用途描述」
+  （编辑弹窗可填，优先使用）；未填时从 `command/args/url` 推导（远程 host / npm
+  包名 / 脚本名 / 命令名），不再把原始命令行当描述。MCP 摘要与参数展示、Jev 请求体
+  统一做凭据掩码（`--header` / `--api-key` / Bearer / Basic / `KEY=value` / URL
+  query），本机 `mcp-remote … --header "Bearer …"` 不会再外发。
 - 评分请求**一次**发给 `POST {Base URL}/v1/systemone`：每个能力一条 `noul`，一个
   0–1 分；**不分片、不按能力拆请求**。单次最多 300 个能力（超出直接报错不请求）；
-  超上下文返回「输入内容超出模型上下文上限」，不自动截断或分批。
+  请求体超过 150k 字符时按 4 档降级（先减 `moreTools`、再丢工具清单、最后完全不带
+  工具）；超上下文返回「输入内容超出模型上下文上限」，不自动截断或分批。
 - 缺分 / 非数值答案按容错处理：数值 clamp 到 `[0,1]`（`1.2`→`1`），缺失 / 字符串 /
   `NaN` → 该能力 0 分并标注「未获得评分」（`reason=no-answer`），**不整单失败**，
   列表不丢行。
