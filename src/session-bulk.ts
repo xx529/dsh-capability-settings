@@ -222,7 +222,7 @@ export function createSessionBulk(deps: SessionBulkDeps): SessionBulk {
     }
   }
 
-  /** skills 域：冷会话不可写（`setEnabled` 返回 session not found）→ 记 skipped。 */
+  /** skills 域：冷会话也可先落盘（恢复时由 applyPersistedExplicit 应用）。 */
   async function runSkills(
     services: SessionBulkServices,
     input: {
@@ -252,8 +252,8 @@ export function createSessionBulk(deps: SessionBulkDeps): SessionBulk {
           continue;
         }
       }
-      if (row.canToggleInSession !== true || !input.live) {
-        // 冷会话：技能开关需要 live agent（skills/session.ts 明确拒绝）。
+      if (row.canToggleInSession !== true) {
+        // 无 state 的旧装配 / 不可切换行：跳过。
         stat.skipped += 1;
         continue;
       }

@@ -257,8 +257,9 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   同名 runtime shadow。
 - **会话能力区 / 首屏 hero = 当前对话启停**：注入行与磁盘技能同列，开关调
   `skills.setSessionEnabled`，只作用于当前会话（**按会话落盘**，宿主重启 / resume
-  后自动恢复；优先级 **显式会话覆盖 > 项目默认**）；冷会话（没有 live agent）时
-  开关置灰。
+  后自动恢复；优先级 **显式会话覆盖 > 项目默认**）；冷会话（没有 live agent，
+  如已结束的 teammate）仍可改：先落盘、卡片标「改动待激活生效」，下次 agent
+  恢复时立即应用。
 - **内容只读**：注入技能没有可写的磁盘副本。详情页显示来源 / 渠道 + 只读原因条，
   隐藏 编辑、删除、导入、调用方向、导出到宿主路径等写操作（宿主侧对注入行的写
   RPC 同样返回 `read-only` 业务失败）；仍可查看正文、浏览
@@ -597,8 +598,8 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 - **Skills（关闭 / 恢复）**：宿主注册表没有按会话禁用 API，本插件在**该
   agent 作用域**注册同名 runtime skill shadow（`invocation` 双向 false），
   使该 skill 从「模型目录 / `skill` 工具 / `/name` 用户口令」三条链路消失；
-  恢复即解除 shadow。**只可关闭、不能强制开启文件级已禁用项**；会话没有
-  live agent 时开关置灰。**项目默认关闭的投影**：被本项目屏蔽占位关闭的全局
+  恢复即解除 shadow。**只可关闭、不能强制开启文件级已禁用项**；无 live agent
+  的冷会话也允许先落盘（显示「改动待激活生效」），恢复时应用。**项目默认关闭的投影**：被本项目屏蔽占位关闭的全局
   Skills 在会话首屏默认 `enabledInSession=false`（新会话默认关），会话内仍可
   显式开启（显式覆盖优先于项目默认）。
 - **Tools（插件级，两层）**：首屏开关写**本会话覆盖**（`session-capabilities.json`
@@ -611,7 +612,7 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 - **批量语义（`session.setBulk`）**：宿主自己枚举三域目标、**幂等**（重放只写差异）、
   **同会话串行**、**部分失败不回滚**（失败项在 `failed[]` 里带
   `domain / target / kind / error`，已成功项保留；重试 = 重放同一 action）；
-  冷会话时 Skills 项跳过（需要 live agent），MCP / Tools 仍落盘。
+  冷会话时 Skills 项也先落盘（恢复时应用），MCP / Tools 同样落盘。
   三域写入都走批量端点：Skills 用 `setEnabledBatch`（整批一次技能目录发现 +
   一次落盘；逐条写 150 条会触发 O(N²) 的宿主 catalog 全量发现），MCP 用
   `setSessionEnabledMany`（一次落盘 + 一次重挂），Tools 一次 `restrict` 重算。

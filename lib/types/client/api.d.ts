@@ -71,6 +71,8 @@ export interface ClientSkillSummary {
     enabledInSession?: boolean;
     /** 当前会话是否有 agent ctx（false 时 UI 会话开关置灰）。 */
     canToggleInSession?: boolean;
+    /** 冷会话：改动已落盘，下次恢复时生效。 */
+    activationPending?: boolean;
 }
 /** skill 详情 = 摘要 + 完整 spec + 正文 + 资源文件列表。 */
 export interface ClientSkillDetail extends ClientSkillSummary {

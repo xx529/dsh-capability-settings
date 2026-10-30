@@ -927,6 +927,7 @@ function toSummary(value: Record<string, unknown>): ClientSkillSummary {
     ...(value.projectShadow === "stub" || value.projectShadow === "skill" ? { projectShadow: value.projectShadow } : {}),
     ...(typeof value.enabledInSession === "boolean" ? { enabledInSession: value.enabledInSession } : {}),
     ...(typeof value.canToggleInSession === "boolean" ? { canToggleInSession: value.canToggleInSession } : {}),
+    ...(value.activationPending === true ? { activationPending: true } : {}),
     ...(injected ? { injected: true } : {}),
     ...(origin !== undefined ? { origin } : {}),
     ...(typeof value.channel === "string" && value.channel.length > 0 ? { channel: value.channel } : {}),

@@ -1758,6 +1758,7 @@ export function buildSkillRows(snapshot: CapabilitySnapshot, pending: Record<str
   return unique.map((skill) => {
     const id = `skill:${skill.name}`;
     const canToggle = skill.canToggleInSession !== false;
+    const pendingActivation = skill.activationPending === true;
     return {
       id,
       kind: "skill",
@@ -1769,7 +1770,7 @@ export function buildSkillRows(snapshot: CapabilitySnapshot, pending: Record<str
       ...(skill.injected === true && skill.channel !== undefined && skill.channel.length > 0 ? { channel: skill.channel } : {}),
       enabled: pending[id] ?? skillEnabled(skill),
       disabled: !canToggle,
-      ...(canToggle ? {} : { meta: "会话未激活" }),
+      ...(pendingActivation ? { meta: "改动待激活生效" } : canToggle ? {} : { meta: "会话未激活" }),
     };
   });
 }

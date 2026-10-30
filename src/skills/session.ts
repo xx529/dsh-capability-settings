@@ -64,8 +64,13 @@ export interface SkillSessionDeps {
 export interface SessionSkillView extends SkillSummaryView {
   /** 本会话是否生效（项目默认 + 会话显式开关共同决定，以实际 shadow 状态为准）。 */
   enabledInSession: boolean;
-  /** 当前是否有该 session 的 agent ctx（false 时 UI 置灰）。 */
+  /**
+   * 当前是否可以写会话开关：有 live agent 时立即注册 shadow；冷会话在有
+   * `state` 时也允许先落盘，下次恢复时由 `applyPersistedExplicit` 应用。
+   */
   canToggleInSession: boolean;
+  /** 冷会话（无 live agent）的改动只在下次恢复时生效。 */
+  activationPending?: boolean;
 }
 
 /** 会话级 Skills 开关的结果（业务信封形状，见 remote.ts 文件头）。 */
@@ -810,7 +815,12 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
                 : derived
                   ? false
                   : registered;
-        return { ...row, enabledInSession, canToggleInSession: record !== undefined };
+        return {
+          ...row,
+          enabledInSession,
+          canToggleInSession: record !== undefined || deps.state !== undefined,
+          ...(record === undefined && deps.state !== undefined ? { activationPending: true } : {}),
+        };
       });
     },
 
@@ -822,7 +832,14 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
       if (name.length === 0) return { ok: false, errors: ["skill name is required"] };
 
       const record = find(sessionId);
-      if (record === undefined) return { ok: false, errors: [`session not found: ${sessionId}`] };
+      if (record === undefined) {
+        // 冷会话（teammate 已结束）：没有 live agent ctx，无法注册 shadow；
+        // 先落盘，等下次 restore / resume 时由 applyPersistedExplicit 应用。
+        if (deps.state === undefined) return { ok: false, errors: [`session not found: ${sessionId}`] };
+        await deps.state.ready();
+        await deps.state.setSkill(sessionId, name, input.enabled);
+        return { ok: true };
+      }
       const skills = skillsOf(record);
       if (typeof skills?.register !== "function") {
         return { ok: false, errors: [`skills service unavailable for session ${sessionId}`] };
@@ -897,7 +914,20 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
       if (wanted.size === 0) return { ok: true, errors: [], outcomes: [] };
 
       const record = find(sessionId);
-      if (record === undefined) return { ok: false, errors: [`session not found: ${sessionId}`], outcomes: [] };
+      if (record === undefined) {
+        if (deps.state === undefined) {
+          return { ok: false, errors: [`session not found: ${sessionId}`], outcomes: [] };
+        }
+        await deps.state.ready();
+        const writes: Record<string, boolean | undefined> = {};
+        for (const [name, enabled] of wanted) writes[name] = enabled;
+        if (Object.keys(writes).length > 0) await deps.state.setToggles(sessionId, "skills", writes);
+        return {
+          ok: true,
+          errors: [],
+          outcomes: [...wanted.keys()].map((name) => ({ name, ok: true })),
+        };
+      }
       const skills = skillsOf(record);
       if (typeof skills?.register !== "function") {
         return { ok: false, errors: [`skills service unavailable for session ${sessionId}`], outcomes: [] };
