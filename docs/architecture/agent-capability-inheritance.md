@@ -79,9 +79,12 @@
 
 - 主对话的能力页工具行右端 + 首屏行各一个下拉，选项固定为
   **`派生继承会话`（默认）/ `派生继承工作区`**，**不再有「派生模式」前置标题**。
-- **派生继承会话**：child 创建时（`agent/created`，`source === "startup"`）把父会话的
-  显式覆盖（`skills` / `mcp` / `tools`）复制进 child 自己的 `session-capabilities.json`
-  记录；child 之后独立编辑。
+- **派生继承会话**：child 创建时（`agent/created`，`source === "startup"`）：
+  - Skills 按**父会话当时模型可见的技能集合**投影到 child 自己的可见目录
+    （`parentVisible → true`、`childVisible - parentVisible → false`），避免父 / 子
+    `agentPreset` 或技能目录升级导致的「lead 13 / teammate 153」；
+  - MCP / Tools 复制父会话的显式覆盖；
+  - 全部写入 child 自己的 `session-capabilities.json` 记录；child 之后独立编辑。
 - **派生继承工作区**：不复制；child 从工作区 / 项目默认启动。
 - `resume` 不重新继承；已存在的 child 不回溯；切换只影响之后创建的 child。
 - 父 / 子项目根不同时降级为 `派生继承工作区`，避免跨项目复制 MCP `project:<key>`。

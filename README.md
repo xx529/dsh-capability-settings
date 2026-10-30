@@ -635,8 +635,9 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 
 - **派生继承（v19，spawn-time snapshot）**：主对话的「本会话能力」工具行右端与
   首屏行各有一个下拉，`派生继承会话`（默认）/ `派生继承工作区`。**继承会话** =
-  创建 subagent / teammate 时，把当前会话的显式覆盖（Skills / MCP / Tools）复制到
-  子会话自己的记录；**继承工作区** = 不复制，子 agent 使用工作区 / 项目默认能力。
+  创建 subagent / teammate 时：Skills 按**父会话此刻模型可见的技能集合**投影到
+  child 自己的目录（父可见 → 子可见，父不可见 → 子关闭），MCP / Tools 复制父会话
+  显式覆盖；**继承工作区** = 不复制，子 agent 使用工作区 / 项目默认能力。
   只在子 agent 创建那一刻生效（`agent/created` + `source=startup`）：
   `resume` 不重新继承，已存在的派生 agent 不受影响，切换下拉也只影响之后创建的
   child。派生会话页只读展示创建时的模式（`派生继承会话 · 创建时快照`），不提供
