@@ -714,6 +714,44 @@ export interface SessionApi {
 }
 
 // ---------------------------------------------------------------------------
+// 派生继承（spawn-time snapshot）
+// ---------------------------------------------------------------------------
+
+/**
+ * 派生继承模式：新派生的 subagent / teammate 在创建那一刻继承什么。
+ *
+ * - `session`（默认）：复制当前会话的显式能力覆盖；
+ * - `workspace`：不复制，使用工作区 / 项目默认能力。
+ */
+export type DeriveMode = "session" | "workspace";
+
+/** 派生会话的创建快照（只读；由宿主在 child 创建时落盘）。 */
+export interface DerivedInfo {
+  /** 创建时实际使用的模式。 */
+  mode: DeriveMode;
+  /** 直接父 session id。 */
+  from?: string;
+  /** 快照写入时间（毫秒）。 */
+  at?: number;
+}
+
+/** `session.deriveGet` 的返回。 */
+export interface DeriveGetResult {
+  /** 本会话之后创建 child 时使用的模式（缺省 `session`）。 */
+  mode: DeriveMode;
+  /** 本会话自身作为派生会话时的创建快照；非派生会话为 undefined。 */
+  derived?: DerivedInfo;
+}
+
+/** 派生继承 API（会话作用域）。 */
+export interface DeriveApi {
+  /** 读取当前会话的模式 + 派生快照。 */
+  get(): Promise<DeriveGetResult>;
+  /** 设置当前会话之后创建 child 时使用的模式。 */
+  set(mode: DeriveMode): Promise<OpResult>;
+}
+
+// ---------------------------------------------------------------------------
 // 项目级"全局能力禁用"域
 // ---------------------------------------------------------------------------
 
@@ -1024,6 +1062,8 @@ export interface CapabilityPanelApi {
   tools: ToolsApi;
   /** 会话级批量开关（v13 R1：`session.setBulk`）。 */
   session: SessionApi;
+  /** 派生继承（spawn-time snapshot）：会话级模式 + 派生快照读取。 */
+  derive: DeriveApi;
   overrides: OverridesApi;
   /**
    * Jev 能力决策域。配置页只用 `getConfig/setConfig/test`；`rank/apply` 需要

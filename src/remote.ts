@@ -140,6 +140,10 @@ export interface PanelRpcService {
    */
   session: {
     setBulk(input: unknown): Promise<unknown>;
+    /** 读取会话级「派生继承模式」+ 派生会话创建快照。 */
+    deriveGet(input: unknown): Promise<unknown>;
+    /** 设置会话级「派生继承模式」。 */
+    deriveSet(input: unknown): Promise<unknown>;
   };
   /**
    * Jev 能力决策（配置 / 连通性 / 批量打分 / 批量应用）。
@@ -240,6 +244,12 @@ export async function handleEndpoint(service: PanelRpcService, endpoint: string,
       case "session.setBulk":
         // 三域批量：业务失败（缺 sessionId / 非法 action / 未知域名）也在 value 内。
         return { ok: true, value: await service.session.setBulk(p) };
+      case "session.deriveGet":
+        // 派生继承模式 + 派生会话创建快照；业务失败在 value.ok=false。
+        return { ok: true, value: await service.session.deriveGet(p) };
+      case "session.deriveSet":
+        // 只接受 session / workspace；业务失败在 value.ok=false。
+        return { ok: true, value: await service.session.deriveSet(p) };
       case "jev.getConfig":
         // 只回掩码视图（hasApiKey / apiKeySource / apiKeyLast4），绝无明文 key。
         return { ok: true, value: await service.jev.getConfig() };

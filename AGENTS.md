@@ -101,7 +101,8 @@ danger-full-access 审批重试同一条命令即可。手动兜底通道仍是 
 | `src/client.ts` | 客户端插件入口：注入样式/语言包，注册 `sidebar.panellist` + `main`（面板）与 `conversation.input.*`（composer），构造面板 api 与**每会话** composer api |
 | `src/client/*.tsx` | UI：`panel.tsx`（skills/quick 共用列表/详情）、`mcp-panel.tsx`、`quick-messages-panel.tsx`、`composer-*.tsx`、`composer-capability.tsx`（会话能力：首屏 `conversation.hero.options` 行内入口 + 背景模糊配置弹窗 + 顶部「能力」Tab 整页；Tab 打开时隐藏输入框）、`select.tsx`（自绘下拉）、`panel-entry.tsx`（主区域页面 + 侧栏图标）、`styles.ts` |
 | `src/{skills,mcp,quick-messages,overrides,imports}/` | 各域宿主实现（配置读写、CRUD、挂载、探测、声明文件）；`skills/session.ts` = 会话级 Skills 开关（agent 作用域同名 runtime shadow，按会话落盘 + 项目默认投影） |
-| `src/session-state.ts` | 会话级开关持久化（`<dshHome>/dsh-capability-settings/session-capabilities.json`：原子写 + 文件锁 + 懒加载 + 两阶段对账；Skills / MCP 两个域共用一个实例） |
+| `src/session-state.ts` | 会话级开关持久化（`<dshHome>/dsh-capability-settings/session-capabilities.json`：原子写 + 文件锁 + 懒加载 + 两阶段对账；Skills / MCP / Tools / 派生继承共用一个实例） |
+| `src/derive/manager.ts` | 派生继承（spawn-time snapshot）：`agent/created` 且 `source=startup` 时按父会话 `deriveMode` 把三域显式覆盖复制到 child 记录（或只写工作区快照）；早于三个域注册 |
 | `src/session-state-reconcile.ts` | 孤儿记录对账调度（启动后 / 每 24h 存在性校验；`session/disposed` 只标记不删；持久化服务缺失/抛错一律保留） |
 | `src/shared/` | 通用：原子写、文件锁、项目根探测、agents home、JSON 配置、skill 定位/来源 |
 
@@ -129,8 +130,9 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
   `.agents/capability-overrides.json`（兼容 `.dsh` / `.claude`）**只读兼容**，
   首次写入时并入统一存储并删除旧文件；**不要把声明再写回项目仓库**。
 - **会话级开关持久化**：`<dshHome>/dsh-capability-settings/session-capabilities.json`
-  （`src/session-state.ts`；按 sessionId 记录 Skills/MCP 的显式覆盖，目录 0700 /
-  文件 0600）。与 `jev.json` 同目录。宿主重启 / resume 后恢复；孤儿记录由
+  （`src/session-state.ts`；按 sessionId 记录 Skills/MCP/Tools 显式覆盖 + 派生继承
+  `deriveMode` / `derivedMode` / `derivedFrom` / `derivedAt`，目录 0700 / 文件 0600）。
+  与 `jev.json` 同目录。宿主重启 / resume 后恢复；孤儿记录由
   `src/session-state-reconcile.ts` 两阶段清理。**不要删**：它是「当前对话」开关
   跨重启保持的唯一来源。
 - 写入必须走 `src/shared/atomic-write.ts` + `src/shared/file-lock.ts` 的既有封装，
@@ -244,6 +246,10 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
     对应代码：`src/client.ts` 的 `conversation.hero.options` 注册 + `src/client/styles.ts` 的
     `.skp-dock-entry*` + `composer-capability.tsx` 的 E 图标（书 / MCP 官方标 / 扳手）。预览图
     `docs/figma/preview/v18-*`；scene JSON 待导出（VECTOR 图标会缺，见 README）。
+  - `Capability Panel · 派生继承 v19（实现定稿）`（page `158:13728`）：派生继承下拉
+    （`派生继承会话` 默认 / `派生继承工作区`）+ 派生会话只读页；首屏 `158:14971` /
+    `158:15092` / `158:15213`，能力页 `158:13729` / `158:13847`，派生页 `158:13965`，
+    状态板 `158:15383`；预览图 `docs/figma/preview/v19-*`。
   - `Capability Dock · 首屏入口 v14`（page `134:8699`）：**旧实现基线**（工具行 icon+计数胶囊）：
     4 帧 `134:8700` / `134:8942` / `134:9184` / `134:9426`；预览图 `docs/figma/preview/v14-*`；
     4 帧 scene JSON 已导出（`docs/figma/scenes/v14-*.scene.json`，97/283/205/97 节点，

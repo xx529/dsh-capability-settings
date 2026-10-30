@@ -66,6 +66,19 @@ import { canonicalUnitId } from "./tools/attribution/unit-id.js";
 /** 当前数据文件版本；版本不认识时整份忽略（不猜测迁移）。 */
 export const SESSION_STATE_VERSION = 1;
 
+/**
+ * 派生继承模式：新派生的 subagent / teammate 在创建那一刻继承什么。
+ *
+ * - `session`（默认）：复制当前会话的显式能力覆盖（Skills / MCP / Tools）；
+ * - `workspace`：不复制，子 agent 使用工作区 / 项目默认能力。
+ *
+ * 只影响创建时刻，已存在的派生 agent 不受影响。
+ */
+export type DeriveMode = "session" | "workspace";
+
+/** 派生继承模式的默认值（与 UI 下拉的默认选中项一致）。 */
+export const DEFAULT_DERIVE_MODE: DeriveMode = "session";
+
 /** 插件在 dsh home 下的目录名（与包名一致，和 `jev.json` 共用）。 */
 export const SESSION_STATE_DIR_NAME = "dsh-capability-settings";
 
@@ -119,6 +132,20 @@ export interface SessionStateEntry {
    * 增减工具后 deny 名单自动跟随（见 `tools/manager.ts`）。
    */
   tools?: Record<string, boolean>;
+  /**
+   * 本会话的派生继承模式（仅作用于**本会话之后创建**的 subagent / teammate）。
+   * 缺省 = {@link DEFAULT_DERIVE_MODE}（`session`）。
+   */
+  deriveMode?: DeriveMode;
+  /**
+   * 本会话作为**派生会话**被创建时实际使用的继承模式（只读快照，
+   * 由 `seedDerived` 写入；用于派生会话页展示，不参与后续创建）。
+   */
+  derivedMode?: DeriveMode;
+  /** 本会话的派生来源（直接父 session id；只读诊断 / 派生会话页展示）。 */
+  derivedFrom?: string;
+  /** 派生快照写入时间（毫秒）。 */
+  derivedAt?: number;
   /** 两阶段对账的"首次发现不存在"时间戳；确认存在后清除。 */
   missingSince?: number;
 }
@@ -183,6 +210,28 @@ export interface SessionStateStore {
   mcp(sessionId: string): Readonly<Record<string, boolean>>;
   /** 某会话的 Tools 显式开关（同步；调用方先 `await ready()`；只回规范 `plugin:` 键）。 */
   tools(sessionId: string): Readonly<Record<string, boolean>>;
+  /** 某会话的派生继承模式（缺省 `session`；调用方先 `await ready()`）。 */
+  deriveMode(sessionId: string): DeriveMode;
+  /** 某会话作为派生会话的创建时信息（无记录 / 非派生会话时返回 undefined）。 */
+  derivedInfo(sessionId: string): { mode: DeriveMode; from?: string; at?: number } | undefined;
+  /** 写 / 清除本会话的派生继承模式（`undefined` = 恢复默认 `session`）。 */
+  setDeriveMode(sessionId: string, mode: DeriveMode | undefined, meta?: SessionStateMeta): Promise<void>;
+  /**
+   * 创建派生会话时写入一次性快照（**一次落盘**）：
+   * 记录创建模式 / 来源，并在 `mode === "session"` 时复制父会话的显式覆盖。
+   * 不复制 `deriveMode` 本身（子会话对自己后代的模式仍按默认）。
+   */
+  seedDerived(
+    sessionId: string,
+    from: string,
+    mode: DeriveMode,
+    toggles: {
+      skills?: Readonly<Record<string, boolean>>;
+      mcp?: Readonly<Record<string, boolean>>;
+      tools?: Readonly<Record<string, boolean>>;
+    },
+    meta?: SessionStateMeta,
+  ): Promise<void>;
   /**
    * 一次性 unit id 迁移（D2）：把 `plugin:<旧 display>` 归一为 `plugin:<包名>`，
    * 同时写入旧键镜像（可回滚）并保留未知键；幂等（已 settled 不写盘）。
@@ -267,9 +316,23 @@ function sanitizeEntry(raw: unknown): SessionStateEntry | undefined {
     }
     entry.tools = canonicalTools;
   }
+  if (typeof source.deriveMode === "string" && (source.deriveMode === "session" || source.deriveMode === "workspace")) entry.deriveMode = source.deriveMode;
+  if (typeof source.derivedMode === "string" && (source.derivedMode === "session" || source.derivedMode === "workspace")) entry.derivedMode = source.derivedMode;
+  if (typeof source.derivedFrom === "string" && source.derivedFrom.length > 0) entry.derivedFrom = source.derivedFrom;
+  if (typeof source.derivedAt === "number" && Number.isFinite(source.derivedAt)) entry.derivedAt = source.derivedAt;
   if (typeof source.missingSince === "number" && Number.isFinite(source.missingSince)) entry.missingSince = source.missingSince;
   // 完全空的记录没有保存价值（只有 meta 也不影响语义，但会让文件膨胀）。
-  if (entry.skills === undefined && entry.mcp === undefined && entry.tools === undefined && entry.missingSince === undefined) return undefined;
+  if (
+    entry.skills === undefined &&
+    entry.mcp === undefined &&
+    entry.tools === undefined &&
+    entry.deriveMode === undefined &&
+    entry.derivedMode === undefined &&
+    entry.derivedFrom === undefined &&
+    entry.missingSince === undefined
+  ) {
+    return undefined;
+  }
   return entry;
 }
 
@@ -291,6 +354,7 @@ function sanitizeSnapshot(raw: Record<string, unknown>): SessionStateSnapshot {
 /** 记录是否已经没有任何开关（用于"清空后删整条"）。 */
 function isEmptyEntry(entry: SessionStateEntry): boolean {
   if (entry.missingSince !== undefined) return false;
+  if (entry.deriveMode !== undefined || entry.derivedMode !== undefined || entry.derivedFrom !== undefined) return false;
   return (
     Object.keys(entry.skills ?? {}).length === 0 &&
     Object.keys(entry.mcp ?? {}).length === 0 &&
@@ -452,6 +516,57 @@ export function createSessionState(deps: SessionStateDeps = {}): SessionStateSto
         out[key] = value;
       }
       return out;
+    },
+
+    deriveMode(sessionId: string): DeriveMode {
+      return image.sessions[sessionId]?.deriveMode ?? DEFAULT_DERIVE_MODE;
+    },
+
+    derivedInfo(sessionId: string): { mode: DeriveMode; from?: string; at?: number } | undefined {
+      const entry = image.sessions[sessionId];
+      if (entry?.derivedMode === undefined) return undefined;
+      return {
+        mode: entry.derivedMode,
+        ...(entry.derivedFrom !== undefined ? { from: entry.derivedFrom } : {}),
+        ...(entry.derivedAt !== undefined ? { at: entry.derivedAt } : {}),
+      };
+    },
+
+    async setDeriveMode(sessionId, mode, meta): Promise<void> {
+      await ready();
+      const entry = ensureEntry(sessionId, meta);
+      if (mode === undefined) delete entry.deriveMode;
+      else entry.deriveMode = mode;
+      if (isEmptyEntry(entry)) {
+        delete image.sessions[sessionId];
+        deleted.add(sessionId);
+      }
+      await persist();
+    },
+
+    async seedDerived(sessionId, from, mode, toggles, meta): Promise<void> {
+      await ready();
+      const entry = ensureEntry(sessionId, meta);
+      entry.derivedMode = mode;
+      entry.derivedFrom = from;
+      entry.derivedAt = now();
+      if (mode === "session") {
+        const skills = { ...(toggles.skills ?? {}) };
+        const mcp = { ...(toggles.mcp ?? {}) };
+        const tools = { ...(toggles.tools ?? {}) };
+        if (Object.keys(skills).length > 0) entry.skills = skills;
+        else delete entry.skills;
+        if (Object.keys(mcp).length > 0) entry.mcp = mcp;
+        else delete entry.mcp;
+        if (Object.keys(tools).length > 0) entry.tools = tools;
+        else delete entry.tools;
+      } else {
+        // 继承工作区：不复制会话覆盖，让子 agent 从项目 / 全局默认启动。
+        delete entry.skills;
+        delete entry.mcp;
+        delete entry.tools;
+      }
+      await persist();
     },
 
     async migrateToolsUnits(): Promise<MigrationReport> {

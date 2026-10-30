@@ -138,6 +138,10 @@ export interface PanelRpcService {
      */
     session: {
         setBulk(input: unknown): Promise<unknown>;
+        /** 读取会话级「派生继承模式」+ 派生会话创建快照。 */
+        deriveGet(input: unknown): Promise<unknown>;
+        /** 设置会话级「派生继承模式」。 */
+        deriveSet(input: unknown): Promise<unknown>;
     };
     /**
      * Jev 能力决策（配置 / 连通性 / 批量打分 / 批量应用）。

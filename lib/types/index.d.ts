@@ -88,6 +88,10 @@ export interface CapabilityPanelService {
      */
     session: {
         setBulk(input: unknown): Promise<unknown>;
+        /** 读取会话级「派生继承模式」及（若本会话是派生会话）创建时快照。 */
+        deriveGet(input: unknown): Promise<unknown>;
+        /** 设置会话级「派生继承模式」（`session` / `workspace`）。 */
+        deriveSet(input: unknown): Promise<unknown>;
     };
     /**
      * 可选：按 serverName 从全局工具注册表反推 MCP 工具清单（只读）。

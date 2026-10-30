@@ -63,7 +63,7 @@ Skills / MCP / Tools（Tools 以插件为单元），一次请求批量打 0–1
 |---|---|---|
 | 项目级「默认关闭」声明（MCP 面板的「默认」开关 + 注入技能的「本项目启用」开关） | `<dshHome>/dsh-capability-settings/capability-overrides.json`（一个文件按**项目根**分 key：`projects.<项目根>.mcp` / `.skills`） | 旧项目内 `.agents/capability-overrides.json`（兼容 `.dsh` → `.claude`）：只读兼容，首次写入时把内容并入统一存储并删除旧文件 |
 | 项目级「全局能力引用」声明（MCP 的「导入到本项目」） | `<项目根>/.agents/capability-imports.json` | — |
-| 会话级能力开关（Skills / MCP / Tools 三域，按 sessionId） | `<dshHome>/dsh-capability-settings/session-capabilities.json`（`version: 1`，记录内 `skills` / `mcp` / `tools` 三个域） | — |
+| 会话级能力开关（Skills / MCP / Tools 三域 + 派生继承设置，按 sessionId） | `<dshHome>/dsh-capability-settings/session-capabilities.json`（`version: 1`，记录内 `skills` / `mcp` / `tools` / `deriveMode` / `derivedMode` / `derivedFrom` / `derivedAt`） | — |
 | Tools 归属扫描缓存（自动发现） | `<dshHome>/dsh-capability-settings/tool-attribution.json`（`version: 1`；包名+version+mtime+宿主版本失效；目录 `700` / 文件 `600`、原子写 + 锁；损坏自动重建） | — |
 | Tools **全局默认**（能力面板 Tools 页开关；所有会话 / 新会话） | `<dshHome>/dsh-capability-settings/tools-global.json`（`{"version":1,"disabled":["<unit>",…]}`；目录 `700` / 文件 `600`、原子写 + 文件锁；缺省 = 全部启用） | — |
 | 全局 MCP 服务器 | `~/.agents/mcp.json` | `~/.dsh` → `~/.claude` |
@@ -630,14 +630,20 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   resume 后都保持；写入失败只记 warning（本次运行内仍生效）。会话被删除后，插件
   按「存在性校验 + 24 小时两阶段」清理其记录——宿主没有会话删除事件，关机时的
   `session/disposed` 只做缺失标记、**绝不直接删除**，避免重启清空全部会话开关。
-  `fork` 出的子会话是新 id，不继承父会话的会话级开关。
+  `fork` 出的子会话是新 id；默认的「派生继承会话」会在创建那一刻复制父会话的
+  显式覆盖，选择「派生继承工作区」则不复制（见上条派生继承）。
 
-> **⚠️ 派生继承（R2）本版未实现**：`继承 / 不继承` 布尔开关（subagent / teammate
-> 共用、三域整体、默认继承）目前**只有交互设计**
-> （[docs/ux/capability-v13.md](docs/ux/capability-v13.md) §4），代码、持久化字段
-> 与 RPC 都未落地——首屏行 3 右侧**不渲染任何继承控件或弱提示**。派生 agent 的
-> 能力仍按现有规则（项目默认 / 项目级声明）取得，**不是**「跟随父会话生效集合」；
-> 不要把设计稿的默认「继承」当成现状。
+- **派生继承（v19，spawn-time snapshot）**：主对话的「本会话能力」工具行右端与
+  首屏行各有一个下拉，`派生继承会话`（默认）/ `派生继承工作区`。**继承会话** =
+  创建 subagent / teammate 时，把当前会话的显式覆盖（Skills / MCP / Tools）复制到
+  子会话自己的记录；**继承工作区** = 不复制，子 agent 使用工作区 / 项目默认能力。
+  只在子 agent 创建那一刻生效（`agent/created` + `source=startup`）：
+  `resume` 不重新继承，已存在的派生 agent 不受影响，切换下拉也只影响之后创建的
+  child。派生会话页只读展示创建时的模式（`派生继承会话 · 创建时快照`），不提供
+  可编辑开关；父 / 子不在同一个项目根时自动降级为工作区默认。持久化字段在
+  `session-capabilities.json` 的会话记录：`deriveMode`（本会话设置）、
+  `derivedMode` / `derivedFrom` / `derivedAt`（派生快照）；RPC 为
+  `session.deriveGet` / `session.deriveSet`。
 
 ### 🧭 Jev 能力决策：按输入草稿为本会话预选能力
 

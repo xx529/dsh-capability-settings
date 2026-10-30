@@ -159,6 +159,8 @@ export interface BulkState {
 }
 interface PanelProps {
     mode: "dock" | "hero" | "overlay" | "view" | "modal";
+    /** 每会话 API：派生继承下拉读写本会话设置（旧测试 / 旧宿主可缺省）。 */
+    api?: CapabilityPanelApi;
     loading: boolean;
     error?: string;
     snapshot: CapabilitySnapshot;

@@ -26,6 +26,8 @@ import type {
   ClientToolsList,
   ClientToolsUnit,
   CreateSkillInput,
+  DeriveGetResult,
+  DeriveMode,
   InstallResult,
   JevApplyResult,
   JevConfigIssue,
@@ -533,6 +535,38 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
         const result = await rpc("session.setBulk", payload);
         if (!result.ok) return { ok: false, errors: result.errors };
         return toSessionBulkResult(unwrap(result));
+      },
+    },
+
+    derive: {
+      /** 读取当前会话的派生模式 + 自身作为派生会话时的创建快照。 */
+      async get(): Promise<DeriveGetResult> {
+        if (deps.sessionId === undefined) throw new Error("session.deriveGet 只能在会话作用域的 api 上调用");
+        const result = await rpc("session.deriveGet", { sessionId: deps.sessionId });
+        if (!result.ok) throw new Error(result.errors.join("; "));
+        const raw = unwrap(result) as Record<string, unknown>;
+        const mode: DeriveMode = raw.mode === "workspace" ? "workspace" : "session";
+        const derivedRaw =
+          raw.derived !== null && typeof raw.derived === "object" ? (raw.derived as Record<string, unknown>) : undefined;
+        const derived =
+          derivedRaw === undefined
+            ? undefined
+            : {
+                mode: (derivedRaw.mode === "workspace" ? "workspace" : "session") as DeriveMode,
+                ...(typeof derivedRaw.from === "string" && derivedRaw.from.length > 0 ? { from: derivedRaw.from } : {}),
+                ...(typeof derivedRaw.at === "number" && Number.isFinite(derivedRaw.at) ? { at: derivedRaw.at } : {}),
+              };
+        return { mode, ...(derived !== undefined ? { derived } : {}) };
+      },
+
+      /** 设置当前会话之后创建 child 时的继承模式；业务失败返回 errors。 */
+      async set(mode: DeriveMode) {
+        if (deps.sessionId === undefined) throw new Error("session.deriveSet 只能在会话作用域的 api 上调用");
+        const result = await rpc("session.deriveSet", { sessionId: deps.sessionId, mode });
+        if (!result.ok) return { ok: false as const, errors: result.errors };
+        const raw = unwrap(result) as Record<string, unknown>;
+        if (raw.ok === false) return { ok: false as const, errors: Array.isArray(raw.errors) ? (raw.errors as string[]) : [] };
+        return { ok: true as const };
       },
     },
 

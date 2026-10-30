@@ -5,14 +5,52 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **派生继承（spawn-time snapshot）**：主对话可下拉选择 `派生继承会话`（默认）/
+  `派生继承工作区`，决定之后创建的 subagent / teammate 继承什么：
+  - 继承会话 = 创建时把当前会话的显式覆盖（Skills / MCP / Tools）复制到 child 的
+    `session-capabilities.json` 记录；继承工作区 = 不复制，child 使用工作区 / 项目默认；
+  - 只在 `agent/created` 且 `source === "startup"` 时应用；`resume` 不重新继承，
+    已存在的 child 不受影响；父 / 子不同项目根时降级为工作区默认；
+  - 会话记录新增 `deriveMode` / `derivedMode` / `derivedFrom` / `derivedAt`；
+    新增宿主 RPC `session.deriveGet` / `session.deriveSet`，客户端
+    `api.derive.get/set`；
+  - UI：首屏行「标准模式」旁与「本会话能力」工具行右端各一个下拉；派生会话页
+    只读展示创建时的模式并显示快照说明；
+  - 新增宿主模块 `src/derive/manager.ts`（在 skills / mcp / tools 的
+    `agent/created` 监听器之前写快照，保证 child 首轮前生效）。
+- Figma：新增页面 `Capability Panel · 派生继承 v19`（`158:13728`），含首屏默认 /
+  下拉 / 继承工作区、能力页两种模式、派生会话页与控件状态板；预览图
+  `docs/figma/preview/v19-*.png`。
+
 ### 文档
 
+- 新增 `docs/architecture/capability-packs.md`：「能力套装（Capability Pack）」设计提案。
+  定位为**用户级、只存引用、会话级生效的能力组合宏 + Jev 候选单元**，与宿主
+  `agentPreset`（整棵隔离插件树）和 DSH `bundle`（插件包）明确分层；数据只落
+  `id / title / description / members(kind+ref)`，默认 additive 快照、可撤销、成员漂移
+  可见；Jev 分两阶段接入（先结果聚合整包勾选，再作为 `kind:"pack"` 评分项且成员不折叠）。
+  含外部先例对照（Claude Code plugin / Codex profile / Gemini extension / Goose recipe /
+  Roo custom mode / Continue assistant / Cline workflow）、安全边界（不携带命令/凭据/
+  prompt 正文）与分期拆分。
 - 新增 `docs/architecture/mcp-resource-suppression.md`：记录「MCP 关闭后资源清单与
   资源工具残留」的完整拆解——四条能力通道、宿主 0.2.1-rc.3 源码依据（`dsh-mcp-resources`
   `layers.merge(scope)`/`request()`、`dsh-scope` 并集无删除、system-prompt scoped
   shadow 契约）、v1.7.2 的缓解实现与文本耦合代价、剩余工具层残留、上游
   [discussion #11562](https://github.com/deepseek-ai/deepseek-harness/discussions/11562)
   与退出条件；README / AGENTS.md 的残留说明链到该文件。
+
+### 验证
+
+- `pnpm typecheck`、`pnpm build` 通过；
+- 宿主机理（`lib/session-state.js` + `lib/derive/manager.js`，假 `agent/created`）
+  验证：继承会话复制三域显式覆盖；`resume` 不重放；继承工作区只写派生元数据、
+  不复制；跨项目根因父 cwd 不可得时按工作区语义处理；
+- `bash notes/verify/run-all.sh`：派生继承相关类型/构建/加载器/归属/Jev 服务端
+  套件通过；`capability-dock-render`、`client-panel`、`client-hero` 仍有**历史遗留**
+  失败（测试仍引用已移除的 `CapabilityBar` / `ComposerCapabilityHero` 与
+  `.skp-dock-bar` 类，非本次改动引入），待单独清理测试基线。
 
 ## [1.7.2] - 2026-10-30
 

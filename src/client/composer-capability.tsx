@@ -27,6 +27,8 @@ import type {
   ClientMcpServer,
   ClientSkillSummary,
   ClientToolsUnit,
+  DeriveGetResult,
+  DeriveMode,
   JevApplyPlanItem,
   JevApplyResult,
   JevApplySuccess,
@@ -320,6 +322,237 @@ async function fetchSnapshot(api: CapabilityPanelApi, workspace: string): Promis
     mounts: aggregateMounts(statuses),
     settling: statuses.some((status) => status.settling === true),
   };
+}
+
+// ---------------------------------------------------------------------------
+// 派生继承（spawn-time snapshot）
+// ---------------------------------------------------------------------------
+
+/** 派生模式变更事件：首屏与能力页是两个独立挂载点，需要互相同步。 */
+const DERIVE_CHANGED_EVENT = "skp-derive-changed";
+
+const DERIVE_LABEL: Record<DeriveMode, string> = {
+  session: "派生继承会话",
+  workspace: "派生继承工作区",
+};
+
+const DERIVE_DESC: Record<DeriveMode, string> = {
+  session: "派生 agent 继承当前会话的能力（默认）",
+  workspace: "派生 agent 使用工作区默认能力",
+};
+
+/** 会话级派生模式：读取 + 写入；写入后本地回显，失败留给 UI 提示。 */
+function useDeriveMode(api: CapabilityPanelApi | undefined, enabled = true) {
+  const [info, setInfo] = useState<DeriveGetResult | undefined>(undefined);
+  const [loading, setLoading] = useState(enabled);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [reloadToken, setReloadToken] = useState(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
+    // 旧宿主 / 测试 mock 可能没有 derive 域：按默认模式只读展示，不阻断能力面板。
+    if (api?.derive === undefined) {
+      setInfo({ mode: "session" });
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    api.derive
+      .get()
+      .then((next) => {
+        if (cancelled || !mountedRef.current) return;
+        setInfo(next);
+        setError(undefined);
+      })
+      .catch((err) => {
+        if (cancelled || !mountedRef.current) return;
+        // 读失败按默认值展示；不阻断能力面板其它功能。
+        setInfo({ mode: "session" });
+        setError(String(err instanceof Error ? err.message : err));
+      })
+      .finally(() => {
+        if (!cancelled && mountedRef.current) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, enabled, reloadToken]);
+
+  // 首屏与能力页常同时挂载：一边写入后通知另一边重读，避免触发器停留在旧值。
+  useEffect(() => {
+    if (!enabled || typeof window === "undefined") return;
+    const onChanged = () => setReloadToken((value) => value + 1);
+    window.addEventListener(DERIVE_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(DERIVE_CHANGED_EVENT, onChanged);
+  }, [enabled]);
+
+  const setMode = useCallback(
+    async (mode: DeriveMode) => {
+      if (api?.derive === undefined) return;
+      setPending(true);
+      setError(undefined);
+      try {
+        const result = await api.derive.set(mode);
+        if (!result.ok) throw new Error(result.errors.join("; "));
+        setInfo((prev) => ({ mode, ...(prev?.derived !== undefined ? { derived: prev.derived } : {}) }));
+        if (typeof window !== "undefined") window.dispatchEvent(new Event(DERIVE_CHANGED_EVENT));
+      } catch (err) {
+        setError(String(err instanceof Error ? err.message : err));
+      } finally {
+        setPending(false);
+      }
+    },
+    [api],
+  );
+
+  return { info, loading, pending, error, setMode };
+}
+
+/**
+ * 「派生继承会话 / 派生继承工作区」下拉。
+ *
+ * 与「标准模式」同族的文字触发器；弹出层用 fixed 定位，避免被首屏行 /
+ * 面板容器裁剪。两个选项都带一句说明，选中项打勾。
+ */
+function DeriveModeSelect({
+  value,
+  loading,
+  pending,
+  onChange,
+  variant = "hero",
+  disabled = false,
+  title,
+}: {
+  value: DeriveMode;
+  loading?: boolean;
+  pending?: boolean;
+  onChange: (mode: DeriveMode) => void;
+  variant?: "hero" | "rail";
+  disabled?: boolean;
+  title?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [anchor, setAnchor] = useState<{ left: number; top: number; width: number } | undefined>(undefined);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const popRef = useRef<HTMLDivElement | null>(null);
+  const busy = pending === true || loading === true;
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => {
+      setOpen(false);
+      setAnchor(undefined);
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (rootRef.current !== null && event.target instanceof Node && !rootRef.current.contains(event.target)) close();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    const onScroll = (event: Event) => {
+      // 弹出层内部滚动放行；其它容器滚动关闭。
+      if (popRef.current !== null && event.target instanceof Node && popRef.current.contains(event.target)) return;
+      close();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [open]);
+
+  const toggle = () => {
+    if (busy) return;
+    if (open) {
+      setOpen(false);
+      setAnchor(undefined);
+      return;
+    }
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (rect === undefined) return;
+    const width = 300;
+    const vw = typeof window === "undefined" ? 1440 : window.innerWidth;
+    const vh = typeof window === "undefined" ? 900 : window.innerHeight;
+    const left = Math.max(8, Math.min(rect.left, vw - 8 - width));
+    const below = rect.bottom + 6;
+    const menuHeight = 152;
+    const top = below + menuHeight <= vh - 8 ? below : Math.max(8, rect.top - 6 - menuHeight);
+    setAnchor({ left, top, width });
+    setOpen(true);
+  };
+
+  return (
+    <div ref={rootRef} className={`skp-derive skp-derive-${variant}`}>
+      <button
+        ref={btnRef}
+        type="button"
+        className="skp-derive-trigger"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`派生继承方式：${DERIVE_LABEL[value]}`}
+        title={title ?? "只影响之后创建的 subagent / teammate；已存在的不受影响"}
+        disabled={disabled || busy}
+        onClick={toggle}
+      >
+        <span className="skp-derive-value">{DERIVE_LABEL[value]}</span>
+        <span className="skp-derive-chevron">
+          <ChevronIcon />
+        </span>
+      </button>
+      {open && anchor !== undefined && (
+        <div
+          ref={popRef}
+          className="skp-derive-pop"
+          role="listbox"
+          aria-label="派生继承方式"
+          style={{ left: `${anchor.left}px`, top: `${anchor.top}px`, width: `${anchor.width}px` }}
+        >
+          {(Object.keys(DERIVE_LABEL) as DeriveMode[]).map((mode) => {
+            const active = mode === value;
+            return (
+              <button
+                key={mode}
+                type="button"
+                role="option"
+                aria-selected={active}
+                className={`skp-derive-opt${active ? " skp-derive-opt-active" : ""}`}
+                onClick={() => {
+                  if (!active) onChange(mode);
+                  setOpen(false);
+                  setAnchor(undefined);
+                }}
+              >
+                <span className="skp-derive-opt-main">
+                  <span className="skp-derive-opt-title">{DERIVE_LABEL[mode]}</span>
+                  <span className="skp-derive-opt-desc">{DERIVE_DESC[mode]}</span>
+                </span>
+                {active && <span className="skp-derive-check" aria-hidden="true">✓</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1810,6 +2043,8 @@ const IDLE_BULK: BulkState = { phase: "idle", doneDomains: 0, totalDomains: BULK
 
 interface PanelProps {
   mode: "dock" | "hero" | "overlay" | "view" | "modal";
+  /** 每会话 API：派生继承下拉读写本会话设置（旧测试 / 旧宿主可缺省）。 */
+  api?: CapabilityPanelApi;
   loading: boolean;
   error?: string;
   snapshot: CapabilitySnapshot;
@@ -1837,6 +2072,7 @@ interface PanelProps {
 export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
   const {
     mode,
+    api,
     loading,
     error,
     skillRows,
@@ -1863,6 +2099,8 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
   };
   const [query, setQuery] = useState("");
   const [resetBusy, setResetBusy] = useState(false);
+  // 派生继承：主对话显示下拉；派生会话只读展示创建时的模式。
+  const derive = useDeriveMode(api, mode === "view" || mode === "modal");
 
   const skillsOn = skillRows.filter((row) => row.enabled).length;
   const mcpOn = mcpRows.filter((row) => row.enabled).length;
@@ -1940,6 +2178,13 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
           )}
         </div>
       </div>
+
+      {derive.info?.derived !== undefined && (mode === "view" || mode === "modal") && (
+        <div className="skp-derive-banner" role="note">
+          <span className="skp-derive-banner-title">{DERIVE_LABEL[derive.info.derived.mode]}</span>
+          <span className="skp-derive-banner-desc">创建时快照 · 本页修改只影响本会话，不影响主对话</span>
+        </div>
+      )}
 
       {/* Tab 栏：能力类型（后续类型从这里扩展） */}
       <div className="skp-dock-tab-row">
@@ -2025,6 +2270,23 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
           </button>
         )}
         {!bulkRunning && bulkError !== undefined && <span className="skp-dock-rail-fail">{bulkError}</span>}
+        {derive.info?.derived !== undefined ? (
+          <span
+            className="skp-derive-static skp-derive-rail-static"
+            title="派生会话：创建时的继承方式已固定；本页修改只影响本会话"
+          >
+            {DERIVE_LABEL[derive.info.derived.mode]} · 创建时快照
+          </span>
+        ) : (
+          <DeriveModeSelect
+            variant="rail"
+            value={derive.info?.mode ?? "session"}
+            loading={derive.loading}
+            pending={derive.pending}
+            title={derive.error ?? undefined}
+            onChange={(next) => void derive.setMode(next)}
+          />
+        )}
       </div>
 
       {error !== undefined && (
@@ -2391,6 +2653,7 @@ function EntryBody({
   const isHero = phase === "hero";
   const workspace = useWorkspaceLabel(api);
   const controller = useCapabilityController(api, workspace, isHero);
+  const derive = useDeriveMode(api, isHero);
   const rect = useComposerCardRect(isHero, ref);
   const [modalOpen, setModalOpen] = useState(false);
   // 弹窗初始 Tab：点哪个域的 icon 就落到哪个 Tab；滑杆沿用上次（默认 Skills）。
@@ -2588,6 +2851,23 @@ function EntryBody({
     <div ref={ref} className="skp-dock-entry-host">
       {isHero && (
         <div ref={entryRef} className="skp-dock-entry" role="group" aria-label="本会话能力">
+          {derive.info?.derived !== undefined ? (
+            <span
+              className="skp-derive-static skp-derive-static-hero"
+              title="派生会话：创建时的继承方式已固定，本页修改只影响本会话"
+            >
+              {DERIVE_LABEL[derive.info.derived.mode]}
+            </span>
+          ) : (
+            <DeriveModeSelect
+              variant="hero"
+              value={derive.info?.mode ?? "session"}
+              loading={derive.loading}
+              pending={derive.pending}
+              title={derive.error ?? undefined}
+              onChange={(mode) => void derive.setMode(mode)}
+            />
+          )}
           <button
             type="button"
             className="skp-dock-entry-item"
@@ -2689,6 +2969,7 @@ function EntryBody({
           <div ref={modalRef} className="skp-dock-modal" role="dialog" aria-modal="true" aria-label="本会话能力">
             <CapabilityPanel
               mode="modal"
+              api={api}
               initialTab={modalTab}
               onTabChange={setModalTab}
               loading={controller.loading}
@@ -2769,6 +3050,7 @@ export function SessionCapabilityView({
       <div className="skp-cap-view-inner">
         <CapabilityPanel
           mode="view"
+          api={api}
           loading={controller.loading}
           error={controller.error}
           snapshot={controller.snapshot}

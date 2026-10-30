@@ -3,11 +3,11 @@
 | 项 | 值 |
 |---|---|
 | 文档 ID | `docs/architecture/agent-capability-inheritance.md`（本文件） |
-| 状态 | **提案 v0.1（未实现）**，2026-10-28 |
+| 状态 | **v0.5（已实现：派生继承会话 / 派生继承工作区）**，2026-10-30 |
 | 作者 | Lead |
-| 上游依据 | 用户反馈（lead 的当前对话能力派生 agent 不继承）+ 本机真实团队运行数据（见附录 A）+ DSH 0.2.1-rc.2 源码取证（见附录 B） |
+| 上游依据 | 用户反馈（lead 的当前对话能力派生 agent 不继承）+ 本机真实团队运行数据（见附录 A）+ DSH 0.2.1-rc.2 / **0.2.1-rc.3** 源码取证（见附录 B） |
 | 下游任务 | phase 1 / phase 2 实现、tester、Figma（实现后同步配置面） |
-| 写作用域 | 本轮**仅新增本文件**；不改 `src/**`、不安装、不推 profile、不改用户 `~/.dsh` 配置 |
+| 写作用域 | 本轮**仅修改本文件**；不改 `src/**`、不安装、不推 profile、不改用户 `~/.dsh` 配置 |
 
 ---
 
@@ -16,7 +16,7 @@
 1. 本文把「WHAT（语义）」与「HOW（实现契约）」放在一份文档里，便于一次性评审；实现阶段再拆任务。
 2. 证据标注：
    - `[源码]` = 本仓库源码实读（行号以当前工作树 `5cb097e` 为准）；
-   - `[宿主取证]` = 从 `/Applications/DeepSeek Harness.app/Contents/Resources/app.asar` 提取的 DSH 0.2.1-rc.2 源码实读（包名 + 符号见附录 B）；
+   - `[宿主取证]` = 从 `/Applications/DeepSeek Harness.app/Contents/Resources/app.asar` 提取的 DSH 0.2.1-rc.2 / 0.2.1-rc.3 源码实读（包名 + 符号见附录 B；rc.3 为本轮复核基线）；
    - `[本机数据]` = 用户本机真实会话文件与持久化文件（附录 A）；
    - `[裁决]` = 本文显式给出的设计决定（附理由与降级）；
    - `[待验证]` = 实现后必须用测试/真机确认的点（见 §8）。
@@ -47,6 +47,48 @@
 - 不覆盖 out-of-process / 跨主机子 agent；
 - 不覆盖其它插件注册的能力（只处理本插件的 skills / MCP 会话开关）；
 - 不提供「单个子 agent 的手动能力编辑」UI（自动选择产生的是派生结果，不是用户开关）。
+
+### 1.4 按钮化 MVP（建议先实施，不含 phase 2 自动选择）
+
+用户诉求是「多一个按钮，控制主 agent 开出来的 subagent / teammate 是否继承主 agent 的能力范围」。MVP 只做**继承 / 不继承**，不做 Jev 自动选择：
+
+- **一个开关，三域整体**：`继承`（默认）/ `不继承`；同时作用于 subagent 与 teammate，覆盖 Skills / MCP / Tools 三域，不按域拆分（沿用 UX v1.8 §4.1/D3）。
+- **入口**：会话「本会话能力」页头部（`conversation.view` 的「能力」Tab）与首屏配置弹窗头部各一枚开关；主能力面板新增「派生策略」区配置**全局默认**（项目级覆盖二期再加）。
+- **语义**：`继承` = 子 agent 的生效集合 = **直接父 agent** 的生效集合（§3.3 的 `inherit`）；`不继承` = 旧行为（项目默认）。
+- **默认值**：`继承`（用户已反馈的期望）；上线必须在 README / CHANGELOG 明示这是**行为变更**，并提供「不继承」一键回退。
+- **实现范围**：lineage + 策略读写/RPC + 两域 owner 投影 + Tools 的 `applyForAgent` 调用 + 热传播 + 重启恢复；**不含** §5.4 的 `tools/pre-execute` / Jev / 派生快照。
+- **验收**：§8.4 中除 `inherit+auto` 两项外的全部条目；INH-1…INH-8 + RESTART-1 + UI-1。
+
+### 1.5 已选定语义（v0.4）：spawn-time 快照，创建后互相独立
+
+用户明确要求「继承 / 不继承只影响主 agent 创建子 agent / teammate 的那一刻；之后 lead 改动或 child 各自改动都不互相影响」。采用 **copy-on-spawn（一次性快照）**，取代 §3.4 的热传播与 §5.3 的 owner 投影：
+
+- **创建时复制**：`agent/created` 且 `source === "startup"`、有 `parentSession`、父级策略 = `inherit` 时，把父会话当前的显式覆盖（`skills` / `mcp` / `tools` 三域）**一次性复制**到 child 自己的 `session-capabilities.json` 记录；三域随后按 child 自己的 sessionId 正常应用。
+- **创建后独立**：不注册父→子监听、不扇出、不做 owner 投影。lead 之后改能力只改 lead 自己；child 之后改能力只改 child 自己；兄弟 child 互不影响。
+- **之后新 spawn**：按当时的 lead 记录再复制一份快照，因此会看到 lead 的最新状态。
+- **resume 不重新继承**：`agent/created` 的 `source === "resume"` 一律跳过复制（child 记录已持久化）；避免「重启后 lead 的变化又灌进已有 child」。
+- **不继承**：不复制，child 按项目默认启动，之后独立。
+- **复制范围**：只复制父会话的**显式覆盖**；项目默认 / 全局默认仍按各自配置生效（不是快照）。若要求连项目默认也冻结，可再讨论「复制生效集合」的增强模式。
+- **同项目根保护**：child `cwd` 与父级不同项目根时不复制（避免跨项目投影），按 child 项目默认。
+- **数据**：child 记录增加可选元数据 `inheritedFrom` / `inheritedAt`（诊断 + UI 说明）；`inheritDerived` 策略仍存父会话记录（默认继承，可全局默认覆盖）。
+- **实现简化**：Skills / MCP 两域**不需要 owner 投影和热传播**，只需在创建时 seed child 记录；Tools 用 `applyForAgent` 在自身作用域应用。
+
+### 1.6 实现定稿（v0.5）：派生继承会话 / 派生继承工作区
+
+用户 2026-10-30 拍板的最终交互替换本节的早期 `inherit / none` 提案：
+
+- 主对话的能力页工具行右端 + 首屏行各一个下拉，选项固定为
+  **`派生继承会话`（默认）/ `派生继承工作区`**，**不再有「派生模式」前置标题**。
+- **派生继承会话**：child 创建时（`agent/created`，`source === "startup"`）把父会话的
+  显式覆盖（`skills` / `mcp` / `tools`）复制进 child 自己的 `session-capabilities.json`
+  记录；child 之后独立编辑。
+- **派生继承工作区**：不复制；child 从工作区 / 项目默认启动。
+- `resume` 不重新继承；已存在的 child 不回溯；切换只影响之后创建的 child。
+- 父 / 子项目根不同时降级为 `派生继承工作区`，避免跨项目复制 MCP `project:<key>`。
+- 持久化：`deriveMode`（本会话设置）+ `derivedMode` / `derivedFrom` / `derivedAt`
+  （child 创建快照）；RPC `session.deriveGet` / `session.deriveSet`。
+- 实现：`src/derive/manager.ts` 的 `agent/created` 监听器在 skills / mcp / tools
+  监听器之前写快照；`src/session-state.ts` 的 `seedDerived` 一次落盘。
 
 ---
 
@@ -91,6 +133,7 @@
     - `subagent`（spawn/fork）: `{description, prompt, cwd?, agentPreset?, provider?, model?, …}`
     - `ralph`: `{objective, maxRounds?}`（固定脚本每轮用 objective 构造 child prompt）
     - `workflow`: `{script, meta, args?}`（每个 child 的 prompt 在脚本里的 `agent(prompt)` 字面量中）
+11. **0.2.1-rc.3 复核（本轮）**：`@deepseek-ai/dsh-tool-subagent` 已移除模型面 `persona` / `toolFilter` 参数——配置里出现会直接报错（`no longer supported; configure persona and tool plugins in an Agent Preset and select it with agentPreset (spawn only)`）⇒ 插件**无法**在 spawn 工具执行前通过参数注入口径限制子 agent 能力；**只能走 `agent/created` 之后按 agent 作用域应用**（本方案主路径）。同时 rc.3 仍未提供 skills / MCP 的原生委派继承（`dsh-subagent` 的委派策略捕获仍只含 sandbox / approval / permissionPreset；`grep -rn "inherit" dsh-subagent/lib dsh-experimental-agent-team/lib` 只命中上下文 / 模型等其它语义）。
 
 ### 2.4 根因链
 
@@ -116,24 +159,25 @@
 - 两种派生类型分别配置三态：`subagent`、`teammate`。
 - 优先级（从高到低）：**会话级覆盖 → 项目级覆盖 → 全局默认**。
 - 默认值 `[裁决]`：`subagent = inherit`、`teammate = inherit`、自动选择关闭（`inherit` 而非 `inherit+auto`）。理由：这是用户报告的"应当继承"的预期；`none` 可一键恢复旧行为。
-- 改策略的生效时机：**只影响之后的 spawn 与 resume**；已 live 的 child 在父级开关变化时按 §3.4 热更新，不因策略变化被"反悔"重算（避免运行中能力集突变）。
+- 改策略的生效时机：**只影响之后的 spawn**；已存在的 child 不因策略或父级开关变化被重算（v0.4 快照语义，见 §1.5）。
 
 ### 3.3 生效集合计算
 
 ```
-effective(root)      = lead 的显式会话覆盖 applied over 项目默认
-effective(child)     = switch(policy(child.kind)):
+effective(child) at spawn time = switch(policy(child.kind)):
     none             -> 项目默认
-    inherit          -> effective(直接父 agent)
-    inherit+auto     -> effective(直接父 agent) ∩ snapshot(child).selected
+    inherit          -> 父级创建时刻的显式覆盖 applied over 项目默认（一次性快照）
+    inherit+auto     -> 快照 ∩ snapshot(child).selected（phase 2）
 ```
+
+> v0.4 起 `inherit` 是**创建时快照**，不是持续绑定：child 创建完成后，父级与 child 的开关互不传播（见 §1.5）。
 
 - `[裁决]` **baseline = 直接父 agent 的生效集合**（不是永远 root）。depth 1 时等于 lead；逐层收窄，符合最小权限，也让 auto 可组合。若父级无法解析 → 回退 root 的生效集合；root 也无法解析 → 项目默认。
 - `∩` 是**收窄**：lead/父级关闭的能力不会被自动选择重新打开；自动选择只决定"在父级已启用的范围内，哪些对这个 child 的任务相关"。
 - MCP 的键与现有 `jev/apply.ts` 的映射一致：项目条目 `project:<key>`、全局/外部 `server:<serverName>`。
 - 快照里的 `selected` 存**保留**的能力名（不是全量开关），因此父级后续关闭的会自动消失（交集），父级后续新增的**不会**自动进入 child（child 的能力范围在 spawn 时固定）`[裁决]`。
 
-### 3.4 热传播（运行中改开关）
+### 3.4 热传播（运行中改开关）—— v0.4 **不采用**，见 §1.5
 
 - lead 在自己的能力面板改开关 → 写 root 记录 → 扇出到**同一会话树下所有 live child**：
   - MCP：重算 plan，重挂/解除 restrict；
@@ -143,6 +187,8 @@ effective(child)     = switch(policy(child.kind)):
 - 未 live 的 child：下次创建/恢复时按持久化状态计算。
 
 ### 3.5 重启 / resume
+
+> v0.4：child 记录就是快照，**resume 不重新继承**；下表为早期（持续绑定）口径，仅供对照。
 
 | 场景 | 行为 |
 |---|---|
@@ -238,6 +284,8 @@ effective(child)     = switch(policy(child.kind)):
 
 ### 5.1 模块清单
 
+> v0.4 以 §1.5 的 spawn-time 快照为准：下表「owner 投影 / 扇出」相关行不再需要；核心改动缩减为「lineage 解析 + 创建时 seed child 记录 + 策略存储/RPC + UI」。
+
 | 模块 | 类型 | 职责 |
 |---|---|---|
 | `src/shared/session-lineage.ts` | 新增 | 沿 `parentSession` 解析对话根 / 直接父级；live 快走 + 持久化兜底 + 进程内缓存 |
@@ -267,6 +315,8 @@ ownerOfAgent(agent): Promise<LineageInfo | undefined>
 - 失败：服务缺失 / open 抛错 → 返回 `undefined`，调用方回落"自身 + 项目默认"并 warn 一次（按 sessionId 去重）。
 
 ### 5.3 两个域如何接入
+
+> v0.4 不采用下面的 owner 投影 / 扇出方案。快照式实现只需：在 `agent/created`（`source === "startup"`）时把父会话显式覆盖写入 child 记录，之后两个域完全按 child 自己的 sessionId 工作，无需改 hydrate / 读投影 / 热传播。以下内容保留为未采用的备选方案，供评审对照。
 
 **MCP（`src/mcp/loader.ts`）**
 
@@ -372,6 +422,7 @@ spawn 工具调用
 
 - 复用 `src/channel.ts` 的 `CHANNEL`，业务失败包在 `value: { ok: false, errors }`（见 `src/remote.ts` 文件头契约）。
 - 客户端：`src/client/api-adapter.ts` 增加对应方法；composer 会话 api 带 `sessionId`。
+- **MVP 只落会话级字段**：`agentPolicy.get/set` 的 `session` 段先支持 `{ inheritDerived: boolean }`，可暂不实现 `derivedAgents` / auto 字段；全局默认读 `agent-inheritance.json` 的 `defaults.inheritDerived`。
 
 ### 5.7 UI（实现阶段）
 
@@ -418,6 +469,7 @@ spawn 工具调用
 | root 不在线 / 无法读持久化 | 回落项目默认 + warn 一次 | 不阻塞 spawn |
 | root 已删除/归档（超宽限） | child 走 `none` | 派生快照保留但无法求交集 |
 | 父级与子级 `agentPreset` 不同 | 名字不在子视图 → 跳过并 warn | 用户真实数据里 teammate 是 `cordis` preset |
+| 子级 `cwd` 与父级不同项目根 | **不做跨项目继承**：子级按自身项目默认 | 避免把 A 项目的会话开关投影到 B 项目的 MCP 条目 / 项目默认；lineage 可解析但仅在「同项目根」生效 |
 | workflow 逐 child 自动选择 | phase 1 不支持；child 按 `inherit`，auto 可选"脚本字面量"实验开关 | 见 §10 Q7 |
 | ralph | 用 objective 统一选择，应用到该批 child | 同一调用多轮 |
 | 并行 spawn / label 冲突 | 歧义 → 放弃 auto，按 `inherit` | 安全优先 |
@@ -427,7 +479,7 @@ spawn 工具调用
 | `sessionPersistence` 缺失 | 父不在线时无法解析 → 项目默认 | live 父链仍正常 |
 | 工具改名 / 参数形状变化 | 自动选择 fail-open（只继承）；配置项可扩展工具名集合 | DSH 升级风险 |
 | out-of-process 子 agent | 不覆盖 | 需要宿主级委派能力策略 |
-| 子会话在 UI 被打开 | 面板显示/编辑的是所属对话（owner）的配置 | 读投影规范化 |
+| 子会话在 UI 被打开（继承模式） | **v0.4 已拍板：child 页面独立**（快照初始化后互不影响） | child 记录是它自己的；lead / sibling 改动不传播，child 改动也不外溢；不再采用 owner 投影 |
 | 降级旧版插件 | 新字段被忽略/可能被旧版写回丢弃 | 不承诺降级保住派生状态 |
 
 ---
@@ -484,7 +536,7 @@ spawn 工具调用
 
 | 阶段 | 内容 | 预估 |
 |---|---|---|
-| Phase 1 | lineage + 策略存储/RPC + 两域 `inherit` + 热传播 + 会话/全局配置 UI + 单测/真机 + 文档 | 600–900 行 src + 测试；2–3 工作日 |
+| Phase 1 | lineage + 会话级「继承 / 不继承」开关（按钮）+ 全局默认 + 两域 `inherit` + 热传播 + 会话/全局配置 UI + 单测/真机 + 文档 | 500–800 行 src + 测试；2–3 工作日 |
 | Phase 2 | `tools/pre-execute` 自动选择流水线 + 派生快照 + 成本/超时/缓存 + AUTO 测试 | 400–600 行；约 2 工作日 |
 | Phase 3（可选） | workflow 逐 child、out-of-process（需上游）、Figma 配置面同步 | 视范围 |
 
@@ -513,6 +565,7 @@ spawn 工具调用
 | Q6 | UI 入口？ | 主面板新增「派生策略」页；会话面板头部「派生策略…」弹窗 |
 | Q7 | workflow / ralph 的支持程度？ | ralph 用 objective；workflow 暂不逐 child auto（可后续加实验开关） |
 | Q8 | 是否需要"某个 child 手动覆盖"？ | 本方案不做，后续再议 |
+| Q9 | 子会话能力页面被打开时，改动的作用域？ | **已拍板（v0.4）**：spawn-time 快照；child 页面就是 child 自己的开关，改动只影响该 child；lead / sibling 互不影响。不采用 owner 投影与热传播 |
 
 ---
 
@@ -521,6 +574,10 @@ spawn 工具调用
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v0.1 | 2026-10-28 | 初稿（提案，未实现）：接入证据、三态策略、会话树继承、pre-execute + agent/created 两段式自动选择、存储/降级/测试/待决 |
+| v0.2 | 2026-10-30 | 复核 DSH 0.2.1-rc.3：`subagent` 工具已移除模型面 `toolFilter` / `persona`（不能靠 spawn 参数注入能力过滤，必须 `agent/created` 后应用）；补充按钮化 MVP（单开关、三域整体、默认继承、全局默认）与「同项目根」边界 |
+| v0.3 | 2026-10-30 | 补充 Q9：子会话能力页面的编辑作用域（只读 / 子级本地覆盖 / owner 投影）待拍板，并修正 §7 的默认口径说明 |
+| v0.4 | 2026-10-30 | **选定 spawn-time 快照语义**：继承/不继承只作用于创建那一刻；创建后 lead 与 child 互不传播、child 页面独立；`resume` 不重新继承。取代 §3.4 热传播与 §5.3 owner 投影 |
+| v0.5 | 2026-10-30 | **实现定稿**：选项改为「派生继承会话 / 派生继承工作区」（去掉「派生模式」前置标题）；新增 §1.6 实现口径；代码落在 `derive/manager.ts` + `session-state.seedDerived` + `session.deriveGet/Set` + 首屏/能力页下拉 |
 
 ---
 
