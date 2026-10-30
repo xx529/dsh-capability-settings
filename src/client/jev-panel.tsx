@@ -80,6 +80,7 @@ const COPY = {
   autoSection: "能力决策",
   autoEnable: "输入停顿后自动评分",
   autoEnableHint: "开启后，在对话首屏停止输入达到阈值会自动发起 1 次评分（默认关闭）。",
+  autoNoKey: "当前没有可用的 API Key：自动评分不会触发。请先填写并保存密钥，或配置环境变量。",
   pause: "停顿阈值",
   pauseHint: "停止输入达到该时长后自动发起 1 次评分 · 修改量达到阈值后可再次触发",
   minChars: "最少触发字数",
@@ -803,6 +804,11 @@ export function JevPanel({ api, active }: { api: CapabilityPanelApi; active: boo
               <span className="skp-jev-switch-text">
                 <span className="skp-jev-label skp-jev-label-strong">{COPY.autoEnable}</span>
                 <span className="skp-jev-hint">{COPY.autoEnableHint}</span>
+                {form.autoEnabled && saved !== null && !saved.hasApiKey && (
+                  <span className="skp-jev-err" role="status">
+                    {COPY.autoNoKey}
+                  </span>
+                )}
               </span>
               <label className="skp-switch" title={COPY.autoEnable}>
                 <input

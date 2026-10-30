@@ -177,6 +177,8 @@ interface PanelProps {
     /** 重试只重放失败域。 */
     onRetryBulk: () => void;
     bulkState: BulkState;
+    /** 用户切 Tab 时通知外层（首屏入口用它记住上次的域，下次打开弹窗落点一致）。 */
+    onTabChange?: (tab: TabId) => void;
 }
 export declare function CapabilityPanel(props: PanelProps & {
     initialTab?: TabId;

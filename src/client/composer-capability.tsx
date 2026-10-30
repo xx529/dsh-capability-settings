@@ -1807,6 +1807,8 @@ interface PanelProps {
   /** 重试只重放失败域。 */
   onRetryBulk: () => void;
   bulkState: BulkState;
+  /** 用户切 Tab 时通知外层（首屏入口用它记住上次的域，下次打开弹窗落点一致）。 */
+  onTabChange?: (tab: TabId) => void;
 }
 
 export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
@@ -1829,8 +1831,13 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
     onRetryBulk,
     bulkState,
     initialTab,
+    onTabChange,
   } = props;
-  const [tab, setTab] = useState<TabId>(initialTab ?? "skills");
+  const [tab, setTabState] = useState<TabId>(initialTab ?? "skills");
+  const setTab = (next: TabId) => {
+    setTabState(next);
+    onTabChange?.(next);
+  };
   const [query, setQuery] = useState("");
   const [resetBusy, setResetBusy] = useState(false);
 
@@ -2360,6 +2367,8 @@ function EntryBody({
   const controller = useCapabilityController(api, workspace, isHero);
   const rect = useComposerCardRect(isHero, ref);
   const [modalOpen, setModalOpen] = useState(false);
+  // 弹窗初始 Tab：点哪个域的 icon 就落到哪个 Tab；滑杆沿用上次（默认 Skills）。
+  const [modalTab, setModalTab] = useState<TabId>("skills");
   const contentRef = useRef<HTMLDivElement | null>(null);
   const entryRef = useRef<HTMLDivElement | null>(null);
   const modalRef = useRef<HTMLDivElement | null>(null);
@@ -2558,7 +2567,10 @@ function EntryBody({
             className="skp-dock-entry-item"
             title={countTitle("Skills", skillsOn, controller.skillRows.length)}
             aria-label={`配置 Skills：已启用 ${skillsOn} / ${controller.skillRows.length}`}
-            onClick={() => setModalOpen(true)}
+            onClick={() => {
+              setModalTab("skills");
+              setModalOpen(true);
+            }}
           >
             <span className="skp-dock-entry-icon">
               <BookIcon />
@@ -2570,7 +2582,10 @@ function EntryBody({
             className="skp-dock-entry-item"
             title={countTitle("MCP", mcpOn, controller.mcpRows.length)}
             aria-label={`配置 MCP：已启用 ${mcpOn} / ${controller.mcpRows.length}`}
-            onClick={() => setModalOpen(true)}
+            onClick={() => {
+              setModalTab("mcp");
+              setModalOpen(true);
+            }}
           >
             <span className="skp-dock-entry-icon">
               <PlugIcon />
@@ -2582,7 +2597,10 @@ function EntryBody({
             className="skp-dock-entry-item"
             title={countTitle("Tools", toolsOn, controller.toolRows.length)}
             aria-label={`配置 Tools：已启用 ${toolsOn} / ${controller.toolRows.length}`}
-            onClick={() => setModalOpen(true)}
+            onClick={() => {
+              setModalTab("tools");
+              setModalOpen(true);
+            }}
           >
             <span className="skp-dock-entry-icon">
               <ToolboxIcon />
@@ -2646,6 +2664,8 @@ function EntryBody({
           <div ref={modalRef} className="skp-dock-modal" role="dialog" aria-modal="true" aria-label="本会话能力">
             <CapabilityPanel
               mode="modal"
+              initialTab={modalTab}
+              onTabChange={setModalTab}
               loading={controller.loading}
               error={controller.error}
               snapshot={controller.snapshot}
