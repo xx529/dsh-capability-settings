@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+（暂无）
+
+## [1.6.1] - 2026-10-30
+
 ### 修复
 
 - **能力决策「应用所选」要卡 5–10 秒**（用户反馈：点「应用所选」后「应用中…」
@@ -1179,6 +1183,7 @@
   输出总量上限（对接入的压缩包上限之下再拦一层"膨胀内存"），并修复
   数据区越界被静默截断、短归档负面偏移读越界的问题（zip bomb 防护）。
 
+[1.6.1]: https://github.com/xx529/dsh-capability-settings/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/xx529/dsh-capability-settings/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.4.3...v1.5.0
 [1.4.3]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.4.2...v1.4.3
