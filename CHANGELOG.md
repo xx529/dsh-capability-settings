@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+（暂无）
+
+## [1.6.0] - 2026-10-30
+
 ### 变更
 
 - **首屏能力入口改为工具行 icon + 计数，默认收起**：入口从「输入框下方独立能力条 /
@@ -1121,6 +1125,7 @@
   输出总量上限（对接入的压缩包上限之下再拦一层"膨胀内存"），并修复
   数据区越界被静默截断、短归档负面偏移读越界的问题（zip bomb 防护）。
 
+[1.6.0]: https://github.com/xx529/dsh-capability-settings/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.4.3...v1.5.0
 [1.4.3]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/chengdb/dsh-plugin-capability-panel/compare/v1.4.1...v1.4.2
