@@ -2541,6 +2541,15 @@ function EntryBody({
     };
   }, [modalOpen, closeModal]);
 
+  // 自动评分开启但草稿还不够「最少触发字数」时，在入口旁给一行原因提示。
+  // （停顿倒计时此前按用户要求移除；这里只在门槛未达到时解释「还差多少字」。）
+  const autoPrefs = jevConfig.state.status === "ready" ? jevConfig.state.view.autoTrigger : undefined;
+  const draftChars = draft === undefined ? 0 : draftLength(draft);
+  const autoHint =
+    autoPrefs?.enabled === true && configured && draft !== undefined && draftChars > 0 && draftChars < autoPrefs.minChars
+      ? `自动评分还需 ${autoPrefs.minChars - draftChars} 字`
+      : undefined;
+
   // 入口三域计数（已启用数；加载中显示 —）。
   const skillsOn = controller.skillRows.filter((row) => row.enabled).length;
   const mcpOn = controller.mcpRows.filter((row) => row.enabled).length;
@@ -2629,6 +2638,16 @@ function EntryBody({
             <SlidersIcon />
           </button>
         </div>
+      )}
+      {isHero && autoHint !== undefined && (
+        <button
+          type="button"
+          className="skp-dock-auto-hint"
+          title="自动评分的最少触发字数可在「能力面板 → Jev 模型 → 能力决策」里调整；点此打开设置"
+          onClick={() => onManage?.("jev")}
+        >
+          {autoHint}
+        </button>
       )}
       {isHero && decision.state !== undefined && decisionStyle !== undefined && (
         <div ref={contentRef} className="skp-dock-fixed" style={decisionStyle}>
