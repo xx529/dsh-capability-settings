@@ -683,11 +683,41 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
     });
   }
 
-  /** 生命周期回调：登记 + 延后应用项目默认（等 preset 层 provider 就绪）。 */
-  function onAgentCreated(agent: any): void {
+  /** 构造完成后回填（供 agent/created 时立即应用落盘开关；见 onAgentCreated）。 */
+  let registryApi: SkillSessionRegistry | undefined;
+
+  /**
+   * 把落盘的显式开关在 agent 创建时**立即**批量应用。
+   *
+   * 背景：`applyProjectDefaults` 只处理注入技能，磁盘技能要等到 `list` 的
+   * `restoreExplicit` 才注册 shadow；宿主重启 / resume 后模型首轮可能先于
+   * 面板加载，出现「面板显示 19 / 模型实际 155」的不一致。这里在创建路径用
+   * 现有 `setEnabledBatch`（一次目录发现 + 一次落盘）提前收敛。
+   */
+  async function applyPersistedExplicit(record: SessionRecord): Promise<void> {
+    const api = registryApi;
+    const sessionId = typeof record.agent?.id === "string" ? record.agent.id : undefined;
+    if (api === undefined || deps.state === undefined || sessionId === undefined) return;
+    await deps.state.ready();
+    const entries = Object.entries(deps.state.skills(sessionId)).map(([name, enabled]) => ({ name, enabled }));
+    if (entries.length === 0) return;
+    const result = await api.setEnabledBatch({ sessionId, entries });
+    const failed = result.outcomes.filter((outcome) => outcome.ok !== true).length;
+    if (failed > 0) {
+      deps.logger?.warn?.(`capability-panel: 会话恢复时 ${failed} 个技能显式开关未能立即应用`);
+    }
+  }
+
+  /** 生命周期回调：登记 + 延后应用项目默认 + 立即应用落盘显式开关。 */
+  function onAgentCreated(agent: any): Promise<void> | void {
     const record = track(agent);
     if (record === undefined) return;
     scheduleRetry(record, 0);
+    // agent/created 是 serial 且被 await：返回 Promise 可把首轮前的 shadow 收敛
+    // 纳入创建路径；失败只 warn，绝不让 agent 创建失败。
+    return applyPersistedExplicit(record).catch((error) => {
+      deps.logger?.warn?.(`capability-panel: 会话恢复技能开关失败（${String(error)}）`);
+    });
   }
 
   // —— 生命周期簿记 ——
@@ -705,18 +735,18 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
     if (typeof offDisposed === "function") listeners.push(offDisposed);
   }
 
-  // 插件加载时已经存活的 agent（resume / 历史 session）补登记并应用项目默认。
-  try {
-    const existing = ctx.get?.("agents")?.list?.() ?? [];
-    for (const agent of Array.isArray(existing) ? existing : []) onAgentCreated(agent);
-  } catch {
-    /* agents 服务不可用：按无存量会话处理 */
-  }
-
-  return {
+  const api: SkillSessionRegistry = {
     async list(baseList, cwd, sessionId): Promise<SessionSkillView[]> {
       const record = sessionId !== undefined ? find(sessionId) : undefined;
       const projectDisabled = new Set<string>(await projectDisabledOf(cwd));
+      // 冷会话（agent 已释放）没有 record，但面板仍应显示落盘快照而不是默认全开。
+      let persisted: Readonly<Record<string, boolean>> = {};
+      let derived = false;
+      if (sessionId !== undefined && deps.state !== undefined) {
+        await deps.state.ready();
+        persisted = deps.state.skills(sessionId);
+        derived = deps.state.entries()[sessionId]?.derivedMode !== undefined;
+      }
       // 项目默认投影（fire-and-await；读路径允许触发一次幂等 reconcile）。
       if (record !== undefined) await runApply(record, 0, [...projectDisabled]);
 
@@ -767,8 +797,19 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
         // 实际注册状态（项目默认 + 会话 shadow 共同决定）。
         const registered =
           record !== undefined ? !shadowed(record, row.name) : row.injected !== true || !projectDisabled.has(row.name);
-        // 优先级：显式会话覆盖 > 项目级默认（stub 遮蔽）> 实际注册状态。
-        const enabledInSession = explicit !== undefined ? explicit : shadowedByProjectStub(row) ? false : registered;
+        // 优先级：显式会话覆盖 > 项目级默认（stub 遮蔽）> 落盘快照（冷会话 /
+        // 派生会话缺席名字按关闭）> 实际注册状态。
+        const persistedValue = persisted[row.name];
+        const enabledInSession =
+          explicit !== undefined
+            ? explicit
+            : shadowedByProjectStub(row)
+              ? false
+              : persistedValue !== undefined
+                ? persistedValue
+                : derived
+                  ? false
+                  : registered;
         return { ...row, enabledInSession, canToggleInSession: record !== undefined };
       });
     },
@@ -1067,4 +1108,15 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
       warnedSkips.clear();
     },
   };
+  registryApi = api;
+  // api 就绪后再补应用存量 agent：此前 agent/created 若已错过，这里仍能恢复
+  // 落盘显式开关（异步，不阻塞插件加载）。
+  try {
+    const existing = ctx.get?.("agents")?.list?.() ?? [];
+    for (const agent of Array.isArray(existing) ? existing : []) void onAgentCreated(agent);
+  } catch {
+    /* agents 服务不可用：按无存量会话处理 */
+  }
+  return api;
 }
+
