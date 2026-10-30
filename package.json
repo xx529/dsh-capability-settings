@@ -1,7 +1,7 @@
 {
   "name": "dsh-capability-settings",
   "description": "dsh plugin: browse and manage project-level and global capabilities (skills, MCP servers, …) from the web GUI",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
