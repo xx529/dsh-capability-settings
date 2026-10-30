@@ -831,7 +831,8 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   **剩余残留**：三个资源工具（`list_mcp_resources` /
   `list_mcp_resource_templates` / `read_mcp_resource`）仍能列出/读取被关
   server 的 resources（宿主没有按名字移除 provider 的 API，工具层无法只删
-  单个 provider 的资源能力）。
+  单个 provider 的资源能力）。完整的问题拆解、宿主源码依据、上游讨论与退出条件
+  见：[MCP 资源清单/资源工具残留跟踪](docs/architecture/mcp-resource-suppression.md)。
 - **Tools 的开关也是 `tools.restrict`，但按"插件"聚合、且是两层默认**：宿主工具
   注册表只有 `name / description / parameters`、没有注入方字段（`tools.register`
   不接受来源参数），所以插件归属靠命名约定表推断（见「Tools（插件工具）」）。

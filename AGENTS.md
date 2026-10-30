@@ -194,7 +194,8 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
    派生清单」。
    剩余残留：三个资源工具（`list_mcp_resources` / `list_mcp_resource_templates`
    / `read_mcp_resource`）仍能访问被关 server 的 resources（宿主无按名字移除
-   provider 的 API）。
+   provider 的 API）。完整跟踪（问题拆解 / 宿主源码行号 / 上游 discussion /
+   退出条件）见 `docs/architecture/mcp-resource-suppression.md`（改这里前先读）。
 6. **外部注入的 MCP**（其它插件/profile 运行时挂的 mcp-client，不在本插件配置文件里）：
    通过 cordis `ctx.registry` 的 `Plugin.Runtime.fibers` 发现（`Fiber.name` =
    最近具名祖先插件 = 注入方），或 cordis `loader.entries()`（profile `insert:` 条目）；

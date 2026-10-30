@@ -5,7 +5,14 @@
 
 ## [Unreleased]
 
-（暂无）
+### 文档
+
+- 新增 `docs/architecture/mcp-resource-suppression.md`：记录「MCP 关闭后资源清单与
+  资源工具残留」的完整拆解——四条能力通道、宿主 0.2.1-rc.3 源码依据（`dsh-mcp-resources`
+  `layers.merge(scope)`/`request()`、`dsh-scope` 并集无删除、system-prompt scoped
+  shadow 契约）、v1.7.2 的缓解实现与文本耦合代价、剩余工具层残留、上游
+  [discussion #11562](https://github.com/deepseek-ai/deepseek-harness/discussions/11562)
+  与退出条件；README / AGENTS.md 的残留说明链到该文件。
 
 ## [1.7.2] - 2026-10-30
 
