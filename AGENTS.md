@@ -99,7 +99,7 @@ danger-full-access 审批重试同一条命令即可。手动兜底通道仍是 
 | `src/channel.ts` | RPC 通道名唯一来源：`CHANNEL = "/capability-panel"`（两端 import，禁止硬编码） |
 | `src/remote.ts` | 宿主 ⇄ 浏览器 RPC：在 `webServer` 挂 `CHANNEL` 前缀路由；endpoint 为 `skills.* / mcp.* / quick.* / overrides.*`（见文件头注释与路由表） |
 | `src/client.ts` | 客户端插件入口：注入样式/语言包，注册 `sidebar.panellist` + `main`（面板）与 `conversation.input.*`（composer），构造面板 api 与**每会话** composer api |
-| `src/client/*.tsx` | UI：`panel.tsx`（skills/quick 共用列表/详情）、`mcp-panel.tsx`、`quick-messages-panel.tsx`、`composer-*.tsx`、`composer-capability.tsx`（会话能力：首屏 `conversation.input.left` 工具行入口 + 背景模糊配置弹窗 + 顶部「能力」Tab 整页；Tab 打开时隐藏输入框）、`select.tsx`（自绘下拉）、`panel-entry.tsx`（主区域页面 + 侧栏图标）、`styles.ts` |
+| `src/client/*.tsx` | UI：`panel.tsx`（skills/quick 共用列表/详情）、`mcp-panel.tsx`、`quick-messages-panel.tsx`、`composer-*.tsx`、`composer-capability.tsx`（会话能力：首屏 `conversation.hero.options` 行内入口 + 背景模糊配置弹窗 + 顶部「能力」Tab 整页；Tab 打开时隐藏输入框）、`select.tsx`（自绘下拉）、`panel-entry.tsx`（主区域页面 + 侧栏图标）、`styles.ts` |
 | `src/{skills,mcp,quick-messages,overrides,imports}/` | 各域宿主实现（配置读写、CRUD、挂载、探测、声明文件）；`skills/session.ts` = 会话级 Skills 开关（agent 作用域同名 runtime shadow，按会话落盘 + 项目默认投影） |
 | `src/session-state.ts` | 会话级开关持久化（`<dshHome>/dsh-capability-settings/session-capabilities.json`：原子写 + 文件锁 + 懒加载 + 两阶段对账；Skills / MCP 两个域共用一个实例） |
 | `src/session-state-reconcile.ts` | 孤儿记录对账调度（启动后 / 每 24h 存在性校验；`session/disposed` 只标记不删；持久化服务缺失/抛错一律保留） |
@@ -191,10 +191,10 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
 - **composer 槽是 session 作用域**：`conversation.input.left` / `conversation.input.overlay`
   的 standardProps 直接提供 `sessionId`；composer 的 api 必须用
   `composerApiFor(props.sessionId)`（项目作用域只跟随所在会话，禁止掺入面板钉选或退回
-  「工作区列表第一项」）。**首屏能力入口注册在 `conversation.input.left`**
-  （输入框底部工具行、`工作区内修改` 之后的预留位；`order: 60`），不再用
-  `conversation.input.dock` 零高锚点 + fixed 面板；入口点击打开 fixed 全屏弹窗，
-  active 相位不渲染。
+  「工作区列表第一项」）。**首屏能力入口注册在 `conversation.hero.options`**
+  （首屏行 workspace chip /「标准模式」那一行右端；list · session 槽，外壳固定右对齐，
+  `order: 60`），不再用 `conversation.input.dock` 零高锚点 + fixed 面板；入口点击打开
+  fixed 全屏弹窗，active 相位随首屏行整行消失。
 - **外壳版本 ≥ 0.2.0-rc.2**：`sidebar.panellist` 在更早的 `0.1.2-alpha.2` 里不存在
   （那时只有 `sidebar.footer.action`），用它验证会把"注册没生效"误判成缺陷。
 - **客户端 bundle 协议**：tsdown 输出 lazy-CJS（`window.__ModuleLoader__.load({ id, factory })`），
@@ -209,9 +209,13 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
 ## Figma 原型（dsh-to-figma 本地桥）
 
 - **设计源**：Figma 本地文档 **`dsh`**。**当前基线**：
-  - `Capability Dock · 首屏入口 v14`（page `134:8699`）：4 帧 `134:8700`（默认收起 · 工具行
-    icon+计数入口）/ `134:8942`（Skills 配置弹窗 · 背景模糊）/ `134:9184`（Tools 弹窗）/
-    `134:9426`（全部关闭）。与代码 v14 首屏交互对齐；预览图 `docs/figma/preview/v14-*`；
+  - `Capability Dock · 首屏入口 v18（实现基线）`（page `155:13148`）：3 帧 `155:13149`（默认 ·
+    入口在首屏行右端）/ `155:13275`（hover 计数项）/ `155:13396`（配置弹窗 · 沿用 v14）。
+    对应代码：`src/client.ts` 的 `conversation.hero.options` 注册 + `src/client/styles.ts` 的
+    `.skp-dock-entry*` + `composer-capability.tsx` 的 E 图标（书 / MCP 官方标 / 扳手）。预览图
+    `docs/figma/preview/v18-*`；scene JSON 待导出（VECTOR 图标会缺，见 README）。
+  - `Capability Dock · 首屏入口 v14`（page `134:8699`）：**旧实现基线**（工具行 icon+计数胶囊）：
+    4 帧 `134:8700` / `134:8942` / `134:9184` / `134:9426`；预览图 `docs/figma/preview/v14-*`；
     4 帧 scene JSON 已导出（`docs/figma/scenes/v14-*.scene.json`，97/283/205/97 节点，
     可逐帧 `import_scene`；VECTOR 图标会缺，见 README）。
   - `Capability Panel · 能力决策 v11`（page `56:7043`）：5 帧 `56:7046` / `56:7257` / `56:7468` /
@@ -222,7 +226,9 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
     `4:7`、会话内「能力」Tab `4:223`）、`Capability Panel · 升级原型 v6`（`10:2`）、
     `Capability Panel · 交互原型 v7`（`21:2353`）、`Capability Panel · Jev 模型 v9`（`49:4455`）、
     `Capability Panel · 自主决策 v10`（`51:5711`）、`Capability Panel · Skill 来源 v12`（`88:8519`）、
-    `Capability Panel · 全局开关与派生 v13`（`106:2`）、`Capability Dock · 交互原型` v1–v4（page `1:2`）。
+    `Capability Panel · 全局开关与派生 v13`（`106:2`）、`Capability Dock · 交互原型` v1–v4（page `1:2`）、
+    `Capability Dock · 首屏入口 v15（落位研究）`（`155:10657`）、`v16（统一样式）`（`155:11488`）、
+    `v17（图标套系）`（`155:12016`）。
 - **工具前提**：Figma 桌面打开该文件并运行伴生插件「DSH to Figma · Local」，保持窗口常开。
   先 `figma_status`；断连或多文档时 `figma_select_document <connectionId>` 显式重新绑定，
   然后才用 `use_figma` / `get_screenshot` / `import_scene` / `download_assets`。画布工具报
@@ -238,7 +244,7 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
   `SERIALIZE_RANGE` 分片）。完整流程与已知限制见 `docs/figma/README.md`。
 - **已知限制**：scene 契约不含 VECTOR 图标（导入后图标为空）、只保留 SOLID 填充/描边与圆角/自动布局，
   渐变/阴影/图片不导出；文字字体为 `PingFang SC`。
-- **变更纪律**：用户可见 UI/交互改动 → 先改代码并跑验证 → 同步 Figma 基线节点（当前首屏交互 = v14，
+- **变更纪律**：用户可见 UI/交互改动 → 先改代码并跑验证 → 同步 Figma 基线节点（当前首屏交互 = v18，
   能力决策 = v11；面板结构改动同时同步 v8）→ 重新导出预览图 + 更新对应 scene JSON（v11 变更时重导
   `scenes/v11-*.scene.json`；v14 首屏帧见 `docs/figma/README.md`；v9/v10 暂无 scene；v5/v8 变更时
   一并更新）→ 与代码一起提交（CHANGELOG 里注明设计变更）。

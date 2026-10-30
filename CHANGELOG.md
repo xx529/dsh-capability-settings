@@ -5,7 +5,28 @@
 
 ## [Unreleased]
 
-（暂无）
+### 变更
+
+- **首屏能力入口从输入框工具行迁到首屏行右端**（`conversation.hero.options`）：
+  入口与 workspace chip /「标准模式」同族——24px 高、12px 字号、无外底 / 边框 /
+  分隔线，hover 才出单项浅底（`rgba(255,255,255,.06)` + 圆角 6），focus-visible
+  2px 主色环；首屏行保持 26px、不再被入口撑高。该槽由外壳固定右对齐、`occupants`
+  为空，`standardProps` 与旧槽同款（`useInput` / `inputActions` / `sessionId`），
+  组件逻辑不变。实现：`src/client.ts` 槽注册 + `src/client/styles.ts` 的
+  `.skp-dock-entry*`。
+- **三域图标换成 E 套（内联 SVG，无新依赖）**：Skills = Lucide `book-open`（ISC）、
+  MCP = Simple Icons 官方标（CC0）、Tools = Lucide `wrench`（ISC）；24 viewBox、
+  12px 渲染、stroke 2.2（约 1.1px），与邻居线性图标同档。交互不变：点计数项 →
+  对应 Tab 的配置弹窗，`✦` → 能力决策，滑杆 → 配置弹窗。
+
+### 内部
+
+- 首屏入口的 `HeroSlotProps` 注释同步为 `conversation.hero.options` 契约；active
+  相位入口随首屏行整行卸载（与旧实现「active 不渲染入口」等价）。
+- 验证：`pnpm typecheck`、`pnpm build` 通过，构建产物已核对注册槽名 / 入口样式 /
+  三域图标 path；Figma 基线 `v18`（3 帧预览 `docs/figma/preview/v18-*.png`）。
+  真机 GUI 验收需在隔离 `DSH_HOME` 或重装 profile 后补跑（首屏行入口 / hover /
+  弹窗 / 首条消息后入口消失）。
 
 ## [1.6.1] - 2026-10-30
 

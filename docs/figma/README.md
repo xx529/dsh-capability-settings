@@ -1,4 +1,4 @@
-# Figma 原型（Dock v5 · 能力面板 v6–v8 · Jev/能力决策 v9–v11 · Skill 来源 v12 · 首屏入口 v14）
+# Figma 原型（Dock v5 · 能力面板 v6–v8 · Jev/能力决策 v9–v11 · Skill 来源 v12 · 首屏入口 v14–v17 过程稿 / v18 实现基线）
 
 本目录是能力面板相关 UI 的 Figma 设计源，供人工查看 / 未来智能体继续改原型：
 
@@ -12,12 +12,36 @@
   Jev 模型配置 Tab（历史原型，4 帧）；
 - **Capability Panel · 自主决策 v10**（page `51:5711`）：改名「自主决策」，交互改为输入停顿
   约 1s 后自动触发（历史原型，5 帧）；
-- **Capability Dock · 首屏入口 v14**（page `134:8699`）：**当前首屏交互基线**——能力入口收进
+- **Capability Dock · 首屏入口 v14**（page `134:8699`）：**旧首屏交互基线（v18 起被取代）**——能力入口收进
   输入框底部工具行（`conversation.input.left`）预留位，默认收起为「书 / 插头 / 工具箱
   + 已启用数 + ✦ + 滑杆」；点击计数区或滑杆打开居中配置弹窗（55% 遮罩 + 10px 背景模糊，
   1120 宽、随域自适应），`✦ 能力决策` 仍保留在入口。4 帧：01 `134:8700`（默认收起）、
   02 `134:8942`（Skills 弹窗）、03 `134:9184`（Tools 弹窗）、04 `134:9426`（全部关闭）。
   预览图 `preview/v14-01..04`；交互说明在页面底部 `v14/interaction-notes`。
+- **Capability Dock · 首屏入口 v15（落位研究）**（page `155:10657`）：把首屏能力入口从输入框
+  工具行（`conversation.input.left`）迁到首屏元信息行（workspace / 标准模式 那一行）的**落位
+  研究稿，不是实现基线**（v14 仍为实现基线）。4 帧：01 `155:10658`（现状：黄框＝工具行入口、
+  红框＝目标位）、02 `155:10791`（方案 A：注册 `conversation.hero.options`，落点＝该行右端）、
+  03 `155:10924`（方案 B：紧贴标准模式，需覆盖外壳 `.heroOptions{margin-left:auto}`，非契约）、
+  04 `155:11057`（点击态：沿用 v14 配置弹窗）。预览图 `preview/v15-01..04`；结论/依据在页面
+  底部 `v15/notes`。
+- **Capability Dock · 首屏入口 v16（方案 A · 统一样式）**（page `155:11488`）：在 v15 落位研究上确定
+  样式——入口仍注册到 `conversation.hero.options`（首屏行右端），但视觉降为「行内控件组」：无外底 /
+  边框 / 分隔线，24px 高、12px 字号、数字 `label-secondary`、图标 `label-tertiary`，hover 单项浅底
+  `rgba(255,255,255,.06)`、focus-visible 2px 主色环、禁用 opacity .4。4 帧：01 `155:11489`（默认）、
+  02 `155:11643`（hover）、03 `155:11781`（旧胶囊 vs 新行内 2×）、04 `155:11782`（hover / focus /
+  禁用 2×）。预览图 `preview/v16-01..04`；实现映射与规格在页面底部 `v16/notes`。
+- **Capability Dock · 首屏入口 v17（图标套系）**（page `155:12016`）：首屏入口三域图标的选型稿，
+  5 套开源方案（最终以内联 SVG 落代码、不引依赖）：A Lucide 书 / 插头 / 扳手（推荐）、B Lucide 毕业帽 /
+  节点网络 / 终端、C Heroicons 填充剪影、D Remix 实心线、E A + MCP 官方标（Simple Icons）。4 帧：
+  01 `155:12038`（候选板：2× + 1×）、02 `155:12422`（现状 vs A–E 的 1× 首屏行对照）、
+  03 `155:12630`（推荐 A 完整首屏）、04 `155:12773`（备选 B 完整首屏）。预览图 `preview/v17-01..04`；
+  许可与落地方式在页面底部 `v17/notes`。
+- **Capability Dock · 首屏入口 v18（实现基线）**（page `155:13148`）：**当前首屏交互基线**——
+  方案 A 落位（`conversation.hero.options`，首屏行右端）+ v16 行内统一样式 + v17 的 E 图标套
+  （书 / MCP 官方标 / 扳手）。3 帧：01 `155:13149`（默认）、02 `155:13275`（hover 计数项）、
+  03 `155:13396`（配置弹窗，沿用 v14）。预览图 `preview/v18-01..03`；实现明细与边界在页面底部
+  `v18/notes`（对应代码：`src/client.ts`、`src/client/styles.ts`、`src/client/composer-capability.tsx`）。
 - **Capability Panel · 能力决策 v11**（page `56:7043`）：**能力决策基线**——统一命名「能力决策」、
   自动触发默认关闭、双门槛（最少触发字数 10 / 最少修改间隔字符数 4）、密钥路径
   `~/.dsh/dsh-capability-settings/jev.json`（目录 700 / 文件 600）。5 帧：01 `56:7046`、02 `56:7257`、
@@ -41,6 +65,55 @@
 > 见下方 v14 scene 表）。注意：scene 契约不含 VECTOR → 入口三个 icon（书/插头/工具箱）、
 > `✦` 与滑杆图标导入后会缺失，需用 `use_figma` 重画或 `upload_assets` 补 SVG；
 > 其余布局/文字/卡片/弹窗完整。交互以页面底部 notes 与预览图为准。
+
+> **v15 首屏入口落位研究（2026-10-30，设计评估，未实现）**：用户提议把入口从工具行（黄框）挪到
+> 首屏行「标准模式」右侧（红框）。核对宿主槽位目录（`dsh-cordis-client-runner` 内置 slots 目录，
+> 从 `app.asar` 只读提取）后的结论：
+> 1) `conversation.hero.options` 是 list 槽（scope `session`），摘要「Compact options right-aligned
+>    in the New Session row after the workspace and preset controls; rendered only with a Session.」，
+>    当前 occupants 为空，standardProps 含 `useInput` / `inputActions` / `sessionId` / `useConversation`，
+>    与现有入口组件所需一致 → **契约内可行**；
+> 2) 但外壳把 `.heroOptions` 设为 `margin-left:auto`（右对齐），落点只能是**该行右端**，不是紧贴
+>    「标准模式」；同行 `hero.workspace` / `hero.agentPreset` 是 single 槽且被 WorkspacePicker /
+>    AgentPresetSeat 占用，无法插入；
+> 3) 精确红框位（方案 B）只能覆盖外壳 hashed CSS 或 DOM 注入：跨版本易碎、影响其它
+>    `hero.options` 占位，**不作为交付方案**；
+> 4) 行为等价：该槽只在 New Session 首屏行（有 Session 时）渲染，发首条消息后整行消失、入口卸载，
+>    与现状「active 相位不渲染入口 UI」等价；弹窗 / ✦ 能力决策面板仍按 `[data-composer-card]` 定位。
+> 若采纳方案 A，改动面仅为 `src/client.ts` 一处槽注册（`conversation.input.left` →
+> `conversation.hero.options`，`id`/`order` 不变语义）+ `styles.ts` 尺寸 / 右端留白微调，组件逻辑
+> 不改。本页 4 张预览图由 `download_assets` 导出；**未导出 scene JSON**（研究稿，采纳后再补）。
+
+> **v16 方案 A 统一样式（2026-10-30，设计稿，未实现）**：按用户反馈「入口样式要和旁边的
+> workspace chip /「标准模式」统一」，把方案 A 的入口从 v14 的 28px 胶囊改为行内 ghost 组：去外底 /
+> 边框 / 内分隔线，高度 24（首屏行维持 26、不再被撑高），字号 12 / 行高 18，数字 12/500
+> `label-secondary`，图标 12 `label-tertiary`，hover 单项 `rgba(255,255,255,.06)` + 圆角 6、同组
+> 其它项不动；focus-visible 2px `#4176E6`；禁用项 opacity .4。信息与交互不变（三域计数 + ✦ 能力决策
+> + 配置；点开仍是 v14 居中弹窗）。实现映射：`src/client.ts` 一处槽注册（`conversation.input.left` →
+> `conversation.hero.options`）+ `src/client/styles.ts` 的 `.skp-dock-entry*` 规则；组件逻辑不改。
+> 预览图 `preview/v16-01..04`；**未导出 scene JSON**（实现后随基线一起补）。
+
+> **v17 图标套系（2026-10-30，设计稿，未实现）**：解决 v14 填充剪影（书 / 插头 / 工具箱）在 12px 下
+> 糊成一团、与邻居的线性图标不同族的问题。5 套候选与取舍：**A 对象派**（Lucide 书 open / 插头 /
+> 扳手，12px 轮廓最稳，推荐）；**B 技术派**（Lucide 毕业帽 / 节点网络 / 终端，语义成体系但略抽象）；
+> **C 填充派**（Heroicons 书 / 服务器堆 / 扳手，12px 醒目但比「标准模式」重一档）；**D 圆润派**
+> （Remix 书 / 插头 / 工具，笔画更实，工具图标像叉号）；**E 品牌 MCP**（A + Simple Icons 的 MCP 官方
+> 标，12px 细节糊，除非入口整体放大）。落地：选定的 3 个图标以 SVG path 内联进
+> `src/client/composer-capability.tsx` 的 `BookIcon` / `PlugIcon` / `ToolboxIcon`，不新增依赖；许可
+> Lucide ISC、Heroicons MIT、Remix Apache-2.0、Simple Icons CC0。12px 统一口径：24 viewBox +
+> stroke 2.2（渲染约 1.1px），hover 时图标提亮到 `#C9CED8`；预览图 `preview/v17-01..04`；
+> **未导出 scene JSON**（选定后随实现一起补）。
+
+> **v18 实现基线（2026-10-30，已落代码）**：用户选定 E 图标套后，把「方案 A 落位 + v16 行内
+> 统一样式 + E 图标」一起落地。代码改动：`src/client.ts` 槽注册 `conversation.input.left` →
+> `conversation.hero.options`；`src/client/styles.ts` 的 `.skp-dock-entry*` 改为行内 ghost 组
+> （24px 高、无外底 / 边框 / 分隔线；数字 `label-secondary`、图标 `label-tertiary`；hover 单项
+> `rgba(255,255,255,.06)` + 圆角 6；focus 2px `#4176E6`；禁用 opacity .4）；`composer-capability.tsx`
+> 的 `EntrySkillIcon`（Lucide book-open）/ `EntryMcpIcon`（Simple Icons MCP）/ `EntryToolIcon`
+> （Lucide wrench）。行为边界：仅 New Session 首屏行（有 Session 时）渲染，发首条消息后整行消失、
+> 入口卸载；弹窗 / ✦ 能力决策不变。验证：`pnpm typecheck`、`pnpm build` 通过（真机 GUI 验收待隔离
+> `DSH_HOME` / 重装 profile 后补跑）；v14 归档为旧基线，v15–v17 保留为过程稿。预览图
+> `preview/v18-01..03`。
 
 > **v11 已导出可重导入 scene JSON（2026-10-24）**：`scenes/v11-01-entry.scene.json`、
 > `v11-02-pause.scene.json`、`v11-03-loading.scene.json`、`v11-04-results.scene.json`、

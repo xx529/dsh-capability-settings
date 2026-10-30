@@ -7,7 +7,7 @@
 
 面板还内置 TypeSafe Jev「能力决策」：按当前输入草稿为**本会话**预选
 Skills / MCP / Tools（Tools 以插件为单元），一次请求批量打 0–1 分，可手动点按，
-也可按输入停顿自动触发（默认关闭）。会话首屏工具行另有**本会话能力入口**（书/插头/工具箱三域计数）与**配置弹窗**（背景模糊），并保留 `✦ 能力决策` 手动入口。
+也可按输入停顿自动触发（默认关闭）。会话首屏行（workspace /「标准模式」那一行）右端另有**本会话能力入口**（书 / MCP 官方标 / 扳手三域计数，行内 ghost 样式）与**配置弹窗**（背景模糊），并保留 `✦ 能力决策` 手动入口。
 
 ![能力面板 v7 · 技能 · 项目（工作区列表在左导航）](docs/figma/preview/v7-01-skills-project.png)
 
@@ -20,8 +20,10 @@ Skills / MCP / Tools（Tools 以插件为单元），一次请求批量打 0–1
 > **v13 新增的第三域 Tools、首屏三域控制条、MCP 两枚来源标签、含 Tools 的能力决策**
 > 见 `docs/figma/preview/v13-01…08-*.png`（Figma 页
 > `Capability Panel · 全局开关与派生 v13`）。
-> **v14 首屏入口（工具行 icon+计数）与配置弹窗**见 `docs/figma/preview/v14-01…04-*.png`
-> （Figma 页 `Capability Dock · 首屏入口 v14`）；旧首屏截图仍是 v13 的"默认展开能力面板"版式。
+> **v18 首屏入口（首屏行右端 · 行内统一样式 · E 图标）与配置弹窗**见
+> `docs/figma/preview/v18-01…03-*.png`（Figma 页 `Capability Dock · 首屏入口 v18（实现基线）`）；
+> v14（工具行胶囊）为上一版基线，v15–v17 为落位 / 样式 / 图标选型过程稿。
+> 旧首屏截图仍是 v13 的"默认展开能力面板"版式。
 > 当前 IA 说明见「一个面板，管住三个能力域」「注入技能」「Tools（插件工具）」
 > 与 [docs/ux/panel-upgrade.md](docs/ux/panel-upgrade.md)、
 > [docs/ux/capability-v13.md](docs/ux/capability-v13.md)（v1.8）。
@@ -550,11 +552,13 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 （全局默认存 `tools-global.json`、所有会话共享，缺省全部启用）。
 输入框工具栏的快捷按钮与输入框下方独立能力条已按产品决定移除：
 
-- **首屏（hero）默认收起，入口收进工具行**：注册在 `conversation.input.left`
-  （输入框底部工具行里、`工作区内修改` 之后的预留位）。收起态只有
-  `书 + Skills 数` / `插头 + MCP 数` / `工具箱 + Tools 数` 三枚单色 icon + 计数
-  （计数 = 已启用数，tooltip 显示 `已启用 / 总数`）、分隔线、`✦ 能力决策` 与
-  滑杆「配置」。**点哪个域的 icon 就打开对应 Tab**（Skills / MCP / Tools），
+- **首屏（hero）默认收起，入口挂在首屏行右端**：注册在 `conversation.hero.options`
+  （workspace chip /「标准模式」那一行右端；外壳对该槽固定右对齐）。入口与邻居控件同族：
+  24px 高、12px 字号、无外底 / 边框 / 分隔线，hover 才出单项浅底（`rgba(255,255,255,.06)`
+  + 圆角 6），focus-visible 2px 主色环；首屏行保持 26px、不再被入口撑高。
+  收起态只有 `书 + Skills 数` / `MCP 官方标 + MCP 数` / `扳手 + Tools 数`
+  三枚单色 icon + 计数（计数 = 已启用数，tooltip 显示 `已启用 / 总数`）、
+  `✦ 能力决策` 与滑杆「配置」。**点哪个域的 icon 就打开对应 Tab**（Skills / MCP / Tools），
   滑杆「配置」沿用上次停留的 Tab；点击后是 **居中弹窗**：`55%` 遮罩 + `10px`
   背景模糊，宽 1120、高随域自适应；Esc / 点遮罩 / ✕ / 完成关闭，Tab 焦点圈定在弹窗内。
   弹窗内容复用能力面板（三 Tab + 搜索 + 行 3 控制条 + 卡片网格 + 恢复默认），
@@ -761,8 +765,8 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 │ └ 左导航 + 项目下钻 /详情│          │ ├ overrides 项目级默认关闭   │
 │ conversation.view        │          │ ├ imports   项目级引用声明   │
 │ └ 「能力」Tab（会话级）  │          │ ├ jev 配置 + rank / apply    │
-│ conversation.input.left  │          │ ├ session.setBulk 三域批量   │
-│ └ 工具行能力入口         │          │ └ agent/created → 排队/挂载  │
+│ conversation.hero.options│          │ ├ session.setBulk 三域批量   │
+│ └ 首屏行能力入口         │          │ └ agent/created → 排队/挂载  │
 │   + 配置弹窗 + 能力决策   │          │ 插件 ctx → 全局单例挂载      │
 └──────────────────────────┘          └──────────────────────────────┘
 ```

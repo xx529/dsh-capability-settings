@@ -2,9 +2,10 @@
  * 会话「本会话能力」配置区（首屏入口 + 配置弹窗 + 会话内整页）。
  *
  * 两个入口（在 src/client.ts 注册）：
- *   - 首屏（hero）：`conversation.input.left` 工具行预留位里的 icon+计数入口
- *     （书/插头/工具箱 + ✦ + 滑杆），点击打开居中弹窗（55% 遮罩 + 10px 背景模糊）；
- *     ✦ 仍触发能力决策，结果面板 fixed 落在输入卡下方。active 相位不渲染入口。
+ *   - 首屏（hero）：`conversation.hero.options` 首屏行（workspace chip /「标准模式」那一行）
+ *     右端的行内控件组（书 / MCP 官方标 / 扳手 + ✦ + 滑杆），点击打开居中弹窗
+ *     （55% 遮罩 + 10px 背景模糊）；✦ 仍触发能力决策，结果面板 fixed 落在输入卡下方。
+ *     与邻居控件同款：12px、无外底、hover 才出浅底。active 相位整行消失、入口卸载。
  *   - 会话中（conversation.view，顶部 Tab「能力」）：整页管理本会话能力；
  *     进入该 Tab 时会临时隐藏输入框（不需要对话输入），切回其它 Tab 恢复。
  *
@@ -62,30 +63,51 @@ function ChevronIcon({ up = false, size = 12 }: { up?: boolean; size?: number })
   );
 }
 
-/**
- * 首屏入口三域图标（扁平单色，随 currentColor）：
- * 书 = Skills、插头 = MCP、工具箱 = Tools（Figma v14 对齐）。
- */
-function BookIcon() {
+// ---------------------------------------------------------------------------
+// 首屏入口的三域图标（图标套系 E，见 docs/figma/preview/v17-01..04）
+//
+//   - Skills = Lucide `book-open`；MCP = Simple Icons 的 MCP 官方标（填充）；
+//     Tools = Lucide `wrench`。全部内联 path，不新增依赖。
+//   - 24 viewBox、12px 渲染；线性图标 stroke 2.2（渲染约 1.1px），与首屏行
+//     邻居（workspace chip /「标准模式」）的线性图标同档。
+//   - 许可：Lucide ISC、Simple Icons CC0。
+// ---------------------------------------------------------------------------
+
+/** Skills：Lucide book-open。 */
+function EntrySkillIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M3 7 11 9v11L3 18ZM21 7 13 9v11l8-2ZM11 9h2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M12 7v14M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
 
-function PlugIcon() {
+/** MCP：Simple Icons 的 MCP 官方标（原图满 24 网格，视口内缩 2 对齐其它两枚的视觉体量）。 */
+function EntryMcpIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M12 22v-5M9 8V2M15 8V2M6 8h12v3l-1.5 2.5L14.5 15 12 15.7 9.5 15 7.5 13.5 6 11Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    <svg width="12" height="12" viewBox="-2 -2 28 28" fill="currentColor" aria-hidden="true">
+      <path d="M13.85 0a4.16 4.16 0 0 0-2.95 1.217L1.456 10.66a.835.835 0 0 0 0 1.18.835.835 0 0 0 1.18 0l9.442-9.442a2.49 2.49 0 0 1 3.541 0 2.49 2.49 0 0 1 0 3.541L8.59 12.97l-.1.1a.835.835 0 0 0 0 1.18.835.835 0 0 0 1.18 0l.1-.098 7.03-7.034a2.49 2.49 0 0 1 3.542 0l.049.05a2.49 2.49 0 0 1 0 3.54l-8.54 8.54a1.96 1.96 0 0 0 0 2.755l1.753 1.753a.835.835 0 0 0 1.18 0 .835.835 0 0 0 0-1.18l-1.753-1.753a.266.266 0 0 1 0-.394l8.54-8.54a4.185 4.185 0 0 0 0-5.9l-.05-.05a4.16 4.16 0 0 0-2.95-1.218c-.2 0-.401.02-.6.048a4.17 4.17 0 0 0-1.17-3.552A4.16 4.16 0 0 0 13.85 0m0 3.333a.84.84 0 0 0-.59.245L6.275 10.56a4.186 4.186 0 0 0 0 5.902 4.186 4.186 0 0 0 5.902 0L19.16 9.48a.835.835 0 0 0 0-1.18.835.835 0 0 0-1.18 0l-6.985 6.984a2.49 2.49 0 0 1-3.54 0 2.49 2.49 0 0 1 0-3.54l6.983-6.985a.835.835 0 0 0 0-1.18.84.84 0 0 0-.59-.245" />
     </svg>
   );
 }
 
-function ToolboxIcon() {
+/** Tools：Lucide wrench。 */
+function EntryToolIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M3 9h18v11H3ZM8 9V5h8v4M3 12.5h18M9 14h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -449,11 +471,12 @@ function useComposerCardRect(active: boolean, hostRef: { current: HTMLDivElement
 export type PanelDomain = "skills" | "mcp" | "jev";
 
 /**
- * 宿主 `conversation.input.left` 槽透传的 standardProps 子集。
+ * 宿主 `conversation.hero.options` 槽透传的 standardProps 子集。
  *
- * 真机契约（app.asar 只读核对）：该槽 ownerProps 为 `InputZone { session, input }`，
- * standardProps 含 `useInput: SnapshotSelectorHook<InputState>`。旧外壳可能两者都
- * 没有，因此全部可选。
+ * 真机契约（app.asar 只读核对）：该槽 ownerProps 为空，standardProps 含
+ * `useInput: SnapshotSelectorHook<InputState>` / `inputActions` / `sessionId`
+ * （与 `conversation.input.left` 同款 session 套件）；`input` 是旧槽的
+ * ownerProps 形态，保留作次选。旧外壳可能都没有，因此全部可选。
  */
 export interface HeroSlotProps {
   /** 订阅式草稿选择器（首选草稿来源，变化即重渲染）。 */
@@ -2311,14 +2334,17 @@ function rowIdOfBulkFailure(failure: SessionBulkFailure, snapshot: CapabilitySna
 }
 
 // ---------------------------------------------------------------------------
-// 首屏入口：收进输入框底部工具行（conversation.input.left）
+// 首屏入口：挂在首屏行右端（conversation.hero.options，v18 落地）
 //
-// 设计（Figma v14）：
-//   - 收起态只在工具行预留位显示「书 8 / 插头 5 / 工具箱 3 + ✦ + 滑杆」，
-//     不再单独占输入框下方一条，也不再内联下拉展开；
-//   - 点击计数区 / 滑杆 → 居中弹窗（背景模糊），弹窗内复用 CapabilityPanel；
+// 设计（Figma v16 样式 + v17 图标 E 套）：
+//   - 与 workspace chip /「标准模式」同族：12px、无外底、无边框、无分隔线，
+//     24px 高（首屏行维持 26px，不再被入口撑高）；hover 才出单项浅底；
+//   - 内容：「书 Skills 数 / MCP 官方标 数 / 扳手 Tools 数 + ✦ + 滑杆」，
+//     计数项各是独立 24px 目标；
+//   - 点击计数项 → 居中弹窗（背景模糊，落在对应 Tab），滑杆 → 配置弹窗；
 //   - ✦ 仍是「能力决策」手动入口，结果面板沿用 v13（fixed 落在输入卡下方）。
-// hero 相位之外（active / settling）组件不渲染入口，但保留壳节点用于相位探测。
+// hero 相位之外（active / settling）整行消失、组件卸载；入口内部的相位判断
+// 仍保留，用于结果面板与弹窗的挂载判定。
 // ---------------------------------------------------------------------------
 
 export function ComposerCapabilityEntry(props: ComposerCapabilityEntryProps) {
@@ -2573,7 +2599,7 @@ function EntryBody({
             }}
           >
             <span className="skp-dock-entry-icon">
-              <BookIcon />
+              <EntrySkillIcon />
             </span>
             <span className="skp-dock-entry-count">{countText(skillsOn)}</span>
           </button>
@@ -2588,7 +2614,7 @@ function EntryBody({
             }}
           >
             <span className="skp-dock-entry-icon">
-              <PlugIcon />
+              <EntryMcpIcon />
             </span>
             <span className="skp-dock-entry-count">{countText(mcpOn)}</span>
           </button>
@@ -2603,11 +2629,10 @@ function EntryBody({
             }}
           >
             <span className="skp-dock-entry-icon">
-              <ToolboxIcon />
+              <EntryToolIcon />
             </span>
             <span className="skp-dock-entry-count">{countText(toolsOn)}</span>
           </button>
-          <span className="skp-dock-entry-sep" aria-hidden="true" />
           <button
             type="button"
             className="skp-dock-entry-btn skp-dock-entry-decision"

@@ -307,17 +307,19 @@ export const SKP_CSS = `
 .skp-dock-fixed{position:fixed;z-index:118;display:flex;justify-content:center;min-width:0;}
 .skp-dock-fixed>.skp-dock-panel{width:100%;max-height:100%;}
 .skp-dock-title-icon{flex:none;display:inline-flex;align-items:center;justify-content:center;color:var(--dsw-alias-state-business-primary,#4176e6);}
-/* 首屏入口：收进输入框底部工具行预留位（conversation.input.left） */
-.skp-dock-entry-host{display:inline-flex;flex:none;align-items:center;min-width:0;max-width:100%;}
-.skp-dock-entry{display:inline-flex;flex:none;align-items:center;gap:2px;height:28px;min-width:0;padding:0 3px;border:1px solid transparent;border-radius:9px;background:var(--dsw-alias-interactive-bg-hover,rgba(20,28,40,.04));color:var(--dsw-alias-label-secondary,#5b6472);font:12px/18px var(--dsw-font-family,system-ui,sans-serif);transition:background-color .15s ease,border-color .15s ease;}
-.skp-dock-entry:hover{border-color:var(--dsw-alias-border-l2,rgba(20,28,40,.08));background:var(--dsw-alias-bg-module-platform,rgba(20,28,40,.06));}
-.skp-dock-entry-item{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 6px;border:none;border-radius:7px;background:transparent;color:inherit;font:inherit;cursor:pointer;transition:background-color .12s ease,color .12s ease;}
+/* 首屏入口：挂在首屏行（conversation.hero.options）右端，与 workspace chip /「标准模式」同族。
+   v18 起改为行内 ghost 组：无外底 / 无边框 / 无分隔线，24px 高（首屏行维持 26px）。
+   与邻居共用 token：hover = --dsw-alias-interactive-bg-hover；数字 label-secondary；
+   图标 label-tertiary；焦点环 state-business-primary。 */
+.skp-dock-entry-host{display:inline-flex;flex:none;align-items:center;height:24px;min-width:0;max-width:100%;}
+.skp-dock-entry{display:inline-flex;flex:none;align-items:center;gap:2px;height:24px;min-width:0;padding:0;border:0;background:transparent;color:var(--dsw-alias-label-secondary,#5b6472);font:12px/18px var(--dsw-font-family,system-ui,sans-serif);}
+.skp-dock-entry-item{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 6px;border:none;border-radius:6px;background:transparent;color:inherit;font:inherit;cursor:pointer;transition:background-color .12s ease,color .12s ease;}
 .skp-dock-entry-item:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(20,28,40,.05));color:var(--dsw-alias-label-primary,#1b1f26);}
 .skp-dock-entry-item:focus-visible,.skp-dock-entry-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--dsw-alias-state-business-primary,#4176e6);}
-.skp-dock-entry-icon{flex:none;display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;color:var(--dsw-alias-label-secondary,#5b6472);}
-.skp-dock-entry-item:hover .skp-dock-entry-icon{color:var(--dsw-alias-label-primary,#1b1f26);}
-.skp-dock-entry-count{flex:none;font-size:12px;font-weight:500;line-height:1;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-primary,#1b1f26);}
-.skp-dock-entry-sep{flex:none;width:1px;height:14px;margin:0 2px;background:var(--dsw-alias-border-l2,rgba(20,28,40,.08));}
+.skp-dock-entry-icon{flex:none;display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;color:var(--dsw-alias-label-tertiary,#8b95a1);}
+.skp-dock-entry-item:hover .skp-dock-entry-icon{color:var(--dsw-alias-label-secondary,#5b6472);}
+.skp-dock-entry-count{flex:none;font-size:12px;font-weight:500;line-height:1;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary,#5b6472);}
+.skp-dock-entry-item:hover .skp-dock-entry-count{color:var(--dsw-alias-label-primary,#1b1f26);}
 .skp-dock-entry-btn{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;flex:none;padding:0;border:none;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary,#5b6472);cursor:pointer;transition:background-color .12s ease,color .12s ease,opacity .12s ease;}
 .skp-dock-entry-btn:hover:not([aria-disabled="true"]){background:var(--dsw-alias-interactive-bg-hover,rgba(20,28,40,.06));color:var(--dsw-alias-label-primary,#1b1f26);}
 .skp-dock-entry-btn[aria-disabled="true"]{opacity:.4;cursor:default;}

@@ -2,9 +2,10 @@
  * 会话「本会话能力」配置区（首屏入口 + 配置弹窗 + 会话内整页）。
  *
  * 两个入口（在 src/client.ts 注册）：
- *   - 首屏（hero）：`conversation.input.left` 工具行预留位里的 icon+计数入口
- *     （书/插头/工具箱 + ✦ + 滑杆），点击打开居中弹窗（55% 遮罩 + 10px 背景模糊）；
- *     ✦ 仍触发能力决策，结果面板 fixed 落在输入卡下方。active 相位不渲染入口。
+ *   - 首屏（hero）：`conversation.hero.options` 首屏行（workspace chip /「标准模式」那一行）
+ *     右端的行内控件组（书 / MCP 官方标 / 扳手 + ✦ + 滑杆），点击打开居中弹窗
+ *     （55% 遮罩 + 10px 背景模糊）；✦ 仍触发能力决策，结果面板 fixed 落在输入卡下方。
+ *     与邻居控件同款：12px、无外底、hover 才出浅底。active 相位整行消失、入口卸载。
  *   - 会话中（conversation.view，顶部 Tab「能力」）：整页管理本会话能力；
  *     进入该 Tab 时会临时隐藏输入框（不需要对话输入），切回其它 Tab 恢复。
  *
@@ -103,11 +104,12 @@ export type Row = SkillRow | McpRow | ToolRow;
 /** 能力面板域 Tab（`onManage` 可指定打开哪个 Tab，由 src/client.ts 接线）。 */
 export type PanelDomain = "skills" | "mcp" | "jev";
 /**
- * 宿主 `conversation.input.left` 槽透传的 standardProps 子集。
+ * 宿主 `conversation.hero.options` 槽透传的 standardProps 子集。
  *
- * 真机契约（app.asar 只读核对）：该槽 ownerProps 为 `InputZone { session, input }`，
- * standardProps 含 `useInput: SnapshotSelectorHook<InputState>`。旧外壳可能两者都
- * 没有，因此全部可选。
+ * 真机契约（app.asar 只读核对）：该槽 ownerProps 为空，standardProps 含
+ * `useInput: SnapshotSelectorHook<InputState>` / `inputActions` / `sessionId`
+ * （与 `conversation.input.left` 同款 session 套件）；`input` 是旧槽的
+ * ownerProps 形态，保留作次选。旧外壳可能都没有，因此全部可选。
  */
 export interface HeroSlotProps {
     /** 订阅式草稿选择器（首选草稿来源，变化即重渲染）。 */

@@ -226,8 +226,9 @@ export function apply(ctx: any) {
   // 会话内能力配置的两个入口：
   //   1. **顶部 Tab「能力」**（conversation.view）：整页管理本会话 Skills / MCP /
   //      Tools，与「对话 / 轨迹 / 上下文 / 编队」同级；进入该 Tab 时隐藏输入框；
-  //   2. 首屏（hero）工具行入口（conversation.input.left 预留位）：icon+计数 +
-  //      ✦ 能力决策 + 配置滑杆，点击打开背景模糊弹窗。
+  //   2. 首屏（hero）行内入口（conversation.hero.options，workspace chip /「标准模式」
+  //      那一行的右端）：三域计数 + ✦ 能力决策 + 配置滑杆，点击打开背景模糊弹窗；
+  //      与邻居控件同款 12px / 无外底 / hover 才出浅底（v18 起）。
   // 输入框下方独立能力条与内联展开已按产品决定移除；快捷消息域已随本版整体下线
   // （数据文件静默保留）。
   //
@@ -261,16 +262,18 @@ export function apply(ctx: any) {
     );
     if (typeof disposeCapabilityView === "function") disposers.push(disposeCapabilityView);
 
-    // 首屏（hero）入口：收进输入框底部工具行的 UI 预留位（conversation.input.left，
-    // 排在 permission / plan / 其它 input.left occupant 之后）。收起态只显示
-    // 「书/插头/工具箱 + 已启用数 + ✦ 能力决策 + 滑杆配置」；点击打开背景模糊弹窗。
-    // active 相位组件不渲染入口（但外壳节点保留用于相位探测）。
+    // 首屏（hero）入口：挂在首屏行右端的 list 槽（conversation.hero.options）。
+    // 该槽由外壳按 Session 渲染，条目右对齐、gap 2px，`occupants` 为空；standardProps
+    // 与 conversation.input.left 同款（useInput / inputActions / sessionId），因此
+    // 组件逻辑不用跟着换。首屏行内容：「书 Skills 数 / MCP 官方标 数 / 扳手 Tools 数
+    // + ✦ 能力决策 + 滑杆配置」；点击打开背景模糊弹窗。
+    // active 相位首屏行整行消失，入口随之卸载（与旧实现「active 不渲染」等价）。
     //
     // `slotProps` 必须透传：hero 要在首屏读输入框草稿 / 停顿自动触发，
     // 而草稿与 input 状态由外壳的 standardProps 注入，不能从 api 侧拿到。
-    const disposeCapabilityEntry = ctx.slots.inject("conversation.input.left", () =>
+    const disposeCapabilityEntry = ctx.slots.inject("conversation.hero.options", () =>
       ctx.slots.register(
-        { name: "conversation.input.left", id: "capability-panel-entry", order: 60, label: "本会话能力（首屏）" },
+        { name: "conversation.hero.options", id: "capability-panel-entry", order: 60, label: "本会话能力（首屏）" },
         (props: any) =>
           ComposerCapabilityEntry({
             api: composerApiFor(props?.sessionId),
