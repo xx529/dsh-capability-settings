@@ -128,6 +128,11 @@ export interface McpLoader {
     }): Promise<void>;
     /** 该 session 的显式开关快照（键带 `project:` / `server:` 前缀）。 */
     sessionToggleState(sessionId?: string): Record<string, boolean>;
+    /** 读取前主动从磁盘恢复该 session 的显式开关（幂等；冷会话面板用）。 */
+    hydrateSession(sessionId: string, meta?: {
+        cwd?: string;
+        headerCreatedAt?: number;
+    }): Promise<void>;
 }
 /** 创建挂载器：注册 agent 生命周期监听 + 全局层首轮挂载 + 存量 agent 补挂。 */
 export declare function createMcpLoader(ctx: any, deps?: McpLoaderDeps): McpLoader;

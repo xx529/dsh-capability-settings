@@ -154,6 +154,11 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
    */
   async function list(cwd?: string, sessionId?: string): Promise<McpListResult> {
     const errors: string[] = [];
+    // 冷会话（teammate 已结束）的显式开关不在内存里；读投影前先从磁盘恢复，
+    // 否则面板会先按默认全开渲染，直到用户改一项触发 hydrate 才突然跳到快照。
+    if (sessionId !== undefined) {
+      await loader.hydrateSession(sessionId, cwd !== undefined ? { cwd } : {}).catch(() => undefined);
+    }
     const globalLocation = locationFor("global");
     const projectFile = cwd !== undefined ? projectMcpFile(cwd) : undefined;
     // 项目级禁用的全局 server 键集合（无 cwd 或读取失败时为空集合）。
@@ -400,6 +405,9 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
    * "本项目是否已禁用"（项目级 overrides）——外部实例的开关走的就是这条链路。
    */
   async function runtime(input?: { cwd?: string; sessionId?: string }): Promise<McpRuntimeView> {
+    if (input?.sessionId !== undefined) {
+      await loader.hydrateSession(input.sessionId, input.cwd !== undefined ? { cwd: input.cwd } : {}).catch(() => undefined);
+    }
     const owned = new Set<string>();
     try {
       for (const status of loader.status()) for (const server of status.servers) owned.add(server.serverName);

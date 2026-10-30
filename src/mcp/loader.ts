@@ -204,6 +204,8 @@ export interface McpLoader {
   }): Promise<void>;
   /** 该 session 的显式开关快照（键带 `project:` / `server:` 前缀）。 */
   sessionToggleState(sessionId?: string): Record<string, boolean>;
+  /** 读取前主动从磁盘恢复该 session 的显式开关（幂等；冷会话面板用）。 */
+  hydrateSession(sessionId: string, meta?: { cwd?: string; headerCreatedAt?: number }): Promise<void>;
 }
 
 /**
@@ -1155,6 +1157,14 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
     return Object.fromEntries(sessionToggles.get(sessionId) ?? []);
   }
 
+  /** 供 mcp.list/runtime 读投影前调用：把落盘开关恢复进内存（幂等）。 */
+  async function hydrateSession(
+    sessionId: string,
+    meta: { cwd?: string; headerCreatedAt?: number } = {},
+  ): Promise<void> {
+    await hydrateToggles(sessionId, meta);
+  }
+
   /** 找到某个 session 的记录（冷会话可能是 undefined：仍允许先落盘）。 */
   function findSessionRecord(sessionId: string): SessionRecord | undefined {
     return [...sessions.values()].find((item) => item.agent?.id === sessionId);
@@ -1211,6 +1221,7 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
     setSessionEnabled,
     setSessionEnabledMany,
     sessionToggleState,
+    hydrateSession,
     /** 状态视图；传 cwd 时按项目根过滤 session，全局层哨兵恒返回（见模块头注释）。 */
     status(cwd?: string): McpStatusView[] {
       if (!enabled) return [];
