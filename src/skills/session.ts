@@ -1,5 +1,6 @@
 /**
- * Skills 的**会话级**开关（内存态、不落盘）与**项目默认**的会话内投影。
+ * Skills 的**会话级**开关（按会话落盘）与**默认值**（全局默认 + 项目覆盖）的
+ * 会话内投影。
  *
  * 背景：宿主 `skills` 注册表（`@deepseek-ai/dsh-skill` 的 `SkillRegistry`）
  * 没有 disable/restrict 一类的按会话禁用 API，但它是**分层**的：`register()`
@@ -18,13 +19,23 @@
  * 本模块管理两类 shadow，**分开记账**：
  *
  *   1. **会话显式开关**（`shadows`）：用户在会话内手动关掉某个技能；
- *   2. **项目默认禁用**（`projectShadows`）：`.agents/capability-overrides.json`
- *      的 `skills` 名单，在 agent 创建时/项目默认热更新时 reconcile 进去。
+ *   2. **默认关闭投影**（`projectShadows`）：有效默认关闭名单
+ *      （`(global.skills ∪ project.skills) \ project.enabledSkills`，见
+ *      `overrides/*` 与 `shared/skill-defaults.ts`）在 agent 创建 / 项目默认
+ *      热更新 / 全局默认切换时 reconcile 进去。
  *
- * 优先级：**会话显式开关 > 项目默认**（显式开可以覆盖项目默认关）。
+ * 优先级：**会话显式开关 > 工作区覆盖 > 全局默认**（显式开可以覆盖默认关）。
  * `enabledInSession` 以**实际注册状态**为准（不只看意图），并且 register 之后
  * 会 read-after 校验胜者确实是本插件的 shadow，消灭「UI 已禁用、实际仍可见」
- * 的假成功（同层 runtime 先到先得时无法覆盖，属宿主 registry 的硬边界）。
+ * 的假成功。
+ *
+ * **磁盘技能与注入技能都覆盖**（v20.1 B2）：宿主的 filesystem provider 注册在
+ * host 层（global layer），而本插件的 shadow 注册在 agent 层 —— 读取时最近层
+ * 直接赢，所以 `~/.agents/skills` / `<项目>/.agents/skills` 的磁盘技能同样能被
+ * shadow 关闭（已用真实宿主 `SkillRegistry` 验证）。**已知硬边界**：preset 自带
+ * 的 filesystem provider 与 shadow **同层**（project rank 100/200 < runtime 250），
+ * 这类条目无法关闭；`registry.verifyShadow` 会识破并按业务失败返回，绝不静默
+ * 假装已生效（面板侧以 `canToggleGlobal=false` + 原因禁用开关）。
  *
  * 语义边界：
  *   - **只可关闭，不能强制开启**：文件级已禁用（frontmatter 双 false）或项目
@@ -32,8 +43,9 @@
  *     「反向开启」；
  *   - **按会话落盘**：显式会话开关写在插件数据目录
  *     （`<dshHome>/dsh-capability-settings/session-capabilities.json`，见
- *     `session-state.ts`），agent 重建 / 宿主重启后恢复；项目默认仍落
- *     `.agents/capability-overrides.json`；
+ *     `session-state.ts`），agent 重建 / 宿主重启后恢复；默认关闭名单落在
+ *     `<dshHome>/dsh-capability-settings/capability-overrides.json`（项目层）
+ *     与 `capability-global-overrides.json`（全局层）；
  *   - 找不到 live agent（冷会话）时开关失败并返回业务错误，不做状态暂存。
  *
  * @module dsh-capability-settings/skills/session
@@ -41,14 +53,34 @@
 
 import { findProjectRoot } from "../shared/project-root.js";
 import type { SessionStateStore } from "../session-state.js";
+import {
+  EMPTY_SKILL_DEFAULT_SETS,
+  effectiveDisabledSkills as effectiveDisabledSetOf,
+  skillDefaultFlags,
+  skillDefaultSets,
+} from "../shared/skill-defaults.js";
+import type { SkillDefaultSets } from "../shared/skill-defaults.js";
 import { SHADOW_DESCRIPTION, SHADOW_METADATA_KEY } from "./registry.js";
 import type { ClassifiedInjectedRow, SkillRegistryBridge } from "./registry.js";
 import type { SkillSummaryView } from "./types.js";
 
-/** 会话级 Skills 开关 / 项目默认投影的依赖。 */
+/** 会话级 Skills 开关 / 默认值投影的依赖。 */
 export interface SkillSessionDeps {
-  /** 项目默认禁用名单（overrides.skills；只对注入技能生效）。 */
+  /**
+   * 默认值三层集合快照（全局默认 + 项目覆盖）读取器；**首选注入点**
+   * （`overrides.defaultSets`）。缺省时回退 {@link projectDisabled}。
+   */
+  defaultSets?: (cwd?: string) => Promise<SkillDefaultSets | undefined>;
+  /**
+   * 旧注入点 / 兼容回退：项目关闭名单（不含全局默认层）。
+   * 新装配请用 {@link defaultSets}（B2 需要全局层）。
+   */
   projectDisabled?: (cwd?: string) => Promise<readonly string[]>;
+  /**
+   * 磁盘技能名读取器（v20.1 B2）：默认关闭必须对磁盘技能生效，投影前用它
+   * 做存在性判定，避免给不存在 / 已删除的名字注册 ghost shadow。
+   */
+  diskNames?: (cwd?: string) => Promise<readonly string[]>;
   /** 宿主 registry 桥（读注入技能 + read-before/after-shadow 校验）；缺省退化为纯磁盘行为。 */
   registry?: SkillRegistryBridge;
   /**
@@ -165,10 +197,16 @@ interface SessionRecord {
   explicit: Map<string, boolean>;
   /** 是否已从磁盘恢复过显式开关（每个会话一次；保持内存里刚改的值优先）。 */
   explicitHydrated: boolean;
-  /** 本项目默认禁用名单（最近一次读取的快照）。 */
+  /** 本项目默认禁用名单（最近一次读取的快照；B2 起 = 有效默认 = 全局 ∪ 项目 − 项目启用）。 */
   projectDefaults: Set<string>;
   /** 已尝试但尚未生效的名字（registry 未就绪/时序问题；下次读取重试）。 */
   projectPending: Set<string>;
+  /**
+   * 已判定为**硬失败**（同层更高优先级 provider 抢先）的名字：后续投影直接
+   * 跳过，避免每次 list / reconcile 都重复注册再回滚；默认值恢复或用户显式
+   * 开启时解除（见 `applyProjectDefaults`）。
+   */
+  defaultBlocked: Set<string>;
   /** 每个名字已重试的次数（超过上限只 warn 一次后放弃）。 */
   projectAttempts: Map<string, number>;
   /** 本会话的操作串行队列（toggle / reconcile 互斥）。 */
@@ -206,14 +244,35 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
   const warnedSkips = new Set<string>();
   let disposed = false;
 
-  /** 项目默认名单读取（失败降级为空，不阻断列表）。 */
-  async function projectDisabledOf(cwd: string | undefined): Promise<readonly string[]> {
-    if (deps.projectDisabled === undefined) return [];
-    try {
-      return await deps.projectDisabled(cwd);
-    } catch {
-      return [];
+  /**
+   * 默认值三层集合快照（全局默认 + 项目覆盖；失败降级为空，不阻断列表）。
+   *
+   * 首选 `deps.defaultSets`（组合根注入 `overrides.defaultSets`）；缺省回退
+   * 旧的 `projectDisabled`（只有项目层，全局层视为空）。
+   */
+  async function defaultsOf(cwd: string | undefined): Promise<SkillDefaultSets> {
+    if (deps.defaultSets !== undefined) {
+      try {
+        const sets = await deps.defaultSets(cwd);
+        if (sets !== undefined) return sets;
+      } catch {
+        /* 降级到旧注入点 / 空快照 */
+      }
     }
+    if (deps.projectDisabled === undefined) return EMPTY_SKILL_DEFAULT_SETS;
+    try {
+      return skillDefaultSets({ projectSkills: await deps.projectDisabled(cwd) });
+    } catch {
+      return EMPTY_SKILL_DEFAULT_SETS;
+    }
+  }
+
+  /**
+   * 有效默认关闭名单（排序后的数组）：
+   * `(global.skills ∪ project.skills) \ project.enabledSkills`（契约 §2.3）。
+   */
+  async function effectiveDisabledOf(cwd: string | undefined): Promise<string[]> {
+    return [...effectiveDisabledSetOf(await defaultsOf(cwd))].sort((a, b) => a.localeCompare(b));
   }
 
   /** 登记一个 agent（无 ctx / 无 id 的 stub 跳过；重复登记先到先得）。 */
@@ -232,6 +291,7 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
       explicitHydrated: false,
       projectDefaults: new Set(),
       projectPending: new Set(),
+      defaultBlocked: new Set(),
       projectAttempts: new Map(),
       queue: Promise.resolve(),
     };
@@ -561,11 +621,19 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
   }
 
   /**
-   * 把项目默认禁用名单投影到该会话（幂等、逐名独立）。
+   * 把**有效默认关闭名单**投影到该会话（幂等、逐名独立）。
    *
-   * 只对**注入条目**生效（Lead 裁定 R7：磁盘技能的项目级禁停继续走 shadow
-   * stub）；名单里出现磁盘/未知名字时跳过并 warn 一次。registry 还没就绪时
-   * 记 pending 并按 0 / 100 / 300ms 短重试，仍失败只 warn 不阻断会话。
+   * 覆盖对象 = 注入技能 ∪ 磁盘技能（v20.1 B2；磁盘技能同样靠 agent 层 runtime
+   * shadow 关闭，已用真实宿主 `SkillRegistry` 验证）。名单里出现「既非注入也非
+   * 磁盘」的未知名字时按 0 / 100 / 300ms 短重试，仍失败只 warn 一次、不阻断
+   * 会话（也不给不存在的名字注册 ghost shadow）。
+   *
+   * 关闭路径收敛成「一次目录发现（prepareShadows）+ 批量注册 + 一次 read-after
+   * 校验（verifyShadows）」；同层更高优先级 provider 抢先（preset 自带
+   * filesystem：rank 100/200 < runtime 250）时逐名撤销注册并回滚，错误交给
+   * 调用方，**不静默把列表当已生效**。已判定硬失败的名字记入
+   * `record.defaultBlocked`，后续 list / reconcile 不再重复注册回滚（避免每次
+   * 读取都刷一遍失败）；默认值恢复或显式开关会解除封锁。
    *
    * @param attempt 已重试次数（0 = 首次）
    * @param preloadedDisabled 调用方已读到的名单（避免重复读文件）
@@ -575,19 +643,20 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
     attempt = 0,
     preloadedDisabled?: readonly string[],
   ): Promise<SessionSkillOpResult> {
-    // 先恢复落盘的显式会话开关：desiredEnabled 依赖它（否则重启后会被项目默认盖掉）。
+    // 先恢复落盘的显式会话开关：desiredEnabled 依赖它（否则重启后会被默认值盖掉）。
     await hydrateExplicit(record);
     const registry = deps.registry;
     if (registry === undefined) return { ok: true };
-    const disabled = preloadedDisabled ?? (await projectDisabledOf(record.cwd));
+    const disabled = preloadedDisabled ?? (await effectiveDisabledOf(record.cwd));
     record.projectDefaults = new Set(disabled);
-    // 常见路径：本项目没有任何默认禁用、也没有待处理项、也没有显式会话开关
+    // 常见路径：没有任何默认关闭、也没有待处理项、也没有显式会话开关
     // ⇒ 不必读 registry（显式开关也要走下面的恢复逻辑，不能提前返回）。
     if (
       disabled.length === 0 &&
       record.projectShadows.size === 0 &&
       record.projectPending.size === 0 &&
-      record.explicit.size === 0
+      record.explicit.size === 0 &&
+      record.defaultBlocked.size === 0
     ) {
       return { ok: true };
     }
@@ -598,27 +667,59 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
     } catch {
       injected = undefined;
     }
-    if (injected === undefined && disabled.length > 0) {
-      for (const name of disabled) record.projectPending.add(name);
-      scheduleRetry(record, attempt);
+    // 磁盘技能名（全局默认必须同样作用于磁盘条目）；缺 dep 时退化为只处理注入条目。
+    //
+    // 只在**默认关闭名单非空**时读取磁盘视图：仅存在显式会话开关时不需要它
+    // （显式开关由 `restoreExplicit` / `setEnabled` 按可见名字处理），避免每次
+    // 列表刷新都对全部技能做一遍磁盘扫描。
+    let diskNames: Set<string> | undefined;
+    if (deps.diskNames !== undefined && record.projectDefaults.size > 0) {
+      try {
+        diskNames = new Set(await deps.diskNames(record.cwd));
+      } catch {
+        diskNames = undefined;
+      }
+    }
+    if (injected === undefined && diskNames === undefined) {
+      if (disabled.length > 0) {
+        for (const name of disabled) record.projectPending.add(name);
+        scheduleRetry(record, attempt);
+      }
       return { ok: true };
     }
-
-    const errors: string[] = [];
+    // 注入名单快照不可用（snapshot 失败 / preset 尚未就绪）时无法区分「不是注入
+    // 技能」与「尚未出现」，未知名字一律按 pending 重试。
+    const injectedUnknown = injected === undefined;
     const names = new Set<string>([
       ...record.projectDefaults,
       ...record.projectShadows.keys(),
       ...record.explicit.keys(),
       ...record.projectPending,
+      ...record.defaultBlocked,
     ]);
+    const errors: string[] = [];
+    const toDisable: string[] = [];
+    const toEnable: string[] = [];
     for (const name of [...names].sort()) {
-      const knownInjected =
+      const desired = desiredEnabled(record, name);
+      // 硬失败封锁：默认已恢复或用户显式开启 ⇒ 解除；仍要关闭 ⇒ 跳过（已报过）。
+      if (record.defaultBlocked.has(name)) {
+        if (desired) record.defaultBlocked.delete(name);
+        else continue;
+      }
+      const known =
         injected?.has(name) === true ||
+        diskNames?.has(name) === true ||
         record.projectShadows.has(name) ||
         record.shadows.has(name) ||
         (sessionId !== undefined && registry.knowsInjected(sessionId, name));
-      if (!knownInjected) {
+      if (!known) {
         if (record.projectDefaults.has(name)) {
+          if (injectedUnknown) {
+            record.projectPending.add(name);
+            scheduleRetry(record, attempt);
+            continue;
+          }
           const tries = (record.projectAttempts.get(name) ?? 0) + 1;
           record.projectAttempts.set(name, tries);
           if (tries <= 3) {
@@ -630,16 +731,92 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
           warnSkip(
             record,
             name,
-            `capability-panel: 项目默认禁用名单中的 "${name}" 不是宿主注入技能（或宿主尚未提供），已跳过`,
+            `capability-panel: 默认关闭名单中的 "${name}" 不是宿主注入技能或磁盘技能（或宿主尚未提供），已跳过`,
           );
         }
         record.projectPending.delete(name);
         continue;
       }
       record.projectAttempts.delete(name);
-      const desired = desiredEnabled(record, name);
-      const explicitOff = record.explicit.get(name) === false;
-      const result = desired ? await releaseShadow(record, name) : await ensureShadow(record, name, !explicitOff);
+      if (desired) toEnable.push(name);
+      else toDisable.push(name);
+    }
+
+    // —— 关闭：一次目录发现 + 批量注册 + 一次 read-after 校验 ——
+    if (toDisable.length > 0) {
+      let prepared: Awaited<ReturnType<SkillRegistryBridge["prepareShadows"]>> | undefined;
+      try {
+        prepared = await registry.prepareShadows(record.agent, sessionId, record.cwd, new Set(toDisable));
+      } catch {
+        prepared = undefined;
+      }
+      const created: Array<{ name: string; recorded: () => void }> = [];
+      const applied: string[] = [];
+      for (const name of toDisable) {
+        const explicitOff = record.explicit.get(name) === false;
+        const result = registerShadowCore(record, name, !explicitOff);
+        if (!result.ok) {
+          errors.push(...result.errors);
+          if (result.retryable === true) {
+            record.projectPending.add(name);
+            scheduleRetry(record, attempt);
+          }
+          continue;
+        }
+        const recorded = record.shadows.get(name) ?? record.projectShadows.get(name);
+        if (result.created === true && recorded !== undefined) created.push({ name, recorded });
+        applied.push(name);
+      }
+      let verified: Map<string, boolean> | undefined;
+      if (created.length > 0) {
+        try {
+          verified = await registry.verifyShadows(record.agent, record.cwd, new Set(created.map((entry) => entry.name)));
+        } catch {
+          verified = undefined;
+        }
+      }
+      const hardFailed = new Set<string>();
+      if (verified !== undefined) {
+        for (const entry of created) {
+          if (verified.get(entry.name) === true) continue;
+          // 同层更高优先级 provider 抢先（preset 自带 filesystem：rank 100/200
+          // < runtime 250）：撤销注册并回滚簿记，逐名报业务失败。
+          record.shadows.delete(entry.name);
+          record.projectShadows.delete(entry.name);
+          try {
+            entry.recorded();
+          } catch {
+            /* 回滚失败无额外副作用 */
+          }
+          record.projectPending.delete(entry.name);
+          record.defaultBlocked.add(entry.name);
+          hardFailed.add(entry.name);
+          const message = `skill "${entry.name}" 由同作用域的更高优先级条目（如 preset 自带的技能提供器）提供，无法关闭；能力面板已把该行标为不可全局切换`;
+          errors.push(message);
+          warnSkip(record, entry.name, `capability-panel: ${message}`);
+        }
+      }
+      // register 触发的 skills/change 会清掉刚缓存的元数据：显式写回（展示用）。
+      if (prepared !== undefined) {
+        for (const name of applied) {
+          if (hardFailed.has(name)) continue;
+          const row = prepared.rows.get(name);
+          if (row === undefined) continue;
+          try {
+            registry.keepShadowed(record.agent, sessionId, row);
+          } catch {
+            /* 缓存写回失败只影响展示，不影响启停 */
+          }
+        }
+      }
+      for (const name of applied) {
+        if (!hardFailed.has(name)) record.projectPending.delete(name);
+      }
+    }
+
+    // —— 开启：逐条解除（数量少；read-after 校验在 releaseShadow 内） ——
+    for (const name of toEnable) {
+      const result = await releaseShadow(record, name);
       if (result.ok) {
         record.projectPending.delete(name);
         continue;
@@ -664,10 +841,10 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
   /**
    * 恢复显式会话开关（list 路径，能同时看到磁盘 + 注入技能名）。
    *
-   * `applyProjectDefaults` 只处理**注入技能**（项目默认禁用的口径），而会话
-   * 显式开关也可能落在磁盘技能上（自定义技能 = 磁盘条目）。这里按"当前仍
-   * 可见的名字"恢复：可见 ⇒ 按状态注册/解除 shadow；已删除 ⇒ 清掉显式覆盖
-   * 并落盘（避免重启后给已删技能造出幽灵 shadow）。
+   * `applyProjectDefaults` 只处理**默认关闭名单**里的名字；会话显式开关还可能
+   * 落在「不在默认名单里」的技能上（用户手动关掉一个默认启用的技能）。这里按
+   * "当前仍可见的名字"恢复：可见 ⇒ 按状态注册/解除 shadow；已删除 ⇒ 清掉显式
+   * 覆盖并落盘（避免重启后给已删技能造出幽灵 shadow）。
    */
   async function restoreExplicit(record: SessionRecord, visibleNames: ReadonlySet<string>): Promise<void> {
     if (record.explicit.size === 0) return;
@@ -694,10 +871,10 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
   /**
    * 把落盘的显式开关在 agent 创建时**立即**批量应用。
    *
-   * 背景：`applyProjectDefaults` 只处理注入技能，磁盘技能要等到 `list` 的
-   * `restoreExplicit` 才注册 shadow；宿主重启 / resume 后模型首轮可能先于
-   * 面板加载，出现「面板显示 19 / 模型实际 155」的不一致。这里在创建路径用
-   * 现有 `setEnabledBatch`（一次目录发现 + 一次落盘）提前收敛。
+   * 背景：默认关闭投影（{@link applyProjectDefaults}）只覆盖名单里的名字，显式
+   * 开关还可能落在名单之外（用户手动关掉默认启用的技能）；宿主重启 / resume 后
+   * 模型首轮可能先于面板加载，出现「面板显示 19 / 模型实际 155」的不一致。这里
+   * 在创建路径用现有 `setEnabledBatch`（一次目录发现 + 一次落盘）提前收敛。
    */
   async function applyPersistedExplicit(record: SessionRecord): Promise<void> {
     const api = registryApi;
@@ -713,14 +890,32 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
     }
   }
 
-  /** 生命周期回调：登记 + 延后应用项目默认 + 立即应用落盘显式开关。 */
+  /**
+   * 生命周期回调：登记 + **立即**应用默认关闭名单与落盘显式开关。
+   *
+   * agent/created 是 serial 且被 await：返回 Promise 可把首轮前的 shadow 收敛
+   * 纳入创建路径（全局默认 / 项目默认对磁盘技能同样要生效，不能等面板 list）；
+   * 失败只 warn，绝不让 agent 创建失败。
+   */
   function onAgentCreated(agent: any): Promise<void> | void {
     const record = track(agent);
     if (record === undefined) return;
-    scheduleRetry(record, 0);
-    // agent/created 是 serial 且被 await：返回 Promise 可把首轮前的 shadow 收敛
-    // 纳入创建路径；失败只 warn，绝不让 agent 创建失败。
-    return applyPersistedExplicit(record).catch((error) => {
+    return (async () => {
+      await hydrateExplicit(record);
+      const disabled = await effectiveDisabledOf(record.cwd);
+      record.projectDefaults = new Set(disabled);
+      if (disabled.length > 0) {
+        const result = await runApply(record, 0, disabled);
+        if (!result.ok) {
+          deps.logger?.warn?.(`capability-panel: 默认关闭投影失败（${result.errors.slice(0, 3).join("; ")}）`);
+        }
+      } else {
+        // 无默认关闭：延后一次（preset 层 / registry 可能稍后才就绪；幂等）。
+        scheduleRetry(record, 0);
+      }
+      // 落盘显式开关最后应用（优先级最高；批量路径一次目录发现 + 一次落盘）。
+      await applyPersistedExplicit(record);
+    })().catch((error) => {
       deps.logger?.warn?.(`capability-panel: 会话恢复技能开关失败（${String(error)}）`);
     });
   }
@@ -743,7 +938,9 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
   const api: SkillSessionRegistry = {
     async list(baseList, cwd, sessionId): Promise<SessionSkillView[]> {
       const record = sessionId !== undefined ? find(sessionId) : undefined;
-      const projectDisabled = new Set<string>(await projectDisabledOf(cwd));
+      // 默认值三层快照（全局默认 + 工作区覆盖）；行字段与运行时投影共用同一口径。
+      const defaults = await defaultsOf(cwd);
+      const effectiveDisabled = effectiveDisabledSetOf(defaults);
       // 冷会话（agent 已释放）没有 record，但面板仍应显示落盘快照而不是默认全开。
       let persisted: Readonly<Record<string, boolean>> = {};
       // 只有「派生继承会话」的快照是"缺席即关闭"；派生继承工作区没有快照，
@@ -754,8 +951,8 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
         persisted = deps.state.skills(sessionId);
         derivedSessionSnapshot = deps.state.entries()[sessionId]?.derivedMode === "session";
       }
-      // 项目默认投影（fire-and-await；读路径允许触发一次幂等 reconcile）。
-      if (record !== undefined) await runApply(record, 0, [...projectDisabled]);
+      // 默认关闭投影（fire-and-await；读路径允许触发一次幂等 reconcile）。
+      if (record !== undefined) await runApply(record, 0, [...effectiveDisabled]);
 
       const diskRows = await baseList(cwd);
       let injectedRows: SkillSummaryView[] = [];
@@ -766,7 +963,8 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
             // 冷会话（无 live agent）退化为无 scope 读：只看得见 global 层注入。
             sessionId: record !== undefined ? sessionId : undefined,
             diskRows,
-            projectDisabled,
+            // `disabledInProject` 沿用「项目级覆盖」口径（全局默认层由新字段表达）。
+            projectDisabled: defaults.projectDisabled,
           });
         } catch {
           injectedRows = [];
@@ -801,9 +999,8 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
       if (record !== undefined) await restoreExplicit(record, new Set(toggleable.map((row) => row.name)));
       return toggleable.map((row) => {
         const explicit = record?.explicit.get(row.name);
-        // 实际注册状态（项目默认 + 会话 shadow 共同决定）。
-        const registered =
-          record !== undefined ? !shadowed(record, row.name) : row.injected !== true || !projectDisabled.has(row.name);
+        // 实际注册状态（默认关闭投影 + 会话 shadow 共同决定）。
+        const registered = record !== undefined ? !shadowed(record, row.name) : !effectiveDisabled.has(row.name);
         // 优先级：显式会话覆盖 > 项目级默认（stub 遮蔽）> 落盘快照（冷会话 /
         // 派生会话缺席名字按关闭）> 实际注册状态。
         const persistedValue = persisted[row.name];
@@ -819,6 +1016,8 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
                   : registered;
         return {
           ...row,
+          // v20.1 B2：默认态四列（全局 / 项目 / 有效），前后端共用同一口径。
+          ...skillDefaultFlags(defaults, row.name),
           enabledInSession,
           canToggleInSession: record !== undefined || deps.state !== undefined,
           ...(record === undefined && deps.state !== undefined ? { activationPending: true } : {}),
@@ -852,8 +1051,8 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
           await hydrateExplicit(record);
           if (input.enabled === undefined) {
             record.explicit.delete(name);
-            const projectDisabled = await projectDisabledOf(record.cwd);
-            record.projectDefaults = new Set(projectDisabled);
+            const effectiveDisabled = await effectiveDisabledOf(record.cwd);
+            record.projectDefaults = new Set(effectiveDisabled);
           } else {
             record.explicit.set(name, input.enabled === true);
           }
@@ -870,9 +1069,9 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
 
       return withQueue(record, async () => {
         await hydrateExplicit(record);
-        // 刷新项目默认快照（显式开关的 fallback 依赖它）。
-        const projectDisabled = await projectDisabledOf(record.cwd);
-        record.projectDefaults = new Set(projectDisabled);
+        // 刷新默认值快照（显式开关的 fallback 依赖它；B2 = 全局默认 ∪ 项目覆盖）。
+        const effectiveDisabled = await effectiveDisabledOf(record.cwd);
+        record.projectDefaults = new Set(effectiveDisabled);
         const desired = input.enabled === undefined ? !record.projectDefaults.has(name) : input.enabled === true;
         const explicitOff = input.enabled === false;
         const result = desired
@@ -937,7 +1136,7 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
 
       return withQueue(record, async () => {
         await hydrateExplicit(record);
-        record.projectDefaults = new Set(await projectDisabledOf(record.cwd));
+        record.projectDefaults = new Set(await effectiveDisabledOf(record.cwd));
         const registry = deps.registry;
         const agent = record.agent;
         const names = new Set(wanted.keys());

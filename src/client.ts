@@ -80,10 +80,11 @@ export function apply(ctx: any) {
     disposers.push(ctx.locale.register(NS, { zh, en }));
   }
 
-  // 构建传输无关的面板 API（CapabilityPanelApi）。面板可以在头部下拉框里
-  // 钉选一个项目（selection.cwd）；未钉选时，"project" 作用域跟随当前
-  // session 的工作区，其次是最新使用过的工作区。**这份 api 只给面板用**，
-  // composer 见下面的 composerApi。
+  // 构建传输无关的面板 API（CapabilityPanelApi）。面板的「作用域」由用户在
+  // 头部显式选择（selection.cwd）：`undefined` = **全局**（默认），路径 =
+  // 某个工作区。**面板与当前 session 完全解耦**——这里绝不回落到
+  // `currentWorkspaceCwd(ctx)`（否则面板会被当前对话所在工作区绑走，v20.1
+  // 的核心整改）。**这份 api 只给面板用**，composer 见下面的 composerApi。
   const workspaceListeners = new Set<() => void>();
   const notifyWorkspaceListeners = () => {
     for (const listener of workspaceListeners) {
@@ -94,7 +95,7 @@ export function apply(ctx: any) {
       }
     }
   };
-  // 钉选状态：cwd 为 undefined 表示"跟随当前 session / 最近工作区"。
+  // 面板作用域选择：cwd 为 undefined = 全局；否则 = 用户从全部工作区里选中的那个。
   const selection: { cwd: string | undefined } = { cwd: undefined };
   /** 两个 api 共用同一份订阅集合（各自订阅时都进这里）。 */
   const subscribeWorkspace = (listener: () => void) => {
@@ -105,7 +106,9 @@ export function apply(ctx: any) {
   };
   const api = createPanelApi({
     rpc: ctx.get("connection")?.rpc,
-    currentWorkspaceCwd: () => selection.cwd ?? currentWorkspaceCwd(ctx),
+    // 契约 §3.1：面板 api 的 cwd **只取用户选择**（undefined = 全局），禁止
+    // session fallback。composer api 见下方 composerApiFor，保持跟随 session。
+    currentWorkspaceCwd: () => selection.cwd,
     subscribeWorkspace,
     listProjects: () => listWorkspaceOptions(ctx),
     selectedProject: () => selection.cwd,
@@ -176,15 +179,16 @@ export function apply(ctx: any) {
   // 钉选状态下的通知同样是为了刷新下拉框选项）。只有快照内容真正变化
   // 时才通知，避免无意义的重渲染。
   //
-  // 这里跟踪**两个** cwd：面板侧的（钉选优先）与 composer 侧的（纯会话）。
-  // 面板钉选到 A 时 session 从 B 切到 C，面板侧没变、但 composer 侧变了，
-  // 仍必须通知，否则 composer 会继续显示 B 的项目级内容。
-  let lastPanelCwd = selection.cwd ?? currentWorkspaceCwd(ctx);
+  // 这里跟踪**两个** cwd：面板侧的（只取用户选择，undefined = 全局）与
+  // composer 侧的（纯会话）。面板选到 A 时 session 从 B 切到 C，面板侧没变、
+  // 但 composer 侧变了，仍必须通知，否则 composer 会继续显示 B 的项目级内容。
+  // 工作区列表自身的新增/移除也通知（头部下拉要跟着刷新）。
+  let lastPanelCwd = selection.cwd;
   let lastSessionCwd = currentWorkspaceCwd(ctx);
   let lastItemsKey = workspaceItemsKey(ctx);
   const onGraphChange = () => {
     const sessionCwd = currentWorkspaceCwd(ctx);
-    const panelCwd = selection.cwd ?? sessionCwd;
+    const panelCwd = selection.cwd;
     const itemsKey = workspaceItemsKey(ctx);
     if (panelCwd === lastPanelCwd && sessionCwd === lastSessionCwd && itemsKey === lastItemsKey) return;
     lastPanelCwd = panelCwd;

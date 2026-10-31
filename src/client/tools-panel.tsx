@@ -17,6 +17,10 @@
  * 契约：docs/architecture/v13-implementation.md §5.1 / §9.4 / 附录 A +
  * task-20 两层语义（`defaultEnabled` / `enabled`、`tools.setGlobalEnabled`）。
  *
+ * v20.1 能力中心：Tools 没有工作区维度，根部 header 的作用域分段控件在本
+ * Tab 下置灰并写原因（「全局工具注册 · 不区分工作区」）；本视图只有两栏，
+ * 列表标题栏固定「全局 Tools」+ 计数。
+ *
  * @module dsh-capability-settings/client/tools-panel
  */
 
@@ -175,12 +179,10 @@ type InspectState =
 export function ToolsView({
   api,
   query,
-  workspace,
   onCount,
 }: {
   api: CapabilityPanelApi;
   query: string;
-  workspace?: string;
   /** 数据到达后上报单元总数（域 Tab 计数）。 */
   onCount?: (count: number) => void;
 }) {
@@ -227,7 +229,7 @@ export function ToolsView({
     return () => {
       cancelled = true;
     };
-  }, [api, workspace, version]);
+  }, [api, version]);
 
   const units = useMemo(() => sortUnits(data?.units ?? []), [data]);
 
@@ -376,12 +378,12 @@ export function ToolsView({
         <div className="skp-body skp-tools-body">
           {/* 中间列：插件单元列表（无左导航 / 无工作区维度）。 */}
           <div className="skp-workspace-pane skp-tools-pane">
-            <div className="skp-pane-title">
-              <span className="skp-pane-title-text">Tools</span>
+            <div className="skp-list-head">
+              <span className="skp-list-title">全局 Tools</span>
               <span className="skp-group-count">{units.length}</span>
-              <span className="skp-pane-title-note">
-                · {units.filter((unit) => defaultEnabledOf(unit)).length} 默认启用 · 插件级开关（整插件生效）
-              </span>
+              <span className="skp-list-note">插件级开关 · 不区分工作区</span>
+              <span className="skp-detail-head-spacer" />
+              <span className="skp-pane-title-note">{units.filter((unit) => defaultEnabledOf(unit)).length} 默认启用</span>
             </div>
             {attributionSettling && <div className="skp-pane-note">来源解析中…</div>}
             {units.length === 0 ? (
@@ -434,8 +436,8 @@ export function ToolsView({
                             locked
                               ? (unit.lockedReason ?? "该插件无法开关")
                               : defaultEnabledOf(unit)
-                                ? "关闭：关闭后所有会话默认不可用；单个会话仍可在对话首屏单独开启"
-                                : "开启：所有会话默认可用（单个会话可在对话首屏单独关闭）"
+                                ? "关闭：关闭后全局默认不可用；仍可在对话首屏为单个对话单独开启"
+                                : "开启：全局默认可用（仍可在对话首屏为单个对话单独关闭）"
                           }
                         >
                           <span className="skp-row-default-label">默认</span>
@@ -521,7 +523,7 @@ export function ToolsView({
                 )}
 
                 <div className="skp-note">
-                  工具数 {selected.toolCount} · 开关为插件级：关闭后该插件全部工具在所有会话默认不可见（不改已有会话的显式覆盖）
+                  工具数 {selected.toolCount} · 开关为插件级：关闭后该插件全部工具全局默认不可见（不改已有对话的显式覆盖）
                 </div>
 
                 <div className="skp-detail-inspect">

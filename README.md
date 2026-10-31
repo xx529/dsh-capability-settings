@@ -61,7 +61,8 @@ Skills / MCP / Tools（Tools 以插件为单元），一次请求批量打 0–1
 
 | 配置 | 写入目标 | 读取兼容（旧位置） |
 |---|---|---|
-| 项目级「默认关闭」声明（MCP 面板的「默认」开关 + 注入技能的「本项目启用」开关） | `<dshHome>/dsh-capability-settings/capability-overrides.json`（一个文件按**项目根**分 key：`projects.<项目根>.mcp` / `.skills`） | 旧项目内 `.agents/capability-overrides.json`（兼容 `.dsh` → `.claude`）：只读兼容，首次写入时把内容并入统一存储并删除旧文件 |
+| **Skills 全局默认**（v20.1 B2：全局视图开关；全局关闭后工作区/会话可再打开） | `<dshHome>/dsh-capability-settings/capability-global-overrides.json`（`{"version":1,"skills":["<name>",…]}`；空名单不落 `skills` 字段；目录 `700` / 文件 `600`、原子写 + 文件锁） | — |
+| 项目级「默认关闭」声明（MCP 面板的「默认」开关 + Skills 工作区开关；B2 增 `enabledSkills` 显式启用） | `<dshHome>/dsh-capability-settings/capability-overrides.json`（一个文件按**项目根**分 key：`projects.<项目根>.mcp` / `.skills`（禁用）/ `.enabledSkills`（重新打开）） | 旧项目内 `.agents/capability-overrides.json`（兼容 `.dsh` → `.claude`）：只读兼容，首次写入时把内容并入统一存储并删除旧文件 |
 | 项目级「全局能力引用」声明（MCP 的「导入到本项目」） | `<项目根>/.agents/capability-imports.json` | — |
 | 会话级能力开关（Skills / MCP / Tools 三域 + 派生继承设置，按 sessionId） | `<dshHome>/dsh-capability-settings/session-capabilities.json`（`version: 1`，记录内 `skills` / `mcp` / `tools` / `deriveMode` / `derivedMode` / `derivedFrom` / `derivedAt`） | — |
 | Tools 归属扫描缓存（自动发现） | `<dshHome>/dsh-capability-settings/tool-attribution.json`（`version: 1`；包名+version+mtime+宿主版本失效；目录 `700` / 文件 `600`、原子写 + 锁；损坏自动重建） | — |
@@ -77,6 +78,34 @@ Skills / MCP / Tools（Tools 以插件为单元），一次请求批量打 0–1
 工具搬家都不会影响配置归属。
 
 ## 亮点
+
+### 🧭 v20.1 能力中心（当前 UI）
+
+面板是**独立管理台**，与当前对话所在工作区解耦：
+
+- **作用域**：默认「全局」；「工作区」从**全部已知工作区**中显式选择，不再有
+  「跟随当前会话」。面板只管理到工作区层级，**不涉及会话**；会话级开关仍在
+  对话上方的「能力」Tab。
+- **布局**：删除左栏「全局 / 项目 + 工作区列表」；头部只有「全局 / 工作区 ▾」，
+  列表标题栏写清「全局 Skills / HtDot · Skills / HtDot · MCP」+ 计数，右侧是
+  `＋ 添加 Skill` / `＋ 添加 MCP`。
+- **添加**：落点由「当前 Tab × 当前作用域」直接确定，弹窗只填内容并显示写入路径
+  （`~/.agents/skills`、`~/.agents/mcp.json`、`<工作区>/.agents/skills`、
+  `<工作区>/.mcp.json`）；MCP 支持表单 + JSON 粘贴（逐条预览 新增/覆盖）。
+- **作用域链**：详情只显示「全局 → 工作区」两段；全局视图第二段是
+  「在「工作区」作用域查看 ↗」入口，不统计跨工作区覆盖数。
+- **B2 全局默认（Skills）**：新增独立文件
+  `<dshHome>/dsh-capability-settings/capability-global-overrides.json`
+  （`version:1, skills[]`），**不改技能文件**；优先级
+  **全局默认 < 工作区显式启用/禁用 < 会话显式开关**。工作区可用
+  `enabledSkills` 重新打开全局关闭的 Skill，会话也能覆盖。
+- **MCP 全局默认**沿用 `mcp.json` 的 `disabled`；外部注入的 MCP 无法全局禁用，
+  开关禁用并显示原因（与 preset 同层注入的 Skill 同一套 disabled 语义）。
+- 设计稿：Figma `Capability Panel · 能力中心整改 v20.1`，预览
+  `docs/figma/preview/v20-01…07-*.png`。
+
+> 下面「🗂 一个面板…」起的 v7/v13 小节描述的是**历史 UI**（左导航 + 项目下钻）；
+> 能力语义、配置落点与实现细节仍可参考，但交互以 v20.1 为准。
 
 ### 🗂 一个面板，管住三个能力域
 

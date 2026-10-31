@@ -94,8 +94,24 @@ export interface InjectedSkillFields {
     resourceBaseKind?: RegistryResourceBaseKind;
     /** true = 正文/资源只读（不提供创建/编辑/删除/调用方向修改；启停仍可）。 */
     contentReadOnly?: true;
-    /** 仅 injected 行：本项目默认是否禁用（来自 overrides.skills）。 */
+    /** 仅 injected 行：本项目默认是否禁用（来自 overrides；含全局默认层的有效语义）。 */
     disabledInProject?: boolean;
+    /** 名字在全局默认关闭名单（`capability-global-overrides.json` 的 `skills`）里。 */
+    globalDefaultDisabled?: boolean;
+    /** 名字在本项目 `enabledSkills` 里（工作区重新打开，覆盖全局默认）。 */
+    projectDefaultEnabled?: boolean;
+    /** 名字在本项目 `skills` 里（工作区关闭）。 */
+    projectDefaultDisabled?: boolean;
+    /** 按契约 §1.3 计算的有效默认（面板开关显示用）。 */
+    effectiveDefaultEnabled?: boolean;
+    /**
+     * 全局开关是否可写。缺省 / true = 可写；false = 该名字无法通过能力面板
+     * 全局关闭（目前只有「preset 自带 provider 注入」的行会为 false，原因见
+     * {@link globalToggleBlockedReason}）。
+     */
+    canToggleGlobal?: boolean;
+    /** 不可全局切换的可读原因（`canToggleGlobal === false` 时给 UI 的禁用提示）。 */
+    globalToggleBlockedReason?: string;
 }
 /** 面板列表中的一行摘要（受管根目录磁盘视图 + 宿主 registry 注入条目的合并结果）。 */
 export interface SkillSummaryView extends InjectedSkillFields {

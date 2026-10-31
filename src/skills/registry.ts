@@ -48,6 +48,17 @@ export const SHADOW_DESCRIPTION = "本会话已禁用（capability-panel）";
 /** shadow 注册附带的 metadata 标记键（便于 `ctx.skills.get` 侧二次确认）。 */
 export const SHADOW_METADATA_KEY = "capability-panel/shadow";
 
+/**
+ * preset 同层注入无法被插件 shadow 关闭时的可读原因（契约 §2.2 / §2.3）。
+ *
+ * 背景：preset 自带的 `dsh-skill-filesystem` 挂在 agent 自己的 scope 上，其
+ * project 根条目 rank 100/200 **低于** runtime shadow 的 250，而宿主 registry
+ * 「同层 rank 小者赢」⇒ 本插件的 shadow 无法遮蔽它（已用真实宿主
+ * `SkillRegistry` 验证）。这类行在面板上必须禁用全局开关并给出原因。
+ */
+export const PRESET_GLOBAL_TOGGLE_BLOCKED_REASON =
+  "该技能由预设（preset）自带的技能提供器注入，同层优先级高于本插件的 shadow，无法通过能力面板关闭";
+
 /** 判断一个 registry 摘要条目是否是**本插件自己**注册的 shadow。 */
 export function isOwnShadow(entry: { provider?: string; description?: string } | undefined): boolean {
   return entry?.provider === "runtime" && entry?.description === SHADOW_DESCRIPTION;
@@ -584,6 +595,13 @@ export function createSkillRegistryBridge(deps: SkillRegistryBridgeDeps): SkillR
 
   /** 分类行 → 面板摘要行（注入行的 source 恒为 "external"，不带 root）。 */
   function toSummaryView(row: ClassifiedInjectedRow, disabledInProject: boolean): SkillSummaryView {
+    /**
+     * 全局开关可写性：preset 自带 provider 的条目与本插件 shadow 同层且 rank
+     * 更低，无法关闭 ⇒ 标记 false + 原因，让 UI 禁用开关（契约 §2.2）。
+     * 其它注入行（runtime / bundled / 插件 provider）落在 global 层，可被
+     * agent 层 shadow 覆盖。
+     */
+    const canToggleGlobal = row.origin !== "preset";
     return {
       name: row.name,
       description: row.description,
@@ -601,6 +619,7 @@ export function createSkillRegistryBridge(deps: SkillRegistryBridgeDeps): SkillR
       ...(row.resourceBaseKind !== undefined ? { resourceBaseKind: row.resourceBaseKind } : {}),
       contentReadOnly: true,
       disabledInProject,
+      ...(canToggleGlobal ? {} : { canToggleGlobal: false, globalToggleBlockedReason: PRESET_GLOBAL_TOGGLE_BLOCKED_REASON }),
     };
   }
 

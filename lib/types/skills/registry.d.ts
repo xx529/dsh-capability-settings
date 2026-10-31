@@ -35,6 +35,15 @@ import type { TransferResult } from "./transfer.js";
 export declare const SHADOW_DESCRIPTION = "\u672C\u4F1A\u8BDD\u5DF2\u7981\u7528\uFF08capability-panel\uFF09";
 /** shadow 注册附带的 metadata 标记键（便于 `ctx.skills.get` 侧二次确认）。 */
 export declare const SHADOW_METADATA_KEY = "capability-panel/shadow";
+/**
+ * preset 同层注入无法被插件 shadow 关闭时的可读原因（契约 §2.2 / §2.3）。
+ *
+ * 背景：preset 自带的 `dsh-skill-filesystem` 挂在 agent 自己的 scope 上，其
+ * project 根条目 rank 100/200 **低于** runtime shadow 的 250，而宿主 registry
+ * 「同层 rank 小者赢」⇒ 本插件的 shadow 无法遮蔽它（已用真实宿主
+ * `SkillRegistry` 验证）。这类行在面板上必须禁用全局开关并给出原因。
+ */
+export declare const PRESET_GLOBAL_TOGGLE_BLOCKED_REASON = "\u8BE5\u6280\u80FD\u7531\u9884\u8BBE\uFF08preset\uFF09\u81EA\u5E26\u7684\u6280\u80FD\u63D0\u4F9B\u5668\u6CE8\u5165\uFF0C\u540C\u5C42\u4F18\u5148\u7EA7\u9AD8\u4E8E\u672C\u63D2\u4EF6\u7684 shadow\uFF0C\u65E0\u6CD5\u901A\u8FC7\u80FD\u529B\u9762\u677F\u5173\u95ED";
 /** 判断一个 registry 摘要条目是否是**本插件自己**注册的 shadow。 */
 export declare function isOwnShadow(entry: {
     provider?: string;

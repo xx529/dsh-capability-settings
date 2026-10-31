@@ -10,28 +10,25 @@
  * 选择没有对应 main 条目的 id 会抛错。浮层外壳、backdrop 与关闭按钮都已
  * 随之删除。
  *
- * **两份 api，切勿合并（防回归）**：
- *   - 面板自身用 client.ts 中带「项目钉选」的 `api`：`currentWorkspaceCwd`
- *     是 `selection.cwd ?? 当前会话工作区`，所以头部「项目作用域」下拉框
- *     能把项目级视图钉到任意工作区；
- *   - composer（输入框工具行：Skills / MCP 按钮与弹层）在 client.ts 中用
- *     单独的 `composerApi`：`currentWorkspaceCwd` **只**取当前会话自己的
- *     工作区，`selectedProject()` 恒为 undefined。两者共用同一份
- *     `subscribeWorkspace` 回调集合，因此都会随会话工作区切换刷新。
- *   若把面板这份 api 交给 composer，就会出现在面板里把项目作用域钉到 A
- *   工作区后、B 工作区的对话框弹层列出 A 的项目级技能/MCP 的串味 bug。
+ * **v20.1 信息架构（能力中心）**：只保留两条轴 + 一个解释层。
+ *   1. 类型 = Tab（Skills / MCP / Tools，Jev 用分隔线单独成组）；
+ *   2. 作用域 = 头部常驻分段控件（全局 / 工作区 ▾，工作区下拉列出全部
+ *      工作区）——**面板与当前对话所在工作区完全解耦，默认进入全局**；
+ *      `src/client.ts` 的面板 api `currentWorkspaceCwd = () => selection.cwd`
+ *      （undefined = 全局，禁止 session fallback）；
+ *   3. 详情 = 两段作用域链（全局 → 工作区，逐段标 继承 / 覆盖 / 来源）；
+ *      **面板不涉及会话层级**，会话级开关在对话上方的「能力」Tab。
  *
- * 根容器按能力域分 Tab（**只剩两个**：技能 / MCP，带数据量计数），第二行
- * 是「域 Tab + 搜索框」：搜索框由根组件持有，按域切换 placeholder，两个
- * 视图只接收 `query` 做本地过滤（视图内不再有搜索/安装行）：
- *   - Skills：左列 200–220px 的 ScopeNav（全局 / 项目 + 行尾「+」安装），
- *     中间列按 scope 显示全局技能、工作区选择列表或选中工作区的项目技能
- *     （项目 scope 未选工作区时先列全部工作区，点击 = `api.selectProject`）；
- *     详情页带完整文件树 + SKILL.md 阅读器（见 skill-content.tsx）；
- *   - MCP：同构的左导航 + 中间列（全局含外部注入 / 项目→工作区下钻），
- *     带每个 session 的实时挂载状态（见 mcp-panel.tsx）。
+ * 左栏 ScopeNav / 工作区列表已删除；列表标题栏固定写「类型 + 作用域」
+ * （`全局 Skills` / `HtDot · Skills` / `HtDot · MCP`）+ 计数 + 作用域提示 +
+ * 内联「＋ 添加 Skill / ＋ 添加 MCP」入口，弹窗落点由当前 Tab × 当前作用域
+ * 直接确定（不再二次选择）。
  *
- * 快捷消息域已整体下线（2026-10 产品决定），域 Tab 不再有第三个入口。
+ * **两份 api，切勿合并（防回归）**：面板这份 api 的 cwd 只取用户在面板里
+ * 显式选择的作用域；composer（输入框工具行 / 首屏入口）在 client.ts 中用
+ * 单独的每会话 api，`currentWorkspaceCwd` 只取该会话自己的工作区。两者共用
+ * 同一份 `subscribeWorkspace` 回调集合。若把面板这份 api 交给 composer，
+ * 就会出现跨工作区串味 bug。
  *
  * 布局刻意保持朴素（自带 CSS 类，见 styles.ts），对未经确认的 UI 原语
  * 组件零硬依赖。

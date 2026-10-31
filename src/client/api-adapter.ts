@@ -18,6 +18,7 @@ import type {
   ClientAttributionInfo,
   ClientMcpRuntimeServer,
   ClientMcpUsageEntry,
+  ClientGlobalOverrides,
   ClientOverrides,
   ClientSkillDetail,
   ClientSkillSummary,
@@ -583,6 +584,8 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
           mcp: listOf(view.mcp),
           // skills 域是宿主 additive 字段：旧宿主缺失时按空清单（旧行为不变）。
           skills: listOf(view.skills),
+          // v20.1（B2）additive：本项目显式重新打开的名单；旧宿主缺失视为空。
+          ...(Array.isArray(view.enabledSkills) ? { enabledSkills: listOf(view.enabledSkills) } : {}),
           ...(typeof view.filePath === "string" ? { filePath: view.filePath } : {}),
           ...(typeof view.projectRoot === "string" ? { projectRoot: view.projectRoot } : {}),
         } satisfies ClientOverrides;
@@ -592,6 +595,39 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
       async toggle(domain, key) {
         const cwd = deps.currentWorkspaceCwd();
         return unwrap(await rpc("overrides.toggle", { cwd, domain, key })) as { ok: true } | { ok: false; errors: string[] };
+      },
+
+      /**
+       * v20.1（B2）：显式设置 skill 在本项目的默认启用/禁用（不是翻转）。
+       * 复用 `overrides.toggle` 的新增可选参数 `enabled`（与 backend 对齐；
+       * 不传 `enabled` 时保持旧的翻转语义）。写盘成功后宿主对同项目 live
+       * 会话 reconcile，UI 重拉 skills.list 即可。
+       */
+      async setSkillDefault(input) {
+        const cwd = deps.currentWorkspaceCwd();
+        return unwrap(
+          await rpc("overrides.toggle", { cwd, domain: "skills", key: input.key, enabled: input.enabled }),
+        ) as { ok: true } | { ok: false; errors: string[] };
+      },
+
+      /** v20.1（B2）：读取全局默认关闭层（独立文件；损坏时返回空清单 + errors）。 */
+      async globalGet() {
+        const result = await rpc("overrides.globalGet", {});
+        if (!result.ok) throw new Error(result.errors.join("; "));
+        const view = (result.value ?? {}) as Record<string, unknown>;
+        const errors = Array.isArray(view.errors)
+          ? view.errors.filter((item): item is string => typeof item === "string")
+          : [];
+        return {
+          skills: Array.isArray(view.skills) ? view.skills.filter((item): item is string => typeof item === "string") : [],
+          ...(typeof view.filePath === "string" ? { filePath: view.filePath } : {}),
+          ...(errors.length > 0 ? { errors } : {}),
+        } satisfies ClientGlobalOverrides;
+      },
+
+      /** v20.1（B2）：切换某个 skill 的全局默认开关（写 capability-global-overrides.json）。 */
+      async globalToggle(input) {
+        return unwrap(await rpc("overrides.globalToggle", input)) as { ok: true } | { ok: false; errors: string[] };
       },
     },
 
@@ -936,6 +972,15 @@ function toSummary(value: Record<string, unknown>): ClientSkillSummary {
     ...(resourceBaseKind !== undefined ? { resourceBaseKind } : {}),
     ...(value.contentReadOnly === true ? { contentReadOnly: true } : {}),
     ...(typeof value.disabledInProject === "boolean" ? { disabledInProject: value.disabledInProject } : {}),
+    // v20.1（B2）additive：全局默认 / 工作区显式覆盖 / 有效默认值。
+    ...(typeof value.globalDefaultDisabled === "boolean" ? { globalDefaultDisabled: value.globalDefaultDisabled } : {}),
+    ...(typeof value.projectDefaultEnabled === "boolean" ? { projectDefaultEnabled: value.projectDefaultEnabled } : {}),
+    ...(typeof value.projectDefaultDisabled === "boolean" ? { projectDefaultDisabled: value.projectDefaultDisabled } : {}),
+    ...(typeof value.effectiveDefaultEnabled === "boolean" ? { effectiveDefaultEnabled: value.effectiveDefaultEnabled } : {}),
+    ...(typeof value.canToggleGlobal === "boolean" ? { canToggleGlobal: value.canToggleGlobal } : {}),
+    ...(typeof value.globalToggleBlockedReason === "string" && value.globalToggleBlockedReason.length > 0
+      ? { globalToggleBlockedReason: value.globalToggleBlockedReason }
+      : {}),
   };
 }
 

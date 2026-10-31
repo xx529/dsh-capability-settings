@@ -124,11 +124,15 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
   的目录；用户主目录永不当作项目根；找不到则回退原 cwd。见 `src/shared/project-root.ts`。
 - **配置文件**：全局 `~/.agents/mcp.json`、项目 `<项目根>/.mcp.json`；skills 目录；
   `quick-messages.json`；项目级「全局能力引用」`capability-imports.json`（导入/引用）。
+- **Skills 全局默认（v20.1 B2）**：`<dshHome>/dsh-capability-settings/capability-global-overrides.json`
+  （`version:1, skills[]` = 全局默认关闭；原子写 + 0600 + 文件锁；不改技能文件）。
+  优先级：全局默认 < 工作区显式启用/禁用 < 会话显式开关；工作区用项目 overrides 的
+  `enabledSkills` 重新打开。
 - **项目级「默认关闭」统一存储**：`<dshHome>/dsh-capability-settings/capability-overrides.json`
   （`src/overrides/*`；一个文件按**项目根**分 key：`projects.<项目根>.mcp` /
-  `.skills`，条目带 `updatedAt` / 最近 `cwd`；文件权限 0600）。旧项目内
-  `.agents/capability-overrides.json`（兼容 `.dsh` / `.claude`）**只读兼容**，
-  首次写入时并入统一存储并删除旧文件；**不要把声明再写回项目仓库**。
+  `.skills`（禁用）/ `.enabledSkills`（重新打开），条目带 `updatedAt` / 最近 `cwd`；
+  文件权限 0600）。旧项目内 `.agents/capability-overrides.json`（兼容 `.dsh` / `.claude`）
+  **只读兼容**，首次写入时并入统一存储并删除旧文件；**不要把声明再写回项目仓库**。
 - **会话级开关持久化**：`<dshHome>/dsh-capability-settings/session-capabilities.json`
   （`src/session-state.ts`；按 sessionId 记录 Skills/MCP/Tools 显式覆盖 + 派生继承
   `deriveMode` / `derivedMode` / `derivedFrom` / `derivedAt`，目录 0700 / 文件 0600）。
@@ -241,6 +245,11 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
 ## Figma 原型（dsh-to-figma 本地桥）
 
 - **设计源**：Figma 本地文档 **`dsh`**。**当前基线**：
+  - `Capability Panel · 能力中心整改 v20.1`（page `169:2`）：7 帧（全局作用域 `171:351` /
+    工作区作用域 `171:72` / 从列表添加 Skills `171:634` / MCP 工作区 `171:974` /
+    设计规范 `171:1256` / 添加 MCP 表单 `177:1648` / JSON 粘贴 `177:1979`）+ 页内诊断；
+    预览图 `docs/figma/preview/v20-*`。对应实现：面板默认全局 + 列表标题栏添加 +
+    两段作用域链 + B2 全局默认；scene JSON 未导出。
   - `Capability Dock · 首屏入口 v18（实现基线）`（page `155:13148`）：3 帧 `155:13149`（默认 ·
     入口在首屏行右端）/ `155:13275`（hover 计数项）/ `155:13396`（配置弹窗 · 沿用 v14）。
     对应代码：`src/client.ts` 的 `conversation.hero.options` 注册 + `src/client/styles.ts` 的

@@ -11,7 +11,8 @@
  *
  * handler 签名是 `(endpoint, payload, signal) -> value`。endpoint 按域前缀
  * 命名：`skills.*` 路由到 skills 管理器，`mcp.*` 路由到 MCP 管理器，
- * `overrides.*` 走项目级默认声明，`jev.*` 走能力决策，`tools.*` 走 Tools 域
+ * `overrides.*` 走默认关闭声明（项目级 `toggle/get` + B2 全局级
+ * `globalGet/globalToggle`），`jev.*` 走能力决策，`tools.*` 走 Tools 域
  * （插件级会话开关），`session.setBulk` 走三域批量端点（R1）。
  * 所有返回值统一包一层 {@link RpcResult} 信封，错误信息收敛进 `errors` 数组，
  * 客户端据此展示而不抛原始异常。
@@ -108,8 +109,24 @@ export interface PanelRpcService {
     setSessionEnabled(input: unknown): Promise<unknown>;
   };
   overrides: {
+    /** 项目级默认声明（含 B2 的 `enabledSkills`）+ 有效默认计算入口。 */
     get(cwd?: string): Promise<unknown>;
+    /**
+     * 切换项目级默认。`mcp` = 翻转项目禁用清单；`skills`（B2 三态）：
+     * `enabled=true` → 写 `enabledSkills` 并移出 `skills`；`enabled=false` →
+     * 写 `skills` 并移出 `enabledSkills`；不传则翻转有效默认。
+     */
     toggle(input: unknown): Promise<unknown>;
+    /**
+     * 全局默认（B2）：`{}` → `{ skills: string[], filePath: string, errors? }`。
+     * 文件缺失 / 空 → 空名单；损坏 → 降级为空名单 + `errors`（可读原因）。
+     */
+    globalGet(): Promise<unknown>;
+    /**
+     * 全局默认开关（B2）：`{domain:"skills", key, disabled}` →
+     * `{ok:true}` / `{ok:false, errors}`；写 `capability-global-overrides.json`。
+     */
+    globalToggle(input: unknown): Promise<unknown>;
   };
   /**
    * Tools 域（插件级会话开关，v13）：只读枚举 + 批量写会话开关。
@@ -229,6 +246,12 @@ export async function handleEndpoint(service: PanelRpcService, endpoint: string,
         return { ok: true, value: await service.overrides.get(cwd) };
       case "overrides.toggle":
         return { ok: true, value: await service.overrides.toggle(p) };
+      case "overrides.globalGet":
+        // 全局默认视图（B2）：读路径降级为空名单，错误收在 value.errors 里。
+        return { ok: true, value: await service.overrides.globalGet() };
+      case "overrides.globalToggle":
+        // 全局默认开关（B2）：业务失败在 value.ok=false（信封仍恒 ok:true）。
+        return { ok: true, value: await service.overrides.globalToggle(p) };
       case "tools.list":
         // sessionId 缺省 = 主面板的只读视图（enabledInSession 恒为默认值）。
         return { ok: true, value: await service.tools.list(sessionId !== undefined ? { sessionId } : {}) };

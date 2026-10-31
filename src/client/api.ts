@@ -59,6 +59,31 @@ export interface ClientSkillSummary {
   contentReadOnly?: boolean;
   /** 仅 injected 行：本项目默认是否禁用（来自 capability-overrides.json 的 skills 清单）。 */
   disabledInProject?: boolean;
+  /**
+   * v20.1（B2 全局默认层）：名字在**全局默认关闭名单**
+   * （`<dshHome>/dsh-capability-settings/capability-global-overrides.json` 的
+   * `skills`）里。全局视图的开关显示/写入依据它；缺省 = false（旧宿主）。
+   */
+  globalDefaultDisabled?: boolean;
+  /** v20.1（B2）：名字在**本项目显式启用名单**（`enabledSkills`）里（工作区重新打开全局默认关闭项）。 */
+  projectDefaultEnabled?: boolean;
+  /** v20.1（B2）：名字在**本项目默认关闭名单**（`skills`）里。 */
+  projectDefaultDisabled?: boolean;
+  /**
+   * v20.1（B2）：按契约 §1.3 计算出的**有效默认值**（工作区视图开关显示用）：
+   * `projectDefaultEnabled ? true : (projectDefaultDisabled || globalDefaultDisabled) ? false : true`。
+   * 缺省时由客户端按旧字段回退。
+   */
+  effectiveDefaultEnabled?: boolean;
+  /**
+   * v20.1（B2）：是否**允许**写全局默认开关。preset 等「同层注入」条目可能
+   * 为 false（宿主 registry 硬边界：无法用 runtime shadow 覆盖同层注入），
+   * 此时全局视图开关置灰并显示 {@link globalToggleBlockedReason}。
+   * 缺省 = true（旧宿主按可写处理）。
+   */
+  canToggleGlobal?: boolean;
+  /** v20.1：`canToggleGlobal=false` 时的可读原因（UI 禁用 tooltip 文案）。 */
+  globalToggleBlockedReason?: string;
   /** 可写条目所属的受管根目录（写回/导出/导入时按 root 精确寻址）。 */
   root?: string;
   /**
@@ -766,10 +791,28 @@ export interface ClientOverrides {
    * 旧宿主缺失该字段 ⇒ 视作空清单。
    */
   skills: string[];
+  /**
+   * v20.1（B2）：本项目**显式重新打开**的技能名（覆盖全局默认关闭）。
+   * 旧宿主缺失 ⇒ 视作空清单。
+   */
+  enabledSkills?: string[];
   /** 统一存储文件绝对路径（`<dshHome>/dsh-capability-settings/capability-overrides.json`；无项目时缺省）。 */
   filePath?: string;
   /** 当前项目根（统一存储里该项目条目的 key；无项目时缺省）。 */
   projectRoot?: string;
+}
+
+/** v20.1（B2）：全局默认关闭层（独立文件 `capability-global-overrides.json`）。 */
+export interface ClientGlobalOverrides {
+  /** 全局默认关闭的 skill 名（空数组 = 全部默认启用）。 */
+  skills: string[];
+  /** 文件绝对路径（UI 展示「开关只改这个文件」；旧宿主缺省）。 */
+  filePath?: string;
+  /**
+   * 读取路径的可读错误（additive）：文件损坏时宿主返回空清单 + errors，
+   * 面板据此显示一行警告而不是把整页拖成错误态。
+   */
+  errors?: string[];
 }
 
 /** 项目级禁用域的面板 API。 */
@@ -786,6 +829,25 @@ export interface OverridesApi {
    * 写盘成功后宿主会对同项目的 live 会话热应用（注册/解除会话 shadow）。
    */
   toggle(domain: CapabilityDomain, key: string): Promise<OpResult>;
+  /**
+   * v20.1（B2）：显式设置某个 skill 在**本项目**的默认启用/禁用（不是翻转）。
+   *
+   * - `enabled=false` → 加入项目 `skills`（工作区默认关闭）、从 `enabledSkills` 移除；
+   * - `enabled=true` → 加入项目 `enabledSkills`（重新打开全局默认关闭项）、从 `skills` 移除。
+   *
+   * 落盘统一存储的 `projects.<项目根>`；宿主写盘后对同项目 live 会话 reconcile。
+   * 契约未写死 RPC 名，adapter 目前复用 `overrides.toggle` 的 `enabled` 扩展参数
+   * （见 api-adapter.ts / backend 对齐说明）。
+   */
+  setSkillDefault(input: { key: string; enabled: boolean }): Promise<OpResult>;
+  /** v20.1（B2）：读取**全局默认关闭层**（独立文件，不修改技能文件本身）。 */
+  globalGet(): Promise<ClientGlobalOverrides>;
+  /**
+   * v20.1（B2）：切换某个 skill 的**全局默认**开关。
+   * `disabled=true` = 全局默认关闭；`false` = 恢复全局默认启用。
+   * 写 `capability-global-overrides.json`，不碰任何技能文件。
+   */
+  globalToggle(input: { domain: "skills"; key: string; disabled: boolean }): Promise<OpResult>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1075,11 +1137,11 @@ export interface CapabilityPanelApi {
   /** 面板头部的"项目作用域"目录标签。 */
   workspaceLabel(): string;
   /**
-   * 当前显式钉选的项目目录；`undefined` 表示面板自动跟随
-   * 当前 session / 最近工作区。
+   * 当前显式选中的工作区目录；`undefined` = **全局作用域**（面板默认，
+   * 与当前对话所在工作区无关，v20.1 契约 §3.1）。
    */
   selectedProject(): string | undefined;
-  /** 把项目作用域钉选到一个工作区路径（`undefined` 恢复自动跟随）。 */
+  /** 把面板作用域切到某个工作区路径（`undefined` = 回到全局）。 */
   selectProject(path: string | undefined): void;
   /** 项目下拉框可用的工作区列表。 */
   projects(): WorkspaceOption[];

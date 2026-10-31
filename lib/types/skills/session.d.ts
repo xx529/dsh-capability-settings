@@ -1,5 +1,6 @@
 /**
- * Skills 的**会话级**开关（内存态、不落盘）与**项目默认**的会话内投影。
+ * Skills 的**会话级**开关（按会话落盘）与**默认值**（全局默认 + 项目覆盖）的
+ * 会话内投影。
  *
  * 背景：宿主 `skills` 注册表（`@deepseek-ai/dsh-skill` 的 `SkillRegistry`）
  * 没有 disable/restrict 一类的按会话禁用 API，但它是**分层**的：`register()`
@@ -18,13 +19,23 @@
  * 本模块管理两类 shadow，**分开记账**：
  *
  *   1. **会话显式开关**（`shadows`）：用户在会话内手动关掉某个技能；
- *   2. **项目默认禁用**（`projectShadows`）：`.agents/capability-overrides.json`
- *      的 `skills` 名单，在 agent 创建时/项目默认热更新时 reconcile 进去。
+ *   2. **默认关闭投影**（`projectShadows`）：有效默认关闭名单
+ *      （`(global.skills ∪ project.skills) \ project.enabledSkills`，见
+ *      `overrides/*` 与 `shared/skill-defaults.ts`）在 agent 创建 / 项目默认
+ *      热更新 / 全局默认切换时 reconcile 进去。
  *
- * 优先级：**会话显式开关 > 项目默认**（显式开可以覆盖项目默认关）。
+ * 优先级：**会话显式开关 > 工作区覆盖 > 全局默认**（显式开可以覆盖默认关）。
  * `enabledInSession` 以**实际注册状态**为准（不只看意图），并且 register 之后
  * 会 read-after 校验胜者确实是本插件的 shadow，消灭「UI 已禁用、实际仍可见」
- * 的假成功（同层 runtime 先到先得时无法覆盖，属宿主 registry 的硬边界）。
+ * 的假成功。
+ *
+ * **磁盘技能与注入技能都覆盖**（v20.1 B2）：宿主的 filesystem provider 注册在
+ * host 层（global layer），而本插件的 shadow 注册在 agent 层 —— 读取时最近层
+ * 直接赢，所以 `~/.agents/skills` / `<项目>/.agents/skills` 的磁盘技能同样能被
+ * shadow 关闭（已用真实宿主 `SkillRegistry` 验证）。**已知硬边界**：preset 自带
+ * 的 filesystem provider 与 shadow **同层**（project rank 100/200 < runtime 250），
+ * 这类条目无法关闭；`registry.verifyShadow` 会识破并按业务失败返回，绝不静默
+ * 假装已生效（面板侧以 `canToggleGlobal=false` + 原因禁用开关）。
  *
  * 语义边界：
  *   - **只可关闭，不能强制开启**：文件级已禁用（frontmatter 双 false）或项目
@@ -32,19 +43,34 @@
  *     「反向开启」；
  *   - **按会话落盘**：显式会话开关写在插件数据目录
  *     （`<dshHome>/dsh-capability-settings/session-capabilities.json`，见
- *     `session-state.ts`），agent 重建 / 宿主重启后恢复；项目默认仍落
- *     `.agents/capability-overrides.json`；
+ *     `session-state.ts`），agent 重建 / 宿主重启后恢复；默认关闭名单落在
+ *     `<dshHome>/dsh-capability-settings/capability-overrides.json`（项目层）
+ *     与 `capability-global-overrides.json`（全局层）；
  *   - 找不到 live agent（冷会话）时开关失败并返回业务错误，不做状态暂存。
  *
  * @module dsh-capability-settings/skills/session
  */
 import type { SessionStateStore } from "../session-state.js";
+import type { SkillDefaultSets } from "../shared/skill-defaults.js";
 import type { SkillRegistryBridge } from "./registry.js";
 import type { SkillSummaryView } from "./types.js";
-/** 会话级 Skills 开关 / 项目默认投影的依赖。 */
+/** 会话级 Skills 开关 / 默认值投影的依赖。 */
 export interface SkillSessionDeps {
-    /** 项目默认禁用名单（overrides.skills；只对注入技能生效）。 */
+    /**
+     * 默认值三层集合快照（全局默认 + 项目覆盖）读取器；**首选注入点**
+     * （`overrides.defaultSets`）。缺省时回退 {@link projectDisabled}。
+     */
+    defaultSets?: (cwd?: string) => Promise<SkillDefaultSets | undefined>;
+    /**
+     * 旧注入点 / 兼容回退：项目关闭名单（不含全局默认层）。
+     * 新装配请用 {@link defaultSets}（B2 需要全局层）。
+     */
     projectDisabled?: (cwd?: string) => Promise<readonly string[]>;
+    /**
+     * 磁盘技能名读取器（v20.1 B2）：默认关闭必须对磁盘技能生效，投影前用它
+     * 做存在性判定，避免给不存在 / 已删除的名字注册 ghost shadow。
+     */
+    diskNames?: (cwd?: string) => Promise<readonly string[]>;
     /** 宿主 registry 桥（读注入技能 + read-before/after-shadow 校验）；缺省退化为纯磁盘行为。 */
     registry?: SkillRegistryBridge;
     /**

@@ -49,6 +49,7 @@ import { createToolsGlobalStore } from "./tools/global-state.js";
 import { createSessionBulk } from "./session-bulk.js";
 import type { SessionBulk } from "./session-bulk.js";
 import { findProjectRoot } from "./shared/project-root.js";
+import { annotateSkillDefaults } from "./shared/skill-defaults.js";
 import { mountRpcChannel } from "./remote.js";
 
 /** Cordis 插件名（对应 cordis.patch.yml 里的插件 id）。 */
@@ -210,7 +211,7 @@ export function apply(ctx: any, config: Config = {}) {
    * reconcile（注册/解除 agent 作用域 runtime shadow）。由组合根注入到
    * `skillSessions` 的构造里（延迟求值，避免构造顺序耦合）。
    */
-  const reconcileProjectRef: { current?: (cwd: string) => Promise<{ ok: true } | { ok: false; errors: string[] }> } = {};
+  const reconcileProjectRef: { current?: (cwd?: string) => Promise<{ ok: true } | { ok: false; errors: string[] }> } = {};
   const overrides = {
     ...overridesRaw,
     toggle: async (input: OverrideToggleInput) => {
@@ -225,6 +226,21 @@ export function apply(ctx: any, config: Config = {}) {
         return reconcileProjectRef.current(input.cwd);
       }
       return result;
+    },
+    /**
+     * 全局默认开关（B2）：写 `capability-global-overrides.json` 后对**所有** live
+     * 会话 reconcile（全局层对所有项目生效）。逐名失败（preset 同层冲突）以
+     * `{ok:false, errors}` 返回，绝不静默把列表当已生效。
+     */
+    globalToggle: async (input: Parameters<typeof overridesRaw.globalToggle>[0]) => {
+      const result = await overridesRaw.globalToggle(input);
+      if (!result.ok) return result;
+      if (reconcileProjectRef.current === undefined) return result;
+      const reconciled = await reconcileProjectRef.current(undefined);
+      if (reconciled.ok) return reconciled;
+      // 文件已写入但运行时投影未完全生效（preset 同层等硬边界）：逐名报错，
+      // 并明确告知「文件已写入」，避免前端把失败误读成没落盘。
+      return { ok: false, errors: ["全局默认已写入文件，但以下运行时投影失败：", ...reconciled.errors] };
     },
   };
   // MCP 工具调用的内存使用记录（只读、不落盘）：通过 root 作用域的 tools.guard
@@ -256,11 +272,22 @@ export function apply(ctx: any, config: Config = {}) {
     logger: ctx.logger,
     registry: skillsRegistry,
     state: sessionState,
+    // 默认值三层快照（全局默认 + 项目覆盖，B2）：列表行字段与运行时投影共用。
+    defaultSets: async (cwd?: string) => overridesRaw.defaultSets(cwd),
+    // 磁盘技能名：全局默认必须对磁盘技能生效；投影前用它做存在性判定。
+    diskNames: async (cwd?: string) => {
+      try {
+        return (await diskList(cwd)).filter((row) => row.shadowStub !== true).map((row) => row.name);
+      } catch {
+        return [];
+      }
+    },
+    // 旧注入点保留（兼容直接构造本服务的外部调用方）。
     projectDisabled: async (cwd?: string) => (await overridesRaw.sets(cwd)).skills,
   });
   skillSessionsRef.current = skillSessions;
   deriveSkillSessionsRef.current = skillSessions;
-  reconcileProjectRef.current = (cwd: string) => skillSessions.reconcileProject(cwd);
+  reconcileProjectRef.current = (cwd?: string) => skillSessions.reconcileProject(cwd);
   /**
    * 面板 `skills.list` 的组合视图：受管磁盘行 + 宿主 registry 注入行。
    *
@@ -269,17 +296,13 @@ export function apply(ctx: any, config: Config = {}) {
    */
   async function mergePanelList(cwd?: string): Promise<SkillSummaryView[]> {
     const diskRows = await diskList(cwd);
-    let projectDisabled = new Set<string>();
+    // 默认值三层快照：行的 4 个默认态字段（契约 §2.2）按同一口径计算。
+    const defaults = await overridesRaw.defaultSets(cwd);
     try {
-      projectDisabled = new Set((await overridesRaw.sets(cwd)).skills);
+      const injected = await skillsRegistry.merge({ cwd, diskRows, projectDisabled: defaults.projectDisabled });
+      return annotateSkillDefaults([...diskRows, ...injected].sort((a, b) => a.name.localeCompare(b.name)), defaults);
     } catch {
-      projectDisabled = new Set();
-    }
-    try {
-      const injected = await skillsRegistry.merge({ cwd, diskRows, projectDisabled });
-      return [...diskRows, ...injected].sort((a, b) => a.name.localeCompare(b.name));
-    } catch {
-      return diskRows;
+      return annotateSkillDefaults(diskRows, defaults);
     }
   }
   // Jev 管理器：内部持有冷会话排队表与 agent/created|disposed 监听。service
@@ -444,6 +467,7 @@ export {
   isOwnShadow,
   SHADOW_DESCRIPTION,
   SHADOW_METADATA_KEY,
+  PRESET_GLOBAL_TOGGLE_BLOCKED_REASON,
 } from "./skills/registry.js";
 export type {
   ClassifiedInjectedRow,
@@ -535,6 +559,7 @@ export type {
 } from "./session-state.js";
 export type { SessionStateReconciler, SessionStateReconcilerDeps } from "./session-state-reconcile.js";
 export { createOverridesManager } from "./overrides/manager.js";
+export type { OverrideToggleInput, OverrideOpResult } from "./overrides/manager.js";
 export { createJevManager } from "./jev/manager.js";
 export type { JevManager, JevManagerDeps } from "./jev/manager.js";
 export {
@@ -559,15 +584,32 @@ export type {
 export { mountRpcChannel, handleEndpoint, CHANNEL } from "./remote.js";
 export { findProjectRoot } from "./shared/project-root.js";
 export { globalSkillsDir, projectSkillsDir, userAgentsSkillsDir } from "./skills/roots.js";
-export { projectOverridesFile, OVERRIDES_FILE_NAME, overridesStoreFile, OVERRIDES_STORE_FILE_NAME } from "./overrides/paths.js";
+export {
+  projectOverridesFile,
+  OVERRIDES_FILE_NAME,
+  overridesStoreFile,
+  OVERRIDES_STORE_FILE_NAME,
+  globalOverridesFile,
+  GLOBAL_OVERRIDES_FILE_NAME,
+} from "./overrides/paths.js";
 export {
   readOverrides,
   writeOverrides,
   readOverridesStore,
   writeOverridesStore,
+  normalizeOverridesSet,
   DOMAIN_KEYS,
   OVERRIDES_STORE_VERSION,
 } from "./overrides/config-file.js";
+export { readGlobalOverrides, writeGlobalOverrides, emptyGlobalOverrides, GLOBAL_OVERRIDES_VERSION } from "./overrides/global-file.js";
+export {
+  skillDefaultSets,
+  effectiveDisabledSkills,
+  skillDefaultFlags,
+  annotateSkillDefaults,
+  EMPTY_SKILL_DEFAULT_SETS,
+} from "./shared/skill-defaults.js";
+export type { SkillDefaultSets, SkillDefaultFlags } from "./shared/skill-defaults.js";
 export { createSkill, updateSkill, removeSkill, readSkillDetail, cloneSkill, listSkillNames } from "./skills/crud.js";
 export { installFromPath, installFromFiles, exportToPath, exportSkillFiles } from "./skills/transfer.js";
 export { installFromUrl, fetchSkillFiles, classifySkillUrl } from "./skills/download.js";

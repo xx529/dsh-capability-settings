@@ -17,6 +17,10 @@
  * 契约：docs/architecture/v13-implementation.md §5.1 / §9.4 / 附录 A +
  * task-20 两层语义（`defaultEnabled` / `enabled`、`tools.setGlobalEnabled`）。
  *
+ * v20.1 能力中心：Tools 没有工作区维度，根部 header 的作用域分段控件在本
+ * Tab 下置灰并写原因（「全局工具注册 · 不区分工作区」）；本视图只有两栏，
+ * 列表标题栏固定「全局 Tools」+ 计数。
+ *
  * @module dsh-capability-settings/client/tools-panel
  */
 import type { CapabilityPanelApi } from "./api.js";
@@ -26,10 +30,9 @@ import type { CapabilityPanelApi } from "./api.js";
  * @param query 根组件头部搜索框的值（按插件名 / 工具名 / 工具说明本地过滤）。
  * @param workspace 当前工作区（只作为重新拉取的信号：工作区/会话切换时刷新列表）。
  */
-export declare function ToolsView({ api, query, workspace, onCount, }: {
+export declare function ToolsView({ api, query, onCount, }: {
     api: CapabilityPanelApi;
     query: string;
-    workspace?: string;
     /** 数据到达后上报单元总数（域 Tab 计数）。 */
     onCount?: (count: number) => void;
 }): import("react").JSX.Element;

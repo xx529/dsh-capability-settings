@@ -819,6 +819,46 @@ button.skp-dock-rail-fail:hover{filter:brightness(.9);}
 @container (max-width:1100px){.skp-tools-pane{width:340px;}}
 @container (max-width:900px){.skp-tools-pane{width:280px;}}
 
+/* v20.1 能力中心：头部作用域分段（全局 / 工作区 ▾）——面板唯一的作用域入口。 */
+.skp-scope-badge{flex:none;padding:0 8px;border-radius:6px;background:var(--skp-accent-soft);color:var(--skp-accent);font-size:11px;font-weight:600;line-height:20px;}
+.skp-scope-seg{display:inline-flex;align-items:center;gap:2px;padding:3px;border-radius:var(--skp-radius-sm);background:var(--skp-fill);}
+.skp-scope-seg-btn{height:28px;padding:0 14px;border:0;border-radius:6px;background:transparent;font:inherit;font-size:12.5px;font-weight:500;color:var(--skp-text-3);cursor:pointer;white-space:nowrap;transition:color .15s var(--skp-ease),background-color .15s var(--skp-ease);}
+.skp-scope-seg-btn:hover:not(:disabled){color:var(--skp-text);}
+.skp-scope-seg-btn-active,.skp-scope-seg-btn-active:hover{background:var(--skp-surface);color:var(--skp-text);box-shadow:0 1px 2px rgba(20,28,40,.08),0 0 0 1px var(--skp-border);}
+.skp-scope-seg-btn:disabled{opacity:.45;cursor:default;}
+.skp-scope-seg-select .skp-dd-btn{height:28px;padding:0 26px 0 12px;border-color:transparent;background-color:transparent;background-position:right 8px center;font-size:12.5px;font-weight:500;color:var(--skp-text);box-shadow:none;}
+.skp-scope-seg-select .skp-dd-btn:hover:not(:disabled){border-color:transparent;background-color:var(--skp-hover);}
+.skp-scope-seg-select .skp-dd-btn:disabled{background-color:transparent;}
+.skp-tab-sep{flex:none;width:1px;height:18px;margin:0 6px;background:var(--skp-border-strong);}
+/* 列表标题栏：类型 + 作用域 + 计数 + 作用域提示 + 内联添加入口。 */
+.skp-list-pane{flex:none;width:380px;display:flex;flex-direction:column;min-height:0;min-width:0;padding:8px;overflow:hidden;border-right:1px solid var(--skp-border);}
+.skp-list-head{flex:none;display:flex;align-items:center;gap:8px;min-height:40px;padding:0 2px;min-width:0;}
+.skp-list-title{flex:none;font-size:14px;font-weight:600;color:var(--skp-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.skp-list-note{flex:none;font-size:11px;color:var(--skp-text-3);white-space:nowrap;}
+.skp-list-add{flex:none;height:28px;padding:0 12px;font-size:12px;}
+.skp-group-scroll-plain{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding:0 2px 4px;scrollbar-width:thin;scrollbar-color:var(--dsw-alias-scrollbar-bg-l2,rgba(0,0,0,.18)) transparent;}
+/* 两段作用域链（全局 → 工作区）：详情首屏回答「为什么是现在这个状态」。 */
+.skp-scope-chain{flex:none;display:flex;align-items:stretch;gap:8px;margin:0 0 12px;min-width:0;}
+.skp-scope-chain-seg{flex:1 1 0;display:flex;flex-direction:column;gap:3px;min-width:0;padding:10px 12px;border:1px solid var(--skp-border);border-radius:var(--skp-radius);background:var(--skp-fill);text-align:left;}
+.skp-scope-chain-head{display:flex;align-items:center;gap:6px;min-width:0;}
+.skp-scope-chain-head .skp-dot{margin-right:0;}
+.skp-scope-chain-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;font-weight:600;letter-spacing:.04em;color:var(--skp-text-3);}
+.skp-scope-chain-title{font-size:13px;font-weight:600;color:var(--skp-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.skp-scope-chain-note{font-size:11px;line-height:15px;color:var(--skp-text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.skp-scope-chain-arrow{flex:none;align-self:center;font-size:13px;color:var(--skp-text-3);}
+.skp-scope-chain-action{border-style:dashed;background:transparent;cursor:pointer;font:inherit;color:inherit;}
+.skp-scope-chain-action:hover{border-color:var(--skp-accent);background:var(--skp-accent-soft);}
+.skp-scope-chain-action:focus-visible{outline:none;box-shadow:0 0 0 2px var(--skp-accent-soft);}
+/* 固定落点卡（添加 Skill / 添加 MCP 弹窗顶部）：作用域 + 写入路径 + 与当前对话无关。 */
+.skp-landing{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border:1px solid var(--skp-border);border-radius:var(--skp-radius);background:var(--skp-fill);min-width:0;}
+.skp-landing-head{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap;}
+.skp-landing-icon{flex:none;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--skp-accent-soft);color:var(--skp-accent);font-size:10px;}
+.skp-landing-note{flex:none;font-size:11.5px;color:var(--skp-text-3);white-space:nowrap;}
+.skp-landing-hint{flex:none;font-size:11px;color:var(--skp-text-3);white-space:nowrap;}
+.skp-landing-path{display:block;padding:6px 8px;border-radius:6px;background:var(--skp-surface);font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:12px;color:var(--skp-text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+@container (max-width:1050px){.skp-list-pane{width:340px;}}
+@container (max-width:900px){.skp-list-pane{width:300px;}}
+
 `;
 
 /**

@@ -5,6 +5,63 @@
 
 ## [Unreleased]
 
+### 新增（v20.1 能力中心）
+
+- **能力面板重构为独立管理台**（与当前对话所在工作区解耦）：
+  - 默认进入「全局」；「工作区」从全部已知工作区中显式选择；面板只管理到工作区层级，
+    不出现/不修改会话级状态（会话级仍在对话上方「能力」Tab）。
+  - 删除左栏「全局 / 项目 + 工作区列表」；列表标题栏写「全局 Skills / HtDot · Skills /
+    HtDot · MCP」+ 计数 + `＋ 添加 Skill` / `＋ 添加 MCP`。
+  - 添加改为**固定落点**：类型与作用域由当前 Tab × 当前作用域决定，弹窗只填内容并显示
+    写入路径；Skills 支持上传/路径/URL，MCP 支持表单 + JSON 粘贴（逐条预览 新增/覆盖）。
+  - 详情作用域链只保留「全局 → 工作区」两段；全局视图第二段是「在「工作区」作用域查看 ↗」
+    入口，P0 不统计跨工作区覆盖数。
+- **Skills 全局默认（B2）**：新增
+  `<dshHome>/dsh-capability-settings/capability-global-overrides.json`
+  （`{"version":1,"skills":[...]}`，原子写、0600、文件锁）。优先级
+  **全局默认 < 工作区显式启用/禁用 < 会话显式开关**；工作区用项目 overrides 的
+  `enabledSkills` 重新打开全局关闭的 Skill，会话显式开关仍最高。
+- 新增 RPC `overrides.globalGet` / `overrides.globalToggle`；`overrides.toggle` 增加可选
+  `enabled`（B2 三态写回）；`skills.list` / `skills.sessionList` 行增加
+  `globalDefaultDisabled` / `projectDefaultEnabled` / `projectDefaultDisabled` /
+  `effectiveDefaultEnabled` / `canToggleGlobal` / `globalToggleBlockedReason`。
+- 新增宿主模块 `src/overrides/global-file.ts`、`src/shared/skill-defaults.ts`（面板列表与
+  运行时投影共用同一套有效默认计算）。
+
+### 变更（v20.1 能力中心）
+
+- 面板 api 的 `cwd` 只取面板内选择（`undefined` = 全局），**不再回落到当前会话工作区**；
+  composer api 保持跟随会话不变。
+- Skills 全局行开关改为写**全局默认**（不再写「本项目禁用」shadow stub）；工作区行改为
+  B2 项目启用/禁用；project preset 同层注入（宿主 rank 100）无法被全局 shadow 时，
+  行开关禁用并显示 `globalToggleBlockedReason`，`overrides.globalToggle` 逐名报业务失败，
+  不把列表当已生效。磁盘 Skills 与其它注入 Skills 均已用真实宿主 `SkillRegistry` 验证可投影。
+- MCP 全局行开关走 `mcp.setEnabled({scope:"global"})`；工作区行走项目 overrides；外部注入
+  实例无法全局禁用，开关禁用并显示原因；面板不再展示/调用 `mcp.status` 的会话挂载状态。
+- Skills 详情移除旧的「在本项目禁用/恢复（shadow stub）」动作，统一由工作区行开关走 B2。
+- `overrides.get` 保持旧形状 `{mcp, skills}`（兼容 mcp loader 与旧回归）；完整 B2 项目态
+  走新 `overrides.projectSets(cwd)`。
+
+### 修复（v20.1 能力中心）
+
+- 修复普通注入行（`canToggleGlobal` 缺省 true）被 `readOnly` 误禁用；`canToggleGlobal=false`
+  优先返回预设的 `globalToggleBlockedReason`。
+- 修复全局 Skills 开关 tooltip 中遗留的「技能」命名（统一 Skills）。
+- 旧验证套件随新 IA 更新（旧 mock 补 `overrides.globalGet/globalToggle`；v18 已移除的
+  dock/hero 套件 SKIP 并注明；`v13-session-bulk` 冷会话语义对齐 v1.8.0）。
+
+### 验证（v20.1）
+
+- `pnpm typecheck` / `pnpm build` 通过。
+- `bash notes/verify/v20-run.sh`：**68/68 PASS**（host 25 / scope 10 / skills 20 / mcp 13），
+  关键按钮/开关均用 DOM 真实点击并断言 RPC、真实文件（含 0600）、视图切换与 modal 副作用。
+- `bash notes/verify/run-all.sh`：`FAILED_SCRIPTS=0` / `FAILED_SUITES=0`。
+
+### 设计（v20.1）
+
+- Figma：`Capability Panel · 能力中心整改 v20.1`（page `169:2`）；预览
+  `docs/figma/preview/v20-01…07-*.png`（含 MCP 表单 / JSON 添加弹窗）。
+
 ### 新增
 
 - **派生继承（spawn-time snapshot）**：主对话可下拉选择 `派生继承会话`（默认）/
