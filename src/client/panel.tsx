@@ -959,7 +959,8 @@ function SkillsView({
         <div className="skp-list-pane">
           <div className="skp-list-head">
             <span className="skp-list-title" title={listTitle}>
-              {listTitle}
+              <span className="skp-list-title-scope">{scope === "global" ? "全局" : (projectName ?? "工作区")}</span>
+              <span className="skp-list-title-type">{scope === "global" ? " Skills" : " · Skills"}</span>
             </span>
             <span className="skp-group-count" title="当前作用域总数">
               {q.length > 0 ? `${visibleItems.length} / ${scopeTotal}` : scopeTotal}

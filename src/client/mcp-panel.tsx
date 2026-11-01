@@ -725,7 +725,8 @@ export function McpView({
         <div className="skp-list-pane">
           <div className="skp-list-head">
             <span className="skp-list-title" title={listTitle}>
-              {listTitle}
+              <span className="skp-list-title-scope">{scope === "global" ? "全局" : (projectName ?? "工作区")}</span>
+              <span className="skp-list-title-type">{scope === "global" ? " MCP" : " · MCP"}</span>
             </span>
             <span className="skp-group-count" title="当前作用域总数">
               {searching ? `${visibleProject.length + visibleGlobal.length} / ${scopeTotal}` : scopeTotal}
