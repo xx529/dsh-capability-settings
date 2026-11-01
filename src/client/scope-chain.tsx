@@ -60,9 +60,10 @@ export function ScopeChain({
   workspaces: ScopeChainWorkspace[];
   onSelectWorkspace(path: string): void;
 }) {
-  const [anchor, setAnchor] = useState<{ left: number; top: number; width: number } | null>(null);
+  const [anchor, setAnchor] = useState<{ left: number; top: number; width: number; maxHeight: number } | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const popRef = useRef<HTMLDivElement | null>(null);
   const open = anchor !== null;
 
   const toggle = () => {
@@ -74,8 +75,15 @@ export function ScopeChain({
     if (rect === undefined) return;
     const width = Math.max(280, Math.min(rect.width, 420));
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
-    const top = Math.min(rect.bottom + 6, window.innerHeight - 120);
-    setAnchor({ left, top, width });
+    // 下拉默认向下；下方空间不足且上方更宽裕时向上弹，并保证最大高度
+    // 严格落在视口内（工作区多时靠内部滚动，不能顶出屏幕）。
+    const spaceBelow = window.innerHeight - rect.bottom - 8;
+    const spaceAbove = rect.top - 8;
+    const openUp = spaceBelow < 220 && spaceAbove > spaceBelow;
+    const available = Math.max(120, openUp ? spaceAbove : spaceBelow);
+    const maxHeight = Math.min(360, available);
+    const top = openUp ? Math.max(8, rect.top - 6 - maxHeight) : rect.bottom + 6;
+    setAnchor({ left, top, width, maxHeight });
   };
 
   useEffect(() => {
@@ -89,15 +97,21 @@ export function ScopeChain({
       if (event.key === "Escape") setAnchor(null);
     };
     const closeOnViewportChange = () => setAnchor(null);
+    // 下拉列表自身滚动时保持打开（否则工作区一多就无法滚轮选择）；
+    // 页面/详情栏滚动、窗口缩放才关闭。
+    const onScroll = (event: Event) => {
+      if (popRef.current !== null && event.target instanceof Node && popRef.current.contains(event.target)) return;
+      setAnchor(null);
+    };
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("keydown", onKeyDown);
     window.addEventListener("resize", closeOnViewportChange);
-    window.addEventListener("scroll", closeOnViewportChange, true);
+    window.addEventListener("scroll", onScroll, true);
     return () => {
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("resize", closeOnViewportChange);
-      window.removeEventListener("scroll", closeOnViewportChange, true);
+      window.removeEventListener("scroll", onScroll, true);
     };
   }, [open]);
 
@@ -134,10 +148,11 @@ export function ScopeChain({
           </button>
           {open && anchor !== null && (
             <div
+              ref={popRef}
               className="skp-dd-pop skp-scope-chain-pop"
               role="listbox"
               aria-label="选择工作区"
-              style={{ left: anchor.left, top: anchor.top, width: anchor.width, maxHeight: 320 }}
+              style={{ left: anchor.left, top: anchor.top, width: anchor.width, maxHeight: anchor.maxHeight }}
             >
               <div className="skp-scope-chain-pop-head">选择工作区</div>
               {workspaces.length === 0 ? (

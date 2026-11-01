@@ -850,7 +850,7 @@ button.skp-dock-rail-fail:hover{filter:brightness(.9);}
 .skp-scope-chain-action:hover{border-color:var(--skp-accent);background:var(--skp-accent-soft);}
 .skp-scope-chain-action:focus-visible{outline:none;box-shadow:0 0 0 2px var(--skp-accent-soft);}
 /* 全局视图第二段：先选工作区，再切换（fixed 弹出层复用 .skp-dd-pop） */
-.skp-scope-chain-pop{padding:6px;}
+.skp-scope-chain-pop{padding:6px;overscroll-behavior:contain;}
 .skp-scope-chain-pop-head{padding:6px 10px 4px;font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--skp-text-3);}
 .skp-scope-chain-pop-empty{padding:14px 10px;font-size:12px;color:var(--skp-text-3);text-align:left;}
 .skp-scope-chain-pop .skp-dd-opt{width:100%;}
