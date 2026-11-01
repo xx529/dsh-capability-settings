@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-11-02
+
 ### 新增（v20.1 能力中心）
 
 - **能力面板重构为独立管理台**（与当前对话所在工作区解耦）：
@@ -89,14 +91,24 @@
 
 ### 文档
 
-- 新增 `docs/architecture/capability-packs.md`：「能力套装（Capability Pack）」设计提案。
-  定位为**用户级、只存引用、会话级生效的能力组合宏 + Jev 候选单元**，与宿主
-  `agentPreset`（整棵隔离插件树）和 DSH `bundle`（插件包）明确分层；数据只落
-  `id / title / description / members(kind+ref)`，默认 additive 快照、可撤销、成员漂移
-  可见；Jev 分两阶段接入（先结果聚合整包勾选，再作为 `kind:"pack"` 评分项且成员不折叠）。
-  含外部先例对照（Claude Code plugin / Codex profile / Gemini extension / Goose recipe /
-  Roo custom mode / Continue assistant / Cline workflow）、安全边界（不携带命令/凭据/
-  prompt 正文）与分期拆分。
+- 新增 `docs/architecture/capability-packs.md`：「能力套装（Capability Pack）」设计提案
+  （v4）。套装 = 一组能力的具名分组，`{id, title, description, members[]}`，
+  members 是 skill / mcp / tool（将来 prompt）的引用；**不持有会话状态**。要点：
+  - **两种来源同一概念**：`derived`（一个插件带来的整组能力，按
+    `src/shared/plugin-attribution.ts` 的三域同口径归因自动聚合，不落盘、随安装/卸载
+    出现与消失）+ `user`（用户手配，存
+    `~/.dsh/dsh-capability-settings/capability-packs.json`；另有 `hiddenDerived` 隐藏项）；
+  - 勾套装 = 逐个打开成员（additive，不动非成员）；取消 = 逐个关闭；成员可多归属，
+    勾多个套装 = 并集；会话里仍只记录成员自己的显式开关；
+  - 对 Jev 是一等候选单元（`kind:"pack"`）：被单一套装覆盖的成员折叠、多归属成员保留，
+    `dsh-to-figma` 由 3 条候选降为 1 条；客户端把勾选的 pack 展开成成员 id 后提交，
+    宿主 `jev.apply` 零改动；
+  - 归因是启发式的，漏网能力进「未归组」桶作为可见兜底；不可开关成员（agent 作用域
+    注入的 MCP）整组开关时跳过并提示；
+  - 硬不变量：pack 的 `title`/`description` 只进面板 UI 与 `jev.rank` 请求体，
+    不进 system prompt / 工具描述 / skills 列表，因此不触发 model-visible ⟺ logged；
+  - 含外部先例对照（Claude Code plugin / Codex profile / Gemini extension / Goose recipe /
+    Roo custom mode / Continue assistant / Cline workflow）与分期拆分。
 - 新增 `docs/architecture/mcp-resource-suppression.md`：记录「MCP 关闭后资源清单与
   资源工具残留」的完整拆解——四条能力通道、宿主 0.2.1-rc.3 源码依据（`dsh-mcp-resources`
   `layers.merge(scope)`/`request()`、`dsh-scope` 并集无删除、system-prompt scoped
