@@ -44,6 +44,8 @@
 
 ### 修复（v20.1 能力中心）
 
+- 全局视图作用域链第二段改为**先展开工作区下拉**，选中具体工作区后再切换；不再隐式跳到
+  最近/第一个工作区，避免用户不知道即将查看哪个工作区。
 - 修复普通注入行（`canToggleGlobal` 缺省 true）被 `readOnly` 误禁用；`canToggleGlobal=false`
   优先返回预设的 `globalToggleBlockedReason`。
 - 修复全局 Skills 开关 tooltip 中遗留的「技能」命名（统一 Skills）。

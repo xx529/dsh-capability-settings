@@ -92,8 +92,8 @@ Skills / MCP / Tools（Tools 以插件为单元），一次请求批量打 0–1
 - **添加**：落点由「当前 Tab × 当前作用域」直接确定，弹窗只填内容并显示写入路径
   （`~/.agents/skills`、`~/.agents/mcp.json`、`<工作区>/.agents/skills`、
   `<工作区>/.mcp.json`）；MCP 支持表单 + JSON 粘贴（逐条预览 新增/覆盖）。
-- **作用域链**：详情只显示「全局 → 工作区」两段；全局视图第二段是
-  「在「工作区」作用域查看 ↗」入口，不统计跨工作区覆盖数。
+- **作用域链**：详情只显示「全局 → 工作区」两段；全局视图第二段先展开**工作区下拉**，
+  选中具体工作区后才切换（不再隐式跳到最近/第一个工作区），也不统计跨工作区覆盖数。
 - **B2 全局默认（Skills）**：新增独立文件
   `<dshHome>/dsh-capability-settings/capability-global-overrides.json`
   （`version:1, skills[]`），**不改技能文件**；优先级

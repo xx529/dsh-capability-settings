@@ -37,6 +37,7 @@ import { summarizeEntry, transportOf, validateEntry } from "../mcp/entry-util.js
 import { sanitizeDescriptorText, formatMaskedArgs } from "../shared/descriptor-text.js";
 import type { McpScope, McpServerEntry } from "../mcp/types.js";
 import { Modal } from "./modal.js";
+import { ScopeChain } from "./scope-chain.js";
 import { ToolParameterTable, toolParameters } from "./tool-schema.js";
 import { SkpSelect } from "./select.js";
 import { hasWorkspaceLabel, useAsyncList } from "./panel-common.js";
@@ -425,12 +426,6 @@ export function McpView({
   const scope: "global" | "workspace" = workspace === undefined ? "global" : "workspace";
   const projectName =
     workspace === undefined ? undefined : (projects.find((project) => project.path === workspace)?.title ?? baseName(workspace));
-  /** 作用域链「在「工作区」作用域查看」的落点：记住最近一次工作区，缺省第一项。 */
-  const lastWorkspace = useRef<string | undefined>(workspace ?? projects[0]?.path);
-  useEffect(() => {
-    if (workspace !== undefined) lastWorkspace.current = workspace;
-  }, [workspace]);
-
   /**
    * 拉取 list + runtime（挂载时、作用域变化时自动执行，写操作后显式 reload）。
    * 不再拉 `mcp.status`：面板不展示某会话的挂载状态（契约 §3.6）。
@@ -610,16 +605,6 @@ export function McpView({
     setAddOpen(true);
   };
 
-  /** 作用域链第二段（全局视图）：切到「工作区」作用域查看真实覆盖。 */
-  const viewWorkspace = () => {
-    const target = lastWorkspace.current ?? projects[0]?.path;
-    if (target === undefined) {
-      setOpError("还没有已知工作区：请先在 DSH 里打开或添加一个工作区，再切换到工作区作用域。");
-      return;
-    }
-    onSelectWorkspace(target);
-  };
-
   /** 非空的服务器列表（组内滚动 + listbox 语义）。 */
   const renderServerScroll = (list: ClientMcpServer[], label: string) => (
     <div className="skp-group-scroll">
@@ -775,7 +760,8 @@ export function McpView({
               server={selectedExternal}
               scope={scope}
               projectName={projectName}
-              onViewWorkspace={viewWorkspace}
+              workspaces={projects}
+              onSelectWorkspace={onSelectWorkspace}
             />
           ) : selectedServer ? (
             <McpDetail
@@ -785,7 +771,8 @@ export function McpView({
               scope={scope}
               workspace={workspace}
               projectName={projectName}
-              onViewWorkspace={viewWorkspace}
+              workspaces={projects}
+              onSelectWorkspace={onSelectWorkspace}
               confirmingDelete={confirmDelete === rowId(selectedServer)}
               confirmingImport={confirmImport === rowId(selectedServer)}
               onEdit={() => setEditServer(selectedServer)}
@@ -911,60 +898,33 @@ function McpUsageSection({ api, serverName }: { api: McpApi; serverName: string 
 /**
  * MCP 详情的两段作用域链（全局 → 工作区，契约 §3.6：只到工作区）。
  *
- * 全局视图的第二段是入口（点击切到工作区视图）；工作区视图的第二段是真实
- * 状态。**不展示任何会话挂载状态**（挂载是会话级事实）。
+ * 全局视图的第二段先展开工作区下拉，选中后才切到该工作区；工作区视图的
+ * 第二段是真实状态。**不展示任何会话挂载状态**（挂载是会话级事实）。
  */
 function McpScopeChain({
   scope,
   projectName,
   globalSeg,
   workspaceSeg,
-  onViewWorkspace,
+  workspaces,
+  onSelectWorkspace,
 }: {
   scope: "global" | "workspace";
   projectName?: string;
   globalSeg: { on: boolean; title: string; note: string };
   workspaceSeg: { on: boolean; title: string; note: string };
-  onViewWorkspace(): void;
+  workspaces: Array<{ path: string; title?: string }>;
+  onSelectWorkspace(path: string): void;
 }) {
   return (
-    <div className="skp-scope-chain" aria-label="作用域链">
-      <div className="skp-scope-chain-seg">
-        <div className="skp-scope-chain-head">
-          <span className={globalSeg.on ? "skp-dot skp-dot-enabled" : "skp-dot skp-dot-hollow"} aria-hidden="true" />
-          <span className="skp-scope-chain-label">全局</span>
-        </div>
-        <div className="skp-scope-chain-title">{globalSeg.title}</div>
-        <div className="skp-scope-chain-note">{globalSeg.note}</div>
-      </div>
-      <span className="skp-scope-chain-arrow" aria-hidden="true">
-        →
-      </span>
-      {scope === "global" ? (
-        <button
-          type="button"
-          className="skp-scope-chain-seg skp-scope-chain-action"
-          title="切换到「工作区」作用域，查看该工作区的真实有效状态"
-          onClick={onViewWorkspace}
-        >
-          <div className="skp-scope-chain-head">
-            <span className="skp-dot skp-dot-partial" aria-hidden="true" />
-            <span className="skp-scope-chain-label">工作区覆盖</span>
-          </div>
-          <div className="skp-scope-chain-title">在「工作区」作用域查看 ↗</div>
-          <div className="skp-scope-chain-note">面板只管理到工作区 · 点击切到工作区视图</div>
-        </button>
-      ) : (
-        <div className="skp-scope-chain-seg">
-          <div className="skp-scope-chain-head">
-            <span className={workspaceSeg.on ? "skp-dot skp-dot-enabled" : "skp-dot skp-dot-hollow"} aria-hidden="true" />
-            <span className="skp-scope-chain-label">工作区 {projectName ?? "当前选择"}</span>
-          </div>
-          <div className="skp-scope-chain-title">{workspaceSeg.title}</div>
-          <div className="skp-scope-chain-note">{workspaceSeg.note}</div>
-        </div>
-      )}
-    </div>
+    <ScopeChain
+      scope={scope}
+      projectName={projectName}
+      globalSeg={globalSeg}
+      workspaceSeg={workspaceSeg}
+      workspaces={workspaces}
+      onSelectWorkspace={onSelectWorkspace}
+    />
   );
 }
 
@@ -981,13 +941,15 @@ function McpExternalDetail({
   server,
   scope,
   projectName,
-  onViewWorkspace,
+  workspaces,
+  onSelectWorkspace,
 }: {
   api: McpApi;
   server: ClientMcpRuntimeServer;
   scope: "global" | "workspace";
   projectName?: string;
-  onViewWorkspace(): void;
+  workspaces: Array<{ path: string; title?: string }>;
+  onSelectWorkspace(path: string): void;
 }) {
   const [toolsOpen, setToolsOpen] = useState(false);
   // 「使用记录」：宿主内存里的 MCP 工具调用记录（只读、不落盘），打开才拉取。
@@ -1022,7 +984,8 @@ function McpExternalDetail({
             ? "来源：工作区覆盖 · 可在列表行尾按工作区默认屏蔽"
             : "按作用域注入 · 无法按工作区默认屏蔽",
         }}
-        onViewWorkspace={onViewWorkspace}
+        workspaces={workspaces}
+        onSelectWorkspace={onSelectWorkspace}
       />
       {externalAttributionIsSpeculative(server) && (
         <div className="skp-note skp-note-warn">来源为推测，请核对工具清单</div>
@@ -1124,7 +1087,8 @@ function McpDetail({
   scope,
   workspace,
   projectName,
-  onViewWorkspace,
+  workspaces,
+  onSelectWorkspace,
   confirmingDelete,
   confirmingImport,
   onEdit,
@@ -1142,8 +1106,10 @@ function McpDetail({
   workspace?: string;
   /** 工作区展示名（HtDot 口径）。 */
   projectName?: string;
-  /** 全局视图作用域链第二段：切到工作区作用域。 */
-  onViewWorkspace(): void;
+  /** 全部工作区（全局视图作用域链第二段的下拉选项）。 */
+  workspaces: Array<{ path: string; title?: string }>;
+  /** 选中工作区后切换面板作用域。 */
+  onSelectWorkspace(path: string): void;
   confirmingDelete: boolean;
   confirmingImport: boolean;
   onEdit(): void;
@@ -1248,7 +1214,8 @@ function McpDetail({
         projectName={projectName}
         globalSeg={globalSeg}
         workspaceSeg={workspaceSeg}
-        onViewWorkspace={onViewWorkspace}
+        workspaces={workspaces}
+        onSelectWorkspace={onSelectWorkspace}
       />
       <div className="skp-detail-actions">
         {/* 配置级启用/禁用：只对**工作区条目**渲染（全局条目的全局默认开关在列表行尾）。 */}

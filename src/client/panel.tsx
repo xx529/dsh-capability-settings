@@ -42,6 +42,7 @@ import { McpView } from "./mcp-panel.js";
 import { ToolsView } from "./tools-panel.js";
 import { JevPanel } from "./jev-panel.js";
 import { Modal } from "./modal.js";
+import { ScopeChain } from "./scope-chain.js";
 import { SkpSelect } from "./select.js";
 import { isProjectSource, useAsyncList } from "./panel-common.js";
 import { SkillContent, skillRefOf } from "./skill-content.js";
@@ -591,12 +592,6 @@ function SkillsView({
   const [globalOverrides, setGlobalOverrides] = useState<ClientGlobalOverrides | undefined>(undefined);
   const [globalVersion, setGlobalVersion] = useState(0);
   const rowRefs = useRef(new Map<string, HTMLElement>());
-  /** 作用域链「在「工作区」作用域查看」的落点：记住最近一次工作区，缺省第一项。 */
-  const lastWorkspace = useRef<string | undefined>(workspace ?? projects[0]?.path);
-
-  useEffect(() => {
-    if (workspace !== undefined) lastWorkspace.current = workspace;
-  }, [workspace]);
 
   const scope: "global" | "workspace" = workspace === undefined ? "global" : "workspace";
   const workspaceSelected = scope === "workspace";
@@ -693,19 +688,6 @@ function SkillsView({
     if (element === undefined) return;
     element.focus();
     element.scrollIntoView({ block: "nearest" });
-  };
-
-  /**
-   * 作用域链第二段（全局视图）：切到「工作区」作用域查看真实覆盖。
-   * 没有已知工作区时给出说明（不静默失败）。
-   */
-  const viewWorkspace = () => {
-    const target = lastWorkspace.current ?? projects[0]?.path;
-    if (target === undefined) {
-      setOpError("还没有已知工作区：请先在 DSH 里打开或添加一个工作区，再切换到工作区作用域。");
-      return;
-    }
-    onSelectWorkspace(target);
   };
 
   /** 行内统一开关：按「当前作用域 × 行类型」分派（全部真实调用后端）。 */
@@ -1017,7 +999,8 @@ function SkillsView({
               scope={scope}
               workspace={workspace}
               projectName={projectName}
-              onViewWorkspace={viewWorkspace}
+              workspaces={projects}
+              onSelectWorkspace={onSelectWorkspace}
               contentVersion={contentVersion}
               onChanged={() => {
                 setContentVersion((value) => value + 1);
@@ -1070,7 +1053,8 @@ function SkillDetail({
   scope,
   workspace,
   projectName,
-  onViewWorkspace,
+  workspaces,
+  onSelectWorkspace,
   contentVersion,
   onChanged,
   onRemoved,
@@ -1083,8 +1067,10 @@ function SkillDetail({
   workspace?: string;
   /** 工作区展示名（HtDot 口径）。 */
   projectName?: string;
-  /** 全局视图作用域链第二段：切到工作区作用域。 */
-  onViewWorkspace: () => void;
+  /** 全部工作区（全局视图作用域链第二段的下拉选项）。 */
+  workspaces: Array<{ path: string; title?: string }>;
+  /** 选中工作区后切换面板作用域。 */
+  onSelectWorkspace(path: string): void;
   /** 父级写操作计数：变化时内容区清缓存重拉文件清单。 */
   contentVersion: number;
   /** 条目内容已变化（如启用/禁用/导入）：保留选中，重拉列表即可。 */
@@ -1334,44 +1320,15 @@ function SkillDetail({
         </div>
       )}
 
-      {/* v20.1：两段作用域链（全局 → 工作区）。会话级开关不进入本面板。 */}
-      <div className="skp-scope-chain" aria-label="作用域链">
-        <div className="skp-scope-chain-seg">
-          <div className="skp-scope-chain-head">
-            <span className={globalSegment.on ? "skp-dot skp-dot-enabled" : "skp-dot skp-dot-hollow"} aria-hidden="true" />
-            <span className="skp-scope-chain-label">全局</span>
-          </div>
-          <div className="skp-scope-chain-title">{globalSegment.title}</div>
-          <div className="skp-scope-chain-note">{globalSegment.note}</div>
-        </div>
-        <span className="skp-scope-chain-arrow" aria-hidden="true">
-          →
-        </span>
-        {scope === "global" ? (
-          <button
-            type="button"
-            className="skp-scope-chain-seg skp-scope-chain-action"
-            title="切换到「工作区」作用域，查看该工作区的真实有效状态"
-            onClick={onViewWorkspace}
-          >
-            <div className="skp-scope-chain-head">
-              <span className="skp-dot skp-dot-partial" aria-hidden="true" />
-              <span className="skp-scope-chain-label">工作区覆盖</span>
-            </div>
-            <div className="skp-scope-chain-title">在「工作区」作用域查看 ↗</div>
-            <div className="skp-scope-chain-note">面板只管理到工作区 · 点击切到工作区视图</div>
-          </button>
-        ) : (
-          <div className="skp-scope-chain-seg">
-            <div className="skp-scope-chain-head">
-              <span className={workspaceSegment.on ? "skp-dot skp-dot-enabled" : "skp-dot skp-dot-hollow"} aria-hidden="true" />
-              <span className="skp-scope-chain-label">工作区 {projectName ?? "当前选择"}</span>
-            </div>
-            <div className="skp-scope-chain-title">{workspaceSegment.title}</div>
-            <div className="skp-scope-chain-note">{workspaceSegment.note}</div>
-          </div>
-        )}
-      </div>
+      {/* v20.1：两段作用域链（全局 → 工作区）。全局视图先选工作区，再切换。 */}
+      <ScopeChain
+        scope={scope}
+        projectName={projectName}
+        globalSeg={globalSegment}
+        workspaceSeg={workspaceSegment}
+        workspaces={workspaces}
+        onSelectWorkspace={onSelectWorkspace}
+      />
 
       {!summary.readOnly && !injected && (
         <div className="skp-detail-actions">
