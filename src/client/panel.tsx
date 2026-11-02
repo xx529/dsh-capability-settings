@@ -1766,7 +1766,7 @@ const SkillListRow = memo(function SkillListRow({
             : "已禁用";
   // v21 UX 修订：全局视图行尾不再有单开关（默认按工作区在弹层里配）；
   // 工作区视图保留行尾默认开关（写本工作区覆盖）。
-  const switchLabel = `${projectName ?? "工作区"} 默认 · ${overrideState === "inherit" ? "跟随全局" : "已覆盖"}`;
+  const switchLabel = `默认 · ${overrideState === "inherit" ? "跟随全局" : "已覆盖"}`;
   return (
     <div
       role="option"

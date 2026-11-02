@@ -152,7 +152,7 @@ function McpServerRowImpl({
     ? "不可见 · 不参与默认"
     : scope === "global"
       ? "全局默认"
-      : `${projectName ?? "工作区"} 默认 · ${overrideState === "inherit" ? "跟随全局" : "已覆盖"}`;
+      : `默认 · ${overrideState === "inherit" ? "跟随全局" : "已覆盖"}`;
   /** 只有全局视图的全局条目能编辑可见性（项目原生 / 引用不参与）。 */
   const showVisibility = scope === "global" && isGlobal;
   return (
@@ -415,7 +415,7 @@ function McpExternalRowImpl({
     ? "不可见 · 不参与默认"
     : scope === "global"
       ? "全局默认"
-      : `${projectName ?? "工作区"} 默认 · ${overrideState === "inherit" ? "跟随全局" : "已覆盖"}`;
+      : `默认 · ${overrideState === "inherit" ? "跟随全局" : "已覆盖"}`;
   /** 行内状态标签：全局默认关闭 / 已覆盖全局默认 / 工作区默认关闭。 */
   const stateTag =
     scope === "global"
