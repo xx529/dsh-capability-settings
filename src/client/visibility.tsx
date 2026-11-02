@@ -382,8 +382,28 @@ export function VisibilityModal({
 }) {
   const [mode, setMode] = useState<ClientVisibilityMode>(visibilityModeOf(entry));
   const [edit, setEdit] = useState<Record<string, WorkspaceEditState>>(() => initEditState(entry, workspaces));
+  /** 打开时的初始快照（用于 dirty 判定；弹层生命周期内不变）。 */
+  const [initial] = useState(() => ({ mode: visibilityModeOf(entry), edit: initEditState(entry, workspaces) }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+
+  /**
+   * 状态规范化 key：与工作区顺序无关（按 workspaces 顺序遍历），等价映射即相等。
+   * mode=none 时可见性恒 false（与 buildWorkspaces 口径一致）。
+   */
+  const stateKey = (targetMode: ClientVisibilityMode, state: Record<string, WorkspaceEditState>): string =>
+    [
+      targetMode,
+      ...workspaces.map((workspace) => {
+        const item = state[workspace.path];
+        const visible = targetMode === "none" ? false : item?.visible === true;
+        const fallback = item?.defaultEnabled === undefined ? "-" : item.defaultEnabled ? "1" : "0";
+        return `${workspace.path}:${visible ? 1 : 0}:${fallback}`;
+      }),
+    ].join("|");
+
+  /** 有改动才允许保存（取消始终可用）。 */
+  const dirty = stateKey(mode, edit) !== stateKey(initial.mode, initial.edit);
 
   const setModeAndDefaults = (next: ClientVisibilityMode) => {
     setMode(next);
@@ -410,7 +430,6 @@ export function VisibilityModal({
    * - `visible` 恒写；
    * - `defaultEnabled` 只在「可见且用户显式设置过」时写（不可见 / 跟随兜底不落）；
    * - 不可见模式（none）各工作区 `{visible:false}`。
-   * 完整映射避免宿主增量合并歧义；`mode=all` 全可见时等价于「未配置」。
    */
   const buildWorkspaces = (): Record<string, ClientWorkspaceVisibility> => {
     const payload: Record<string, ClientWorkspaceVisibility> = {};
@@ -426,7 +445,8 @@ export function VisibilityModal({
   };
 
   const save = async () => {
-    if (saving) return;
+    // 无改动时禁用按钮兜底：即使被程序触发也不发 RPC。
+    if (saving || !dirty) return;
     setSaving(true);
     setError(undefined);
     try {
@@ -458,103 +478,114 @@ export function VisibilityModal({
   };
 
   return (
-    <Modal title={`可见范围 · ${name}`} onClose={onClose}>
-      <div className="skp-vis-modal">
-        <div className="skp-vis-mode-row">
-          <div className="skp-scope-seg" role="group" aria-label="可见范围">
-            {(
-              [
-                { value: "all", label: "全部" },
-                { value: "selected", label: "指定" },
-                { value: "none", label: "不可见" },
-              ] as Array<{ value: ClientVisibilityMode; label: string }>
-            ).map((segment) => (
-              <button
-                key={segment.value}
-                type="button"
-                className={mode === segment.value ? "skp-scope-seg-btn skp-scope-seg-btn-active" : "skp-scope-seg-btn"}
-                aria-pressed={mode === segment.value}
-                onClick={() => setModeAndDefaults(segment.value)}
-              >
-                {segment.label}
-              </button>
-            ))}
-          </div>
-          <button type="button" className="skp-link-btn" onClick={allVisible}>
-            全部工作区可见
-          </button>
-        </div>
-
-        <div className="skp-vis-modal-note">
-          {mode === "all"
-            ? "全部工作区可见；可单独隐藏某个工作区、或为每个工作区设默认开/关。新工作区默认可见、走兜底默认。"
-            : mode === "selected"
-              ? "仅勾选的工作区可见；新工作区默认不可见，需手动勾选。"
-              : "不可见：工作区列表 / 对话首屏都不出现，运行时强制关闭（会话开关不能打开）；旧覆盖保留不删。"}
-        </div>
-
-        {workspaces.length === 0 ? (
-          <div className="skp-note">还没有已知工作区；新建工作区后再来配置。</div>
-        ) : (
-          <div className="skp-vis-table" role="table" aria-label="各工作区可见性与默认">
-            <div className="skp-vis-table-head" role="row">
-              <span role="columnheader">工作区</span>
-              <span role="columnheader">可见</span>
-              <span role="columnheader">默认</span>
+    <Modal
+      title={`可见范围 · ${name}`}
+      onClose={onClose}
+      header={
+        <>
+          <div className="skp-vis-mode-row">
+            <div className="skp-scope-seg" role="group" aria-label="可见范围">
+              {(
+                [
+                  { value: "all", label: "全部" },
+                  { value: "selected", label: "指定" },
+                  { value: "none", label: "不可见" },
+                ] as Array<{ value: ClientVisibilityMode; label: string }>
+              ).map((segment) => (
+                <button
+                  key={segment.value}
+                  type="button"
+                  className={mode === segment.value ? "skp-scope-seg-btn skp-scope-seg-btn-active" : "skp-scope-seg-btn"}
+                  aria-pressed={mode === segment.value}
+                  onClick={() => setModeAndDefaults(segment.value)}
+                >
+                  {segment.label}
+                </button>
+              ))}
             </div>
-            {workspaces.map((workspace) => {
-              const item = edit[workspace.path] ?? { visible: false };
-              const visible = mode === "none" ? false : item.visible;
-              const defaultOn = item.defaultEnabled ?? !globalOff;
-              return (
-                <div key={workspace.path} className="skp-vis-table-row" role="row" title={workspace.path}>
-                  <span className="skp-vis-ws-name" role="cell">
-                    {visibilityWorkspaceTitle(workspace)}
-                  </span>
-                  <span role="cell">
-                    <label className="skp-vis-check">
-                      <input
-                        type="checkbox"
-                        checked={visible}
-                        disabled={mode === "none"}
-                        aria-label={`${visibilityWorkspaceTitle(workspace)} 可见`}
-                        onChange={(event) => setWorkspaceVisible(workspace.path, event.target.checked)}
-                      />
-                      <span>可见</span>
-                    </label>
-                  </span>
-                  <span role="cell">
-                    <label className="skp-row-toggle skp-vis-default-toggle" title="该工作区的默认开/关（工作区仍可覆盖）">
-                      <span className="skp-row-default-label">{defaultOn ? "默认开" : "默认关"}</span>
-                      <span className="skp-switch">
-                        <input
-                          type="checkbox"
-                          role="switch"
-                          aria-label={`${visibilityWorkspaceTitle(workspace)} 默认开启`}
-                          checked={defaultOn}
-                          disabled={mode === "none" || !visible || saving}
-                          onChange={(event) => setWorkspaceDefault(workspace.path, event.target.checked)}
-                        />
-                        <span className="skp-switch-track" />
-                      </span>
-                    </label>
-                  </span>
-                </div>
-              );
-            })}
+            <button type="button" className="skp-link-btn" onClick={allVisible}>
+              全部工作区可见
+            </button>
           </div>
-        )}
-
-        {error !== undefined && <div className="skp-error">{error}</div>}
-        <div className="skp-modal-actions">
-          <button type="button" className="skp-btn" onClick={onClose} disabled={saving}>
+          <div className="skp-vis-modal-note">
+            {mode === "all"
+              ? "全部工作区可见；可单独隐藏某个工作区、或为每个工作区设默认开/关。新工作区默认可见、走兜底默认。"
+              : mode === "selected"
+                ? "仅勾选的工作区可见；新工作区默认不可见，需手动勾选。"
+                : "不可见：工作区列表 / 对话首屏都不出现，运行时强制关闭（会话开关不能打开）；旧覆盖保留不删。"}
+          </div>
+          {error !== undefined && <div className="skp-error">{error}</div>}
+        </>
+      }
+      footer={
+        <>
+          <button type="button" className="skp-btn" onClick={onClose}>
             取消
           </button>
-          <button type="button" className="skp-btn skp-btn-primary" onClick={() => void save()} disabled={saving}>
+          <button
+            type="button"
+            className={dirty && !saving ? "skp-btn skp-btn-primary" : "skp-btn"}
+            disabled={saving || !dirty}
+            title={dirty ? "保存可见范围与每工作区默认" : "没有改动"}
+            onClick={() => void save()}
+          >
             {saving ? "保存中…" : "保存"}
           </button>
+        </>
+      }
+    >
+      {workspaces.length === 0 ? (
+        <div className="skp-note">还没有已知工作区；新建工作区后再来配置。</div>
+      ) : (
+        <div className="skp-vis-table" role="table" aria-label="各工作区可见性与默认">
+          <div className="skp-vis-table-head" role="row">
+            <span role="columnheader">工作区</span>
+            <span role="columnheader">可见</span>
+            <span role="columnheader">默认</span>
+          </div>
+          {workspaces.map((workspace) => {
+            const item = edit[workspace.path] ?? { visible: false };
+            const visible = mode === "none" ? false : item.visible;
+            const defaultOn = item.defaultEnabled ?? !globalOff;
+            return (
+              <div key={workspace.path} className="skp-vis-table-row" role="row" title={workspace.path}>
+                <span className="skp-vis-ws-name" role="cell">
+                  {visibilityWorkspaceTitle(workspace)}
+                </span>
+                <span role="cell">
+                  <label className="skp-vis-check">
+                    <input
+                      type="checkbox"
+                      checked={visible}
+                      disabled={mode === "none"}
+                      aria-label={`${visibilityWorkspaceTitle(workspace)} 可见`}
+                      onChange={(event) => setWorkspaceVisible(workspace.path, event.target.checked)}
+                    />
+                    <span>可见</span>
+                  </label>
+                </span>
+                <span role="cell">
+                  <label className="skp-row-toggle skp-vis-default-toggle" title="该工作区的默认开/关（工作区仍可覆盖）">
+                    <span className="skp-row-default-label">{defaultOn ? "默认开" : "默认关"}</span>
+                    <span className="skp-switch">
+                      <input
+                        type="checkbox"
+                        role="switch"
+                        aria-label={`${visibilityWorkspaceTitle(workspace)} 默认开启`}
+                        checked={defaultOn}
+                        disabled={mode === "none" || !visible || saving}
+                        onChange={(event) => setWorkspaceDefault(workspace.path, event.target.checked)}
+                      />
+                      <span className="skp-switch-track" />
+                    </span>
+                  </label>
+                </span>
+              </div>
+            );
+          })}
         </div>
-      </div>
+      )}
     </Modal>
   );
+
 }

@@ -202,6 +202,22 @@ export interface SkillSessionRegistry {
     dispose(): void;
 }
 /**
+ * 用全局快照补齐工作区视图漏掉的**注入行**（按 name 去重，工作区快照优先）。
+ *
+ * 只补 `injected === true` 且工作区结果里不存在的行：磁盘行 / 项目行 /
+ * `projectShadow` 判定 / `toggleable` 过滤语义完全不变。宿主 registry 在带
+ * cwd 的快照里可能丢掉某些全局注入技能（插件 / preset 注入），它们在全局视图
+ * 可见，工作区 / 会话列表也应可见。
+ *
+ * index.ts 的 `panelSkillRows(cwd)` 与 {@link SkillSessionRegistry.listView}
+ * 共用这一份去重逻辑（禁止两处各写一套）。
+ *
+ * @param rows 工作区快照合并后的行（磁盘 + 注入，可能缺全局注入技能）
+ * @param globalInjected 全局快照（cwd 缺省）的注入行
+ * @returns 去重后的行（按 name 排序；无新增时返回入参浅拷贝）
+ */
+export declare function supplementInjectedRows(rows: readonly SkillSummaryView[], globalInjected: readonly SkillSummaryView[]): SkillSummaryView[];
+/**
  * 构造会话级 Skills 开关注册表。
  *
  * 只做「簿记 + 注册/解除 + 项目默认投影」；磁盘/注入列表由 `skills/manager.ts`

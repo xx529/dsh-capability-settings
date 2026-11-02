@@ -256,6 +256,36 @@ function errMessage(error: unknown): string {
 }
 
 /**
+ * 用全局快照补齐工作区视图漏掉的**注入行**（按 name 去重，工作区快照优先）。
+ *
+ * 只补 `injected === true` 且工作区结果里不存在的行：磁盘行 / 项目行 /
+ * `projectShadow` 判定 / `toggleable` 过滤语义完全不变。宿主 registry 在带
+ * cwd 的快照里可能丢掉某些全局注入技能（插件 / preset 注入），它们在全局视图
+ * 可见，工作区 / 会话列表也应可见。
+ *
+ * index.ts 的 `panelSkillRows(cwd)` 与 {@link SkillSessionRegistry.listView}
+ * 共用这一份去重逻辑（禁止两处各写一套）。
+ *
+ * @param rows 工作区快照合并后的行（磁盘 + 注入，可能缺全局注入技能）
+ * @param globalInjected 全局快照（cwd 缺省）的注入行
+ * @returns 去重后的行（按 name 排序；无新增时返回入参浅拷贝）
+ */
+export function supplementInjectedRows(
+  rows: readonly SkillSummaryView[],
+  globalInjected: readonly SkillSummaryView[],
+): SkillSummaryView[] {
+  const names = new Set(rows.map((row) => row.name));
+  const extra: SkillSummaryView[] = [];
+  for (const row of globalInjected) {
+    if (row.injected !== true || names.has(row.name)) continue;
+    names.add(row.name);
+    extra.push(row);
+  }
+  if (extra.length === 0) return [...rows];
+  return [...rows, ...extra].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
  * 构造会话级 Skills 开关注册表。
  *
  * 只做「簿记 + 注册/解除 + 项目默认投影」；磁盘/注入列表由 `skills/manager.ts`
@@ -1060,6 +1090,28 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
           });
         } catch {
           injectedRows = [];
+        }
+        // v21 修复：工作区 / 会话作用域快照可能漏掉全局注入技能（插件 / preset
+        // 注入），再取一次**全局快照**（cwd/sessionId 都缺省）只补注入行；磁盘行、
+        // 项目行、shadow 行与后续 toggleable 过滤保持原样。
+        if (cwd !== undefined) {
+          try {
+            const globalInjected = await deps.registry.merge({
+              cwd: undefined,
+              sessionId: undefined,
+              diskRows,
+              projectDisabled: defaults.projectDisabled,
+            });
+            // 按「磁盘行 ∪ 工作区注入行」去重：同名磁盘行恒优先（与 registry.merge
+            // 的「同名磁盘行优先」契约一致），避免补全产生重复行。
+            const existing = new Set([...diskRows, ...injectedRows].map((row) => row.name));
+            injectedRows = supplementInjectedRows(
+              injectedRows,
+              globalInjected.filter((row) => !existing.has(row.name)),
+            );
+          } catch {
+            /* 防御性补全失败不影响主列表 */
+          }
         }
       }
 

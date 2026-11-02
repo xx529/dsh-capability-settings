@@ -26,7 +26,7 @@ import type {} from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/dsh-skill";
 
 import { createService } from "./skills/manager.js";
-import { createSkillSessionRegistry } from "./skills/session.js";
+import { createSkillSessionRegistry, supplementInjectedRows } from "./skills/session.js";
 import type { SessionSkillView, SkillSessionRegistry } from "./skills/session.js";
 import { createSkillRegistryBridge } from "./skills/registry.js";
 import type { SkillRegistryBridge } from "./skills/registry.js";
@@ -407,6 +407,14 @@ export function apply(ctx: any, config: Config = {}) {
     try {
       const injected = await skillsRegistry.merge({ cwd, diskRows, projectDisabled: defaults.projectDisabled });
       merged = [...diskRows, ...injected].sort((a, b) => a.name.localeCompare(b.name));
+      // v21 修复：工作区作用域快照可能漏掉全局注入技能（插件 / preset 注入），
+      // 再取一次全局快照（cwd=undefined）只补注入行，保证它们在每个工作区都出现。
+      if (cwd !== undefined) {
+        const globalInjected = await skillsRegistry
+          .merge({ cwd: undefined, diskRows, projectDisabled: defaults.projectDisabled })
+          .catch(() => [] as SkillSummaryView[]);
+        merged = supplementInjectedRows(merged, globalInjected);
+      }
     } catch {
       merged = diskRows;
     }

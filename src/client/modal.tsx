@@ -4,18 +4,50 @@
  * 供 Skills 安装（panel.tsx）与 MCP 添加（mcp-panel.tsx）等弹窗场景共用；
  * 样式见 styles.ts 的 `skp-modal-overlay` / `skp-modal`。
  *
+ * v21：支持可选 **固定头 / 固定底**（`header` / `footer`）——传入后弹层改为
+ * 「标题 + 固定头 + 内容滚动区 + 固定底栏」结构，底部按钮不随内容滚动；
+ * 不传时保持旧结构（整块内容滚动），既有弹窗行为不变。
+ *
  * @module dsh-capability-settings/client/modal
  */
 
 import type { ReactNode } from "react";
 
 /** 模态框外壳：标题 + 内容；点遮罩关闭（内容区点击已拦截）。 */
-export function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+export function Modal({
+  title,
+  children,
+  header,
+  footer,
+  onClose,
+}: {
+  title: string;
+  children: ReactNode;
+  /** 可选：固定头（不随内容滚动），如可见性弹层的模式分段 + 说明。 */
+  header?: ReactNode;
+  /** 可选：固定底栏（不随内容滚动），如「取消 / 保存」。传入后内容区独立滚动。 */
+  footer?: ReactNode;
+  onClose: () => void;
+}) {
+  const fixed = header !== undefined || footer !== undefined;
   return (
     <div className="skp-modal-overlay" onClick={onClose}>
-      <div className="skp-modal" role="dialog" aria-label={title} onClick={(e) => e.stopPropagation()}>
+      <div
+        className={fixed ? "skp-modal skp-modal-fixed" : "skp-modal"}
+        role="dialog"
+        aria-label={title}
+        onClick={(e) => e.stopPropagation()}
+      >
         <h3>{title}</h3>
-        {children}
+        {fixed ? (
+          <>
+            {header !== undefined && <div className="skp-modal-header">{header}</div>}
+            <div className="skp-modal-scroll">{children}</div>
+            {footer !== undefined && <div className="skp-modal-footer">{footer}</div>}
+          </>
+        ) : (
+          children
+        )}
       </div>
     </div>
   );

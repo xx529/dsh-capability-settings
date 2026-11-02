@@ -3,6 +3,22 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.10.1] - 2026-11-02
+
+### 修复
+
+- **工作区视图看不到插件注入的 Skills**：宿主 `skills.snapshot({ cwd })` 的工作区视图快照可能漏掉
+  部分全局注入技能（插件 / preset 注入），导致全局列表有、工作区列表没有。工作区列表现在会在
+  原有快照之外补一次 `{ cwd: undefined }` 全局快照的 `injected` 行（按 name 去重，磁盘行与工作区
+  行优先），`skills.list` / `skills.sessionList` 同一口径；不可见过滤、`hiddenCount`、shadow /
+  projectShadow 判定保持不变。
+- **可见性弹层**：底部「取消 / 保存」改为常驻弹层底部，不随工作区列表滚动；内容区独立滚动、
+  表头 sticky。**「保存」增加 dirty 态**：打开时无改动则置灰禁用（点击不发 RPC），修改任一工作区
+  可见性 / 默认开或关 / 切换模式后变为可用主色；取消始终可用。保存载荷仍是完整 `workspaces` 映射。
+- 自测：jsdom 11/11（footer 不在滚动容器内、初始保存禁用、无改动 0 RPC、改动后启用、还原后
+  重新禁用、完整载荷）；Chrome 无头 30 工作区实测滚动到底且 footer 位置固定（618.9 → 618.9）；
+  v21 UI 12/12、v20.2 UI 9/9、v21 host 36/36 无回归。
+
 ## [1.10.0] - 2026-11-02
 
 ### 新增（v21 能力可见性）
