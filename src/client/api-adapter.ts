@@ -692,7 +692,7 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
 
       /**
        * v20.1（B2）/ v20.2：切换全局默认开关（写 capability-global-overrides.json）。
-       * `domain` 与 `key` / `disabled` 原样透传（mcp 另走宿主的 loader 热应用）。
+       * `domain` 与 `key` / `disabled` 原样透传；只写配置，已有会话不受影响。
        */
       async globalToggle(input) {
         return unwrap(await rpc("overrides.globalToggle", input)) as { ok: true } | { ok: false; errors: string[] };

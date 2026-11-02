@@ -24,6 +24,11 @@ export interface VisibilityWorkspace {
 /** 空可见性集合（旧宿主 / v1 全局文件缺省）。 */
 export declare const EMPTY_VISIBILITY_SETS: ClientVisibilitySets;
 /**
+ * v21.2：可见性 / 每工作区默认的**生效范围**说明（用户要求确认语义）。
+ * 改动只影响新建对话；已有对话保持原状态（会话「能力」Tab 可单独调整）。
+ */
+export declare const VISIBILITY_EFFECT_NOTE = "\u53EF\u89C1\u6027\u4E0E\u9ED8\u8BA4\u6539\u52A8\u53EA\u5BF9\u65B0\u5EFA\u5BF9\u8BDD\u751F\u6548\uFF1B\u5DF2\u6709\u5BF9\u8BDD\u4FDD\u6301\u539F\u72B6\u6001\uFF0C\u53EF\u5728\u4F1A\u8BDD\u300C\u80FD\u529B\u300DTab \u5355\u72EC\u8C03\u6574";
+/**
  * 防御性读取全局层（旧宿主 / 测试夹具可能没有 `overrides.globalGet`）：
  * 失败返回 undefined，调用方按「全部可见 / 空名单」降级。
  */

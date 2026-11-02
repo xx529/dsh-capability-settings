@@ -41,6 +41,13 @@ export interface VisibilityWorkspace {
 export const EMPTY_VISIBILITY_SETS: ClientVisibilitySets = { skills: {}, mcp: {}, tools: {} };
 
 /**
+ * v21.2：可见性 / 每工作区默认的**生效范围**说明（用户要求确认语义）。
+ * 改动只影响新建对话；已有对话保持原状态（会话「能力」Tab 可单独调整）。
+ */
+export const VISIBILITY_EFFECT_NOTE =
+  "可见性与默认改动只对新建对话生效；已有对话保持原状态，可在会话「能力」Tab 单独调整";
+
+/**
  * 防御性读取全局层（旧宿主 / 测试夹具可能没有 `overrides.globalGet`）：
  * 失败返回 undefined，调用方按「全部可见 / 空名单」降级。
  */
@@ -313,6 +320,7 @@ export function VisibilityDetailFields({
             编辑可见范围
           </button>
         </div>
+        <div className="skp-vis-tip">{VISIBILITY_EFFECT_NOTE}</div>
         {open && (
           <VisibilityModal
             api={api}
@@ -541,6 +549,7 @@ export function VisibilityModal({
         header={
           <>
             <div className="skp-vis-modal-note">{headerNote}</div>
+            <div className="skp-vis-tip">{VISIBILITY_EFFECT_NOTE}</div>
             {error !== undefined && <div className="skp-error">{error}</div>}
           </>
         }

@@ -131,6 +131,11 @@ Skills / MCP / Tools（Tools 以插件为单元），一次请求批量打 0–1
   `session-capabilities.json`。
 - **项目自己的条目不做可见性**：`.mcp.json` 原生条目、项目技能、项目引用归项目在
   工作区内管理；全局可见性只约束「全局能力对工作区的暴露」。
+- **生效时机（v1.10.3）**：全局默认 / 每工作区默认 / 可见性改动**只对新建对话生效**；
+  已有对话保持创建时的冻结基线（某个对话正在使用 A skill 时，全局关掉 A 不会影响它）；
+  要影响当前对话，请用会话「能力」Tab 的会话级开关（只作用于该对话）。
+- **Skills 详情**：展示 frontmatter 内容——名称 / 描述 / 使用时机（触发规则）/
+  模型与用户调用策略 / `metadata`（key-value，嵌套用 JSON）+ 可折叠的原始 YAML。
 - 存储：全局文件升 v2（`tools` 名单 + `visibility{skills,mcp,tools}`：`mode` +
   每工作区 `visible/defaultEnabled`），旧 v1 读取即「全部可见」；`tools-global.json`
   继续作为 Tools 兜底默认只读合并，新写入统一进全局文件。

@@ -25,6 +25,11 @@
  *      热更新 / 全局默认切换时 reconcile 进去。
  *
  * 优先级：**会话显式开关 > 工作区覆盖 > 全局默认**（显式开可以覆盖默认关）。
+ *
+ * **默认快照冻结（v21.2）**：默认 / 可见性 / 项目覆盖的变更**只影响新建会话**。
+ * 会话创建时（首次投影）把当时的有效默认快照冻结到 `record.capabilities` /
+ * `record.projectDefaults`；之后写盘不再传播到该会话（`reconcileProject` 只重放
+ * 冻结快照）。会话级显式开关仍按 `explicit` 即时生效。
  * `enabledInSession` 以**实际注册状态**为准（不只看意图），并且 register 之后
  * 会 read-after 校验胜者确实是本插件的 shadow，消灭「UI 已禁用、实际仍可见」
  * 的假成功。
@@ -192,7 +197,13 @@ export interface SkillSessionRegistry {
     sessionId: string;
     entries: ReadonlyArray<SessionSkillBatchEntry>;
   }): Promise<SessionSkillBatchResult>;
-  /** 项目默认变更后，对同项目的全部 live 会话增量 reconcile。 */
+  /**
+   * 对同项目的 live 会话重放**已冻结**的默认投影（幂等）。
+   *
+   * v21.2 起默认 / 可见性变更只影响新会话，因此本方法不再读取新配置：已冻结的
+   * 会话保持创建时快照（本方法基本是 no-op，仅用于重试 pending / 解除旧 shadow 等
+   * 自愈路径）；组合根已不再在默认写盘后调用它。
+   */
   reconcileProject(cwd?: string): Promise<SessionSkillOpResult>;
   /** 本会话被关闭的 skill 名（只读快照，测试/诊断用）。 */
   sessionState(sessionId: string): string[];
@@ -227,10 +238,23 @@ interface SessionRecord {
   /** 本项目默认禁用名单（最近一次读取的快照；B2 起 = 有效默认 = 全局 ∪ 项目 − 项目启用）。 */
   projectDefaults: Set<string>;
   /**
-   * v21 能力默认快照（可见性 + 每工作区默认 + 项目三态）：最近一次读取的
-   * 名字 → 默认态。`desiredEnabled` 与列表投影都从这里取。
+   * v21 能力默认快照（可见性 + 每工作区默认 + 项目三态）：名字 → 默认态。
+   * `desiredEnabled` 与列表投影都从这里取。
    */
   capabilities: Map<string, CapabilityDefaults>;
+  /**
+   * v21.2：会话创建时冻结的默认值三层快照（全局默认 + 项目覆盖原始名单），
+   * 供列表行字段（如 effectiveDefaultEnabled）使用；冻结后不再读新配置。
+   */
+  skillDefaults?: SkillDefaultSets;
+  /**
+   * v21.2：默认快照是否已在会话创建时**冻结**。
+   *
+   * 语义：全局默认 / 可见性 / 项目覆盖的变更**只影响新建会话**；已存在的 live
+   * session 的 shadow 投影保持创建时的快照（创建后新出现的技能名首次遇到时惰性
+   * 补入一次）。会话级显式开关仍按 `explicit` 即时生效。
+   */
+  defaultsFrozen: boolean;
   /** 已尝试但尚未生效的名字（registry 未就绪/时序问题；下次读取重试）。 */
   projectPending: Set<string>;
   /**
@@ -353,6 +377,7 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
       explicitHydrated: false,
       projectDefaults: new Set(),
       capabilities: new Map(),
+      defaultsFrozen: false,
       projectPending: new Set(),
       defaultBlocked: new Set(),
       projectAttempts: new Map(),
@@ -438,6 +463,56 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
   /** 该名字当前是否对本工作区不可见（capability 缺省 = 可见）。 */
   function invisibleOf(record: SessionRecord, name: string): boolean {
     return record.capabilities.get(name)?.visible === false;
+  }
+
+  /**
+   * v21.2：取某技能在**本会话**的默认态（会话冻结快照优先）。
+   *
+   * - 已缓存（创建时解析过 / 之前遇到过）⇒ 原样返回，**不**重新读配置——
+   *   默认 / 可见性变更只影响新会话；
+   * - 创建后才出现的技能名：冻结后**不**再读配置，按「可见 + 默认开」处理
+   *   （创建时它没有被投影关闭，运行时应保持一致；新会话才会按新配置冻结）；
+   * - 更新 `record.projectDefaults` 的成员关系，保证 `desiredEnabled` 的 fallback
+   *   与该快照一致。
+   */
+  async function sessionCapabilityOf(record: SessionRecord, name: string): Promise<CapabilityDefaults | undefined> {
+    const cached = record.capabilities.get(name);
+    if (cached !== undefined) return cached;
+    // 已冻结的会话不读新配置：创建时没解析过的名字一律按「可见 + 默认开」处理
+    // （它们在创建时也确实没有被投影关闭），保证默认 / 可见性变更不影响已存在会话。
+    if (record.defaultsFrozen) return undefined;
+    const fetched = (await capabilityDefaultsOf([name], record.cwd)).get(name);
+    if (fetched !== undefined) {
+      record.capabilities.set(name, fetched);
+      if (fetched.effectiveDefaultEnabled) record.projectDefaults.delete(name);
+      else record.projectDefaults.add(name);
+    }
+    return fetched;
+  }
+
+  /** {@link sessionCapabilityOf} 的批量版（未缓存的名字一次读取）。 */
+  async function sessionCapabilitiesOf(
+    record: SessionRecord,
+    names: readonly string[],
+  ): Promise<Map<string, CapabilityDefaults>> {
+    const out = new Map<string, CapabilityDefaults>();
+    const missing: string[] = [];
+    for (const name of names) {
+      const cached = record.capabilities.get(name);
+      if (cached !== undefined) out.set(name, cached);
+      else missing.push(name);
+    }
+    // 已冻结：不读新配置，未缓存名字按「可见 + 默认开」处理（同上）。
+    if (missing.length > 0 && !record.defaultsFrozen) {
+      const fetched = await capabilityDefaultsOf(missing, record.cwd);
+      for (const [name, capability] of fetched) {
+        record.capabilities.set(name, capability);
+        if (capability.effectiveDefaultEnabled) record.projectDefaults.delete(name);
+        else record.projectDefaults.add(name);
+        out.set(name, capability);
+      }
+    }
+    return out;
   }
 
   /** 会话记录 → 落盘元数据（cwd 仅诊断、headerCreatedAt 防 id 复用）。 */
@@ -746,21 +821,36 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
     await hydrateExplicit(record);
     const registry = deps.registry;
     if (registry === undefined) return { ok: true };
-    // v21：禁用名单 = 旧有效默认关闭名单 ∪ 可见性 / 每工作区默认关掉的名字。
-    // 后者可能不在任何默认名单里（mode/selected、workspaces[ws].defaultEnabled=false），
-    // 所以先用 visibilityNames 发现，再批量取统一默认快照。
-    const legacyDisabled = preloadedDisabled ?? (await effectiveDisabledOf(record.cwd));
-    const visibilityNames = await visibilityNamesOf(record.cwd);
-    const namesToResolve = [...new Set([...legacyDisabled, ...visibilityNames])];
-    const capabilities = await capabilityDefaultsOf(namesToResolve, record.cwd);
-    record.capabilities = new Map(capabilities);
-    const disabled: string[] = [];
-    for (const name of namesToResolve) {
-      const capability = capabilities.get(name);
-      const isDisabled = capability !== undefined ? !capability.effectiveDefaultEnabled : legacyDisabled.includes(name);
-      if (isDisabled) disabled.push(name);
+    // v21.2：默认快照在**会话创建时冻结**（首次投影）。之后全局默认 / 可见性 /
+    // 项目覆盖变化不再影响本会话（只写配置、只影响新会话）；这里直接复用快照。
+    let disabled: string[];
+    if (record.defaultsFrozen) {
+      disabled = [...record.projectDefaults];
+    } else {
+      // v21：禁用名单 = 旧有效默认关闭名单 ∪ 可见性 / 每工作区默认关掉的名字。
+      // 后者可能不在任何默认名单里（mode/selected、workspaces[ws].defaultEnabled=false），
+      // 所以先用 visibilityNames 发现，再批量取统一默认快照。
+      const legacyDisabled = preloadedDisabled ?? (await effectiveDisabledOf(record.cwd));
+      const visibilityNames = await visibilityNamesOf(record.cwd);
+      const namesToResolve = [...new Set([...legacyDisabled, ...visibilityNames])];
+      const capabilities = await capabilityDefaultsOf(namesToResolve, record.cwd);
+      record.capabilities = new Map(capabilities);
+      disabled = [];
+      for (const name of namesToResolve) {
+        const capability = capabilities.get(name);
+        const isDisabled = capability !== undefined ? !capability.effectiveDefaultEnabled : legacyDisabled.includes(name);
+        if (isDisabled) disabled.push(name);
+      }
+      record.projectDefaults = new Set(disabled);
+      // 冻结原始三层快照：列表行 flags（globalDefaultDisabled / effectiveDefaultEnabled）
+      // 也使用创建时口径，避免配置变化后会话视图与运行时不一致。
+      try {
+        record.skillDefaults = await defaultsOf(record.cwd);
+      } catch {
+        record.skillDefaults = undefined;
+      }
+      record.defaultsFrozen = true;
     }
-    record.projectDefaults = new Set(disabled);
     // 常见路径：没有任何默认关闭、也没有待处理项、也没有显式会话开关
     // ⇒ 不必读 registry（显式开关也要走下面的恢复逻辑，不能提前返回）。
     if (
@@ -1061,7 +1151,9 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
     async listView(baseList, cwd, sessionId) {
       const record = sessionId !== undefined ? find(sessionId) : undefined;
       // 默认值三层快照（全局默认 + 工作区覆盖）；行字段与运行时投影共用同一口径。
-      const defaults = await defaultsOf(cwd);
+      // v21.2：live session 用创建时冻结的默认三层快照（不再读新配置）；冷会话
+      // （无 live agent）仍按当前配置投影，下次 resume 时在创建路径重新冻结。
+      const defaults = record?.skillDefaults ?? (await defaultsOf(cwd));
       const effectiveDisabled = effectiveDisabledSetOf(defaults);
       // 冷会话（agent 已释放）没有 record，但面板仍应显示落盘快照而不是默认全开。
       let persisted: Readonly<Record<string, boolean>> = {};
@@ -1145,8 +1237,19 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
       const allNames = toggleable.map((row) => row.name);
       if (record !== undefined) await restoreExplicit(record, new Set(allNames));
       // v21：批量取可见性 + 每工作区默认；工作区视图过滤不可见条目并计 hiddenCount。
+      // v21.2：live session 用**冻结快照**（全局默认/可见性变更不影响已存在会话的
+      // 展示与运行时；创建后新出现的名字惰性补入）；冷会话（无 live agent）仍按
+      // 当前配置投影（下次 resume 会在创建时重新冻结）。
       const workspaceCwd = record?.cwd ?? cwd;
-      const capabilities = await capabilityDefaultsOf(allNames, workspaceCwd);
+      // v21.2：live session 只用冻结快照里已解析的能力（未解析 = 创建时可见 + 默认开，
+      // 不再读新配置）；冷会话按当前配置投影（下次 resume 会在创建时重新冻结）。
+      const capabilities =
+        record !== undefined
+          ? new Map(allNames.flatMap((name) => {
+              const cached = record.capabilities.get(name);
+              return cached !== undefined ? [[name, cached]] : [];
+            }))
+          : await capabilityDefaultsOf(allNames, workspaceCwd);
       const workspaceView = workspaceCwd !== undefined;
       let hiddenCount = 0;
       const visibleRows = toggleable.filter((row) => {
@@ -1228,7 +1331,8 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
         return { ok: true };
       }
       // v21：不可见能力拒绝会话开关（用户须先在全局开启可见）。
-      const gateCapability = (await capabilityDefaultsOf([name], record.cwd)).get(name);
+      // v21.2：用**本会话冻结快照**判定（创建后全局改为不可见不影响已存在会话）。
+      const gateCapability = await sessionCapabilityOf(record, name);
       if (gateCapability !== undefined && !gateCapability.visible) {
         return { ok: false, errors: [INVISIBLE_CAPABILITY_ERROR] };
       }
@@ -1240,21 +1344,12 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
         // 无 registry 桥（旧装配）：保持旧的显式开关行为。
         return withQueue(record, async () => {
           await hydrateExplicit(record);
-          if (input.enabled === undefined) {
-            record.explicit.delete(name);
-            const effectiveDisabled = await effectiveDisabledOf(record.cwd);
-            record.projectDefaults = new Set(effectiveDisabled);
-          } else {
-            record.explicit.set(name, input.enabled === true);
-          }
-          const capability = (await capabilityDefaultsOf([name], record.cwd)).get(name);
+          if (input.enabled === undefined) record.explicit.delete(name);
+          else record.explicit.set(name, input.enabled === true);
+          // v21.2：默认 fallback 用会话冻结快照（不重新读配置）。
+          const capability = await sessionCapabilityOf(record, name);
           if (capability !== undefined && !capability.visible) {
             return { ok: false as const, errors: [INVISIBLE_CAPABILITY_ERROR] };
-          }
-          if (capability !== undefined) {
-            record.capabilities.set(name, capability);
-            if (capability.effectiveDefaultEnabled) record.projectDefaults.delete(name);
-            else record.projectDefaults.add(name);
           }
           const desired = desiredEnabled(record, name);
           const result = desired ? await releaseShadow(record, name) : await ensureShadow(record, name, record.explicit.get(name) !== false);
@@ -1269,17 +1364,10 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
 
       return withQueue(record, async () => {
         await hydrateExplicit(record);
-        // 刷新默认值快照（显式开关的 fallback 依赖它；v21 起含可见性 + 每工作区默认）。
-        const capability = (await capabilityDefaultsOf([name], record.cwd)).get(name);
+        // v21.2：默认 fallback 用**会话冻结快照**（默认/可见性变更只影响新会话）。
+        const capability = await sessionCapabilityOf(record, name);
         if (capability !== undefined && !capability.visible) {
           return { ok: false as const, errors: [INVISIBLE_CAPABILITY_ERROR] };
-        }
-        const effectiveDisabled = await effectiveDisabledOf(record.cwd);
-        record.projectDefaults = new Set(effectiveDisabled);
-        if (capability !== undefined) {
-          record.capabilities.set(name, capability);
-          if (capability.effectiveDefaultEnabled) record.projectDefaults.delete(name);
-          else record.projectDefaults.add(name);
         }
         const defaultEnabled = capability !== undefined ? capability.effectiveDefaultEnabled : !record.projectDefaults.has(name);
         const desired = input.enabled === undefined ? defaultEnabled : input.enabled === true;
@@ -1346,14 +1434,8 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
 
       return withQueue(record, async () => {
         await hydrateExplicit(record);
-        record.projectDefaults = new Set(await effectiveDisabledOf(record.cwd));
-        // v21：可见性 + 每工作区默认（整批一次批量读取）。
-        const capabilityMap = await capabilityDefaultsOf([...wanted.keys()], record.cwd);
-        for (const [capabilityName, capability] of capabilityMap) {
-          record.capabilities.set(capabilityName, capability);
-          if (capability.effectiveDefaultEnabled) record.projectDefaults.delete(capabilityName);
-          else record.projectDefaults.add(capabilityName);
-        }
+        // v21.2：默认 fallback 用**会话冻结快照**（未缓存的名字一次补入）。
+        const capabilityMap = await sessionCapabilitiesOf(record, [...wanted.keys()]);
         const registry = deps.registry;
         const agent = record.agent;
         const names = new Set(wanted.keys());

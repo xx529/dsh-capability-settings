@@ -19,6 +19,10 @@
  * 生命周期与 `mcp/loader.ts` 同构：`agent/created` 首轮应用、`agent/disposed`
  * 只清内存（磁盘留给重启恢复）、`tools/change` 微任务合并后重算。
  *
+ * **默认快照冻结（v21.2）**：全局默认 / 可见性 / 每工作区默认的变更**只影响新建
+ * 会话**。会话创建时把当时的默认快照冻结进 `record.defaults`；之后的重算
+ * （`tools/change` / 会话级开关）都用冻结快照，写盘不向 live agent 传播。
+ *
  * @module dsh-capability-settings/tools/manager
  */
 import type { CapabilityDefaults } from "../overrides/types.js";
@@ -108,18 +112,18 @@ export interface ToolsManager {
      */
     setSessionEnabled(input: unknown): Promise<ToolsSetSessionResult>;
     /**
-     * 设置**全局默认**（能力面板开关，所有会话；写 `tools-global.json`）。
+     * 设置**全局默认**（能力面板开关；v21.2 起只写配置，**只影响新建会话**）。
      *
-     * `{units, enabled}`；写成功后**异步扇出**到全部 live agent 重算 restrict
-     * （不等重算完成即返回，`tools.list` 读内存镜像即时反映新默认）。
-     * 会话首屏的开关仍走 {@link setSessionEnabled}（只写本会话覆盖）。
+     * `{units, enabled}`；写盘后只刷新内存镜像（供列表投影与新会话初始化），
+     * **不**对 live agent 重新 apply——默认变更不能改变已存在会话的 restrict。
+     * 会话首屏的开关仍走 {@link setSessionEnabled}（只写本会话覆盖，即时生效）。
      */
     setGlobalEnabled(input: unknown): Promise<ToolsSetGlobalResult>;
     /** 本会话的显式开关快照（诊断；键带 `plugin:` 前缀）。 */
     sessionToggleState(sessionId?: string): Record<string, boolean>;
     /**
-     * v21：可见性 / 每工作区默认变更后重新收敛（重读全局兜底 + 对所有 live agent
-     * 重新 apply；fire-and-forget 语义由调用方决定）。
+     * v21.2：可见性 / 每工作区默认写入后**只刷新内存镜像**（供列表投影 / 新建会话
+     * 初始化），不传播到已存在的 live session（默认 / 可见性只影响新会话）。
      */
     refreshFromVisibility(): Promise<void>;
     /** 卸载：移除生命周期监听、解除已应用的 restrict、清空内存状态。 */

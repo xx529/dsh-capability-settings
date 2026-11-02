@@ -139,6 +139,13 @@ interface SessionRecord {
   appliedDeny: string[];
   /** 本代需要屏蔽的全局 server（由配置解析得出，换代时重算）。 */
   restrictTargets: RestrictTarget[];
+  /**
+   * v21.2：创建时冻结的默认 / 可见性基线（首次 remount 时写入）。
+   *
+   * 之后默认 / 可见性写盘不再影响本会话；后续 remount（配置级 `disabled` 变更、
+   * 会话级开关）仍复用该基线，只重新读取**配置文件条目**本身。
+   */
+  defaultsSnapshot?: SessionDefaultsSnapshot;
   /** 降级 warning 只打一次，避免 tools/change 刷新刷屏。 */
   restrictWarned?: boolean;
   /**
@@ -170,6 +177,24 @@ interface SessionRecord {
   resourceFilterWarned?: boolean;
   /** 重挂队列：串行化 reload，避免与 agent 初始化交错。 */
   queue: Promise<void>;
+}
+
+/**
+ * v21.2：会话创建时**冻结**的默认 / 可见性基线。
+ *
+ * 默认关闭 / 可见性 / 每工作区默认的变更**只影响新建会话**；已存在 session 的
+ * remount（配置级 `disabled` 变更 / 会话级开关）不能把这些配置变化带进来，否则
+ * 「全局关掉 A 不影响正在用 A 的会话」就不成立。首次 remount 时快照，后续 remount
+ * 复用它；创建后新出现的候选名（新外部实例 / 新会话开关名）不在快照里，按
+ * **创建时的兜底名单**回退（可见 + 旧默认语义）。
+ */
+interface SessionDefaultsSnapshot {
+  /** 创建时的三层默认快照（`mcpDefaultSets`，旧口径）。 */
+  defaults: McpDefaultSets;
+  /** 创建时各候选 serverName 的可见性 + 每工作区默认（v21 统一入口）。 */
+  capabilities: Map<string, CapabilityDefaults>;
+  /** 创建时可见性里出现过的 serverName（未连上的外部实例也进候选）。 */
+  visibilityKeys: string[];
 }
 
 /** 挂载器对外接口：读状态 + 触发重挂。 */
@@ -210,12 +235,13 @@ export interface McpLoader {
   /** 读取前主动从磁盘恢复该 session 的显式开关（幂等；冷会话面板用）。 */
   hydrateSession(sessionId: string, meta?: { cwd?: string; headerCreatedAt?: number }): Promise<void>;
   /**
-   * 全局默认（`capability-global-overrides.json` 的 `mcp`）变更后的**热应用**：
-   * 不重挂任何 fiber，只对所有 live session 重新解析屏蔽目标 →
-   * `applyRestrictions` → `refreshPromptShadows`（逐 session 串行）。
+   * 重新解析所有 live session 的屏蔽目标（显式/诊断入口；**默认变更不再调用**）。
    *
-   * 由组合根在 `overrides.globalToggle` 写盘成功后调用（见 `index.ts`）。
-   * 单个 session 失败只 warn，最后 `Promise.allSettled`，不向调用方抛。
+   * v21.2 语义：全局默认 / 可见性的写盘**只影响新建会话**（新建时 `remount` 按文件
+   * 计算 plan）；组合根已不再在 `overrides.globalToggle` / `setVisibility` 后调用本
+   * 方法。保留它是为了让显式刷新（如诊断工具 / 将来"立即应用"选项）有入口；调用
+   * 方自行承担"会影响已存在会话"的后果。单个 session 失败只 warn，最后
+   * `Promise.allSettled`，不向调用方抛。
    */
   refreshRestrictions(): Promise<void>;
 }
@@ -580,13 +606,24 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
    *
    * 优先级：可见性 > 显式会话开关 > 工作区默认 > 配置里的 `disabled` 硬关闭。
    * 单个文件读失败只记 warn，不中断另一个文件。
+   *
+   * **v21.2 冻结基线**：传入 `snapshot` 时默认 / 可见性部分全部复用创建时的快照
+   * （只有配置文件条目本身重新读取），保证默认 / 可见性变更只影响新建会话。
+   *
+   * @param snapshot 会话创建时冻结的基线（undefined = 首次解析，返回新快照）
    */
-  async function resolveSessionPlan(cwd: string | undefined, sessionId?: string): Promise<{
+  async function resolveSessionPlan(
+    cwd: string | undefined,
+    sessionId?: string,
+    snapshot?: SessionDefaultsSnapshot,
+  ): Promise<{
     session: Array<{ key: string; entry: McpServerEntry }>;
     restrict: RestrictTarget[];
+    snapshot: SessionDefaultsSnapshot;
   }> {
     // 三层默认快照（无 cwd / 读取失败时降级为全空）。
-    const defaults = await resolveDefaultSets(cwd);
+    // v21.2：已冻结的会话复用创建时的 defaults，不读新的默认 / 可见性配置。
+    const defaults = snapshot?.defaults ?? (await resolveDefaultSets(cwd));
     // 项目层禁用（项目原生条目 / 引用的既有语义）：只看 projects.<根>.mcp。
     const disabledByProject = new Set(defaults.projectDisabled);
     // 全局层实例 / 外部注入实例的有效默认关闭（v20.2）。
@@ -685,7 +722,9 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
       if (!serverCandidates.has(serverName)) serverCandidates.set(serverName, serverName);
     }
     // 可见性里配置过、但当前还没注册工具的外部实例（连上后由 tools/change 收敛）。
-    for (const key of await resolveVisibilityServerNames()) {
+    // v21.2：已冻结的会话用创建时的可见性 key 快照（之后新增的可见性配置不影响它）。
+    const visibilityKeys = snapshot?.visibilityKeys ?? (await resolveVisibilityServerNames());
+    for (const key of visibilityKeys) {
       const serverName = sanitizeServerName(key);
       if (!serverCandidates.has(serverName)) serverCandidates.set(serverName, key);
     }
@@ -695,7 +734,17 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
       if (!serverCandidates.has(serverName)) serverCandidates.set(serverName, serverName);
     }
     // v21：可见性 + 每工作区默认（一次批量读取；旧管理器返回空 map ⇒ 回退 v20.2）。
-    const capabilityDefaults = await resolveCapabilityDefaults(cwd, [...serverCandidates.keys()]);
+    // v21.2：已冻结的会话只取创建时快照里有的候选（新出现的名字按旧兜底回退）。
+    let capabilityDefaults: Map<string, CapabilityDefaults>;
+    if (snapshot !== undefined) {
+      capabilityDefaults = new Map();
+      for (const serverName of serverCandidates.keys()) {
+        const cached = snapshot.capabilities.get(serverName);
+        if (cached !== undefined) capabilityDefaults.set(serverName, cached);
+      }
+    } else {
+      capabilityDefaults = await resolveCapabilityDefaults(cwd, [...serverCandidates.keys()]);
+    }
     /** 兜底全局默认关闭（旧口径；新入口缺该名字时用它回退）。 */
     const legacyDefaultDisabled = (serverName: string): boolean =>
       effectiveDisabled.some((item) => sanitizeServerName(item) === serverName);
@@ -719,7 +768,15 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
       const defaultEnabled = capability !== undefined ? capability.effectiveDefaultEnabled : !legacyDefaultDisabled(serverName);
       if (!defaultEnabled) restrict.set(key, { key, serverName });
     }
-    return { session, restrict: [...restrict.values()] };
+    return {
+      session,
+      restrict: [...restrict.values()],
+      snapshot: snapshot ?? {
+        defaults,
+        capabilities: new Map(capabilityDefaults),
+        visibilityKeys: [...visibilityKeys],
+      },
+    };
   }
 
   /**
@@ -1176,7 +1233,10 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
       // 上一代 fiber 并联释放（各 fiber 独立，失败不挡住新一代挂载）。
       await Promise.all(previous.map((fiber) => fiber.dispose().catch(() => undefined)));
       if (!enabled) return;
-      const plan = await resolveSessionPlan(record.cwd, record.agent?.id);
+      // v21.2：首次 remount 冻结默认 / 可见性基线；之后 remount（配置级变更 /
+      // 会话级开关）复用基线，不让默认 / 可见性变更影响已存在会话。
+      const plan = await resolveSessionPlan(record.cwd, record.agent?.id, record.defaultsSnapshot);
+      record.defaultsSnapshot ??= plan.snapshot;
       record.restrictTargets = plan.restrict;
       for (const { key, entry } of plan.session) {
         const config = toClientConfig(key, entry, record.projectRoot ?? record.cwd);
@@ -1408,10 +1468,12 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
   }
 
   /**
-   * 全局默认（`capability-global-overrides.json` 的 `mcp`）写入后的**热应用**。
+   * 重新解析所有 live session 的屏蔽目标（显式/诊断刷新；默认变更不再调用）。
    *
-   * 只重算「全局层实例 / 外部注入实例」的屏蔽目标，**不重挂任何 fiber**（共享
-   * 实例不卸载、项目层挂载不换代）：
+   * **v21.2 语义**：默认关闭 / 可见性只写配置、只影响新建会话（`remount` 时按
+   * 文件计算 plan），因此组合根不再在写盘后调用本方法，避免改变已存在会话的
+   * restrict / 指令段影子。实现细节：不重挂任何 fiber，只重算「全局层实例 /
+   * 外部注入实例」的屏蔽目标：
    *
    *   1. 逐 session 串行（各自 `record.queue`，与 remount 同一队列，避免交错）；
    *   2. `resolveSessionPlan` 重算 → 更新 `record.restrictTargets`；
@@ -1427,7 +1489,8 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
     for (const record of sessions.values()) {
       const run = record.queue.then(async () => {
         try {
-          const plan = await resolveSessionPlan(record.cwd, record.agent?.id);
+          const plan = await resolveSessionPlan(record.cwd, record.agent?.id, record.defaultsSnapshot);
+          record.defaultsSnapshot ??= plan.snapshot;
           record.restrictTargets = plan.restrict;
           applyRestrictions(record);
           refreshPromptShadows(record);

@@ -19,6 +19,10 @@
  * 生命周期与 `mcp/loader.ts` 同构：`agent/created` 首轮应用、`agent/disposed`
  * 只清内存（磁盘留给重启恢复）、`tools/change` 微任务合并后重算。
  *
+ * **默认快照冻结（v21.2）**：全局默认 / 可见性 / 每工作区默认的变更**只影响新建
+ * 会话**。会话创建时把当时的默认快照冻结进 `record.defaults`；之后的重算
+ * （`tools/change` / 会话级开关）都用冻结快照，写盘不向 live agent 传播。
+ *
  * @module dsh-capability-settings/tools/manager
  */
 
@@ -115,6 +119,19 @@ interface ToolsSessionRecord {
   queue: Promise<void>;
   /** 降级 warning 只打一次，避免 `tools/change` 刷新刷屏。 */
   restrictWarned?: boolean;
+  /**
+   * v21.2：本会话**创建时冻结**的默认快照（unit → 当时的默认态）。
+   *
+   * 语义：全局默认 / 可见性 / 每工作区默认的变更**只影响新会话**；已存在的
+   * live session 不能因为配置变化而改变 restrict。创建后新出现的 unit 首次
+   * 重算时惰性补入（取那一刻的配置，相当于它"加入会话"时的默认）。
+   */
+  defaults: Map<string, CapabilityDefaults>;
+  /**
+   * v21.2：旧装配（无 `capabilityDefaults` 注入）的全局兜底快照；与会话同时
+   * 冻结，避免 `tools-global.json` / 全局 `tools` 变更影响已存在会话。
+   */
+  globals?: Set<string>;
 }
 
 /** 构造依赖。 */
@@ -179,18 +196,18 @@ export interface ToolsManager {
    */
   setSessionEnabled(input: unknown): Promise<ToolsSetSessionResult>;
   /**
-   * 设置**全局默认**（能力面板开关，所有会话；写 `tools-global.json`）。
+   * 设置**全局默认**（能力面板开关；v21.2 起只写配置，**只影响新建会话**）。
    *
-   * `{units, enabled}`；写成功后**异步扇出**到全部 live agent 重算 restrict
-   * （不等重算完成即返回，`tools.list` 读内存镜像即时反映新默认）。
-   * 会话首屏的开关仍走 {@link setSessionEnabled}（只写本会话覆盖）。
+   * `{units, enabled}`；写盘后只刷新内存镜像（供列表投影与新会话初始化），
+   * **不**对 live agent 重新 apply——默认变更不能改变已存在会话的 restrict。
+   * 会话首屏的开关仍走 {@link setSessionEnabled}（只写本会话覆盖，即时生效）。
    */
   setGlobalEnabled(input: unknown): Promise<ToolsSetGlobalResult>;
   /** 本会话的显式开关快照（诊断；键带 `plugin:` 前缀）。 */
   sessionToggleState(sessionId?: string): Record<string, boolean>;
   /**
-   * v21：可见性 / 每工作区默认变更后重新收敛（重读全局兜底 + 对所有 live agent
-   * 重新 apply；fire-and-forget 语义由调用方决定）。
+   * v21.2：可见性 / 每工作区默认写入后**只刷新内存镜像**（供列表投影 / 新建会话
+   * 初始化），不传播到已存在的 live session（默认 / 可见性只影响新会话）。
    */
   refreshFromVisibility(): Promise<void>;
   /** 卸载：移除生命周期监听、解除已应用的 restrict、清空内存状态。 */
@@ -642,14 +659,17 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
    * 队列的异步挂载交错。幂等：名单与上一代完全一致时直接返回（`tools.restrict`
    * 自身也会触发 `tools/change`，这条短路是刷新路径不形成循环的关键）。
    */
-  function applyRecord(
-    record: ToolsSessionRecord,
-    enumeration: ToolsEnumeration,
-    defaults?: ReadonlyMap<string, CapabilityDefaults>,
-  ): void {
+  function applyRecord(record: ToolsSessionRecord, enumeration: ToolsEnumeration): void {
     const sessionId = typeof record.agent?.id === "string" ? record.agent.id : undefined;
     const toggles = sessionId !== undefined ? sessionToggles.get(sessionId) : undefined;
-    const { targets, targetTools } = computeTargets(toggles, enumeration, globalDisabled, defaults);
+    // v21.2：用**本会话创建时冻结的**默认快照，而非当前配置文件（默认 / 可见性
+    // 变更只影响新会话；会话级显式开关仍按 `toggles` 即时生效）。
+    const { targets, targetTools } = computeTargets(
+      toggles,
+      enumeration,
+      record.globals ?? new Set<string>(),
+      record.defaults,
+    );
     record.targets = targets;
     if (targets.length === 0) {
       if (record.restrictDisposers.length > 0 || record.restrictions.length > 0) releaseRestrictions(record);
@@ -679,7 +699,23 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
     }));
   }
 
-  /** 本 session 串行化重算：先补 hydration（会话覆盖 + 全局默认），再按当前视图应用 restrict。 */
+  /**
+   * v21.2：取本会话冻结的默认快照；创建后新出现的 unit 惰性补入（保留"只对新
+   * 会话生效"的语义，同时保证后来注册的工具也能按它加入会话时的默认被评估）。
+   *
+   * 冻结发生在**首次重算**（即 agent 创建时的初始化路径），之后配置变化不再影响
+   * 已存在会话。旧装配没有 `capabilityDefaults` 时，额外冻结当时的全局兜底镜像。
+   */
+  async function frozenDefaultsOf(record: ToolsSessionRecord, units: readonly string[]): Promise<void> {
+    const missing = units.filter((unit) => !record.defaults.has(unit));
+    if (missing.length > 0) {
+      const fetched = await capabilityDefaultsFor(record.cwd, missing);
+      for (const [unit, capability] of fetched) record.defaults.set(unit, capability);
+    }
+    if (record.globals === undefined) record.globals = new Set(globalDisabled);
+  }
+
+  /** 本 session 串行化重算：先补 hydration（会话覆盖 + 冻结默认），再按当前视图应用 restrict。 */
   function scheduleRefresh(record: ToolsSessionRecord): Promise<void> {
     const run = record.queue.then(async () => {
       if (disposed) return;
@@ -689,11 +725,11 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
         globalTools,
         deps.resolver?.resolveTool ?? ((name) => tableToolAttribution(name) ?? { matchedBy: "unknown", confidence: "low" }),
       );
-      const defaults = await capabilityDefaultsFor(
-        record.cwd,
+      await frozenDefaultsOf(
+        record,
         enumeration.units.map((unit) => unit.unit),
       );
-      applyRecord(record, enumeration, defaults);
+      applyRecord(record, enumeration);
     });
     record.queue = run.catch(() => undefined);
     return run;
@@ -721,32 +757,11 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
         const enumeration = enumerateGlobalTools(globalTools, deps.resolver?.resolveTool ?? ((name) => tableToolAttribution(name) ?? { matchedBy: "unknown", confidence: "low" }));
         const units = enumeration.units.map((unit) => unit.unit);
         for (const record of sessions.values()) {
-          const defaults = await capabilityDefaultsFor(record.cwd, units);
+          await frozenDefaultsOf(record, units);
           if (disposed) return;
-          applyRecord(record, enumeration, defaults);
+          applyRecord(record, enumeration);
         }
       })();
-    });
-  }
-
-  /**
-   * 全局默认变化后的**扇出**：所有 live agent 按新 effective 重算 restrict。
-   *
-   * fire-and-forget（微任务 + 每 session 自己的串行队列）：写 RPC 不等重算完成，
-   * 避免磁盘写 + N 个 agent 的 restrict 拖慢面板开关；`tools.list` 读内存镜像
-   * 即时反映新默认，重算随后按队列收敛（与 mcp/loader 的写入-重挂语义一致）。
-   */
-  function scheduleGlobalFanout(): void {
-    if (disposed) return;
-    queueMicrotask(() => {
-      if (disposed) return;
-      for (const record of sessions.values()) {
-        void scheduleRefresh(record).catch((error) => {
-          logger?.warn?.(
-            `capability-panel: 全局 Tools 默认扇出失败（session ${record.agent?.id}）：${errMessage(error)}`,
-          );
-        });
-      }
     });
   }
 
@@ -763,6 +778,7 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
       appliedDeny: [],
       restrictions: [],
       queue: Promise.resolve(),
+      defaults: new Map(),
     };
     sessions.set(agent.id, record);
     scheduleRefresh(record).catch((error) => {
@@ -808,10 +824,17 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
     if (sessionId !== undefined) await hydrateToggles(sessionId, metaOf(record));
     const toggles = sessionId !== undefined ? sessionToggles.get(sessionId) : undefined;
     // v21：可见性 + 每工作区默认（一次批量读取；旧装配返回空 map ⇒ 旧语义）。
-    const defaults = await capabilityDefaultsFor(
-      cwd ?? record?.cwd,
-      enumeration.units.map((unit) => unit.unit),
-    );
+    // v21.2：带 sessionId 的 live 会话用**冻结快照**展示（默认 / 可见性变更只影响
+    // 新会话；已存在会话的生效值保持创建时口径）；面板只读视图（无 sessionId）
+    // 仍按当前配置展示。
+    const unitIds = enumeration.units.map((unit) => unit.unit);
+    let defaults: Map<string, CapabilityDefaults>;
+    if (record !== undefined) {
+      await frozenDefaultsOf(record, unitIds);
+      defaults = record.defaults;
+    } else {
+      defaults = await capabilityDefaultsFor(cwd, unitIds);
+    }
     // 旧外壳（无 agent 级 restrict）→ 开关从一开始就置灰，不等用户点了才失败。
     let lockedReason: string | undefined;
     if (record !== undefined) {
@@ -955,7 +978,15 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
         payload.units.filter((unit): unit is string => typeof unit === "string" && unit.length > 0 && known.has(unit)),
       ),
     ];
-    const defaults = await capabilityDefaultsFor(record?.cwd, requestedUnits);
+    // v21.2：live 会话用冻结快照判定可见性（创建后的全局可见性变更不影响本会话，
+    // 会话级开关仍可正常写）；冷会话按当前配置。
+    let defaults: Map<string, CapabilityDefaults>;
+    if (record !== undefined) {
+      await frozenDefaultsOf(record, requestedUnits);
+      defaults = record.defaults;
+    } else {
+      defaults = await capabilityDefaultsFor(undefined, requestedUnits);
+    }
     const visibleUnits = new Set(requestedUnits.filter((unit) => defaults.get(unit)?.visible !== false));
     if (requestedUnits.length > 0 && visibleUnits.size === 0) {
       return { ok: false, errors: [INVISIBLE_CAPABILITY_ERROR] };
@@ -1007,15 +1038,16 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
   }
 
   /**
-   * `tools.setGlobalEnabled` 主体：设置**全局默认**（能力面板开关，所有会话）。
+   * `tools.setGlobalEnabled` 主体：设置**全局默认**（能力面板开关）。
    *
    * - 写 `tools-global.json`（`{version:1, disabled:string[]}`）：`enabled=false`
    *   加入 disabled、`true` 移出；幂等（无变化 `applied:0` 且不写盘）；
    * - 只接受当前枚举出的单元 id（客户端无法注入任意名字），兼容裸 unit 与
    *   `plugin:<unit>` 两种写法；
-   * - 写成功后刷新内存镜像并**异步扇出**到所有 live agent（不阻塞 RPC）；
-   *   新 agent 在 `agent/created` 时也会按 effective 应用；
-   * - 会话首屏的开关仍走 {@link setSessionEnabled}（只写会话覆盖，不动全局）。
+   * - **只写配置**（v21.2）：写成功后只刷新本管理器的内存镜像（供列表投影与
+   *   **新建会话**初始化使用），**不再扇出到 live agent**——默认变更只影响新会话，
+   *   已存在 session 的 restrict 不受影响；会话级开关仍走 {@link setSessionEnabled}
+   *   即时生效。
    */
   async function setGlobalEnabled(input: unknown): Promise<ToolsSetGlobalResult> {
     if (disposed) return { ok: false, errors: ["tools manager disposed"] };
@@ -1048,17 +1080,19 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
         ? await deps.writeGlobalDefaults(requested, payload.enabled)
         : await (store as ToolsGlobalStore).setEnabled(requested, payload.enabled);
     // 无论写盘成败都刷新内存镜像：store 在内存里已生效（本次运行内保持一致）。
+    // v21.2：**不扇出到 live agent**——默认变更只影响新建会话（agent/created 时
+    // 由 frozenDefaultsOf 取当时的配置），已存在的 session 保持创建时的快照。
     await refreshGlobal();
-    // 全局默认变了 ⇒ 所有 live agent 的 effective 可能变化 ⇒ 扇出重算（异步）。
-    scheduleGlobalFanout();
     return result.ok ? { ok: true, applied: result.applied } : result;
   }
 
   /**
-   * v21：可见性 / 每工作区默认变更后的重新收敛。
+   * v21.2：可见性 / 每工作区默认写入后的**内存镜像刷新**（不传播到 live 会话）。
    *
-   * 重读全局兜底（旧 ∪ 新名单）→ 扇出到所有 live agent 重算 restrict。
-   * fire-and-forget（微任务队列），不阻塞 `overrides.setVisibility` 的 RPC。
+   * 只重读全局兜底（旧 ∪ 新名单），供列表投影与**新建会话**的初始化使用；
+   * 按用户要求，默认 / 可见性变更**只影响新会话**，这里**不再**扇出到 live
+   * agent 重算 restrict（已存在 session 保持自己的冻结快照；会话级开关另行即时
+   * 生效）。组合根当前不再调用本方法，保留为显式/诊断入口。
    */
   async function refreshFromVisibility(): Promise<void> {
     if (disposed) return;
@@ -1068,8 +1102,6 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
     } catch (error) {
       logger?.warn?.(`capability-panel: 刷新 Tools 默认失败，按全部启用继续：${errMessage(error)}`);
     }
-    if (disposed) return;
-    scheduleGlobalFanout();
   }
 
   /** 本会话的显式开关快照（诊断；键带 `plugin:` 前缀）。 */

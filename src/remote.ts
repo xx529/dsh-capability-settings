@@ -135,7 +135,7 @@ export interface PanelRpcService {
     /**
      * 全局默认开关：`{domain:"skills"|"mcp"|"tools", key, disabled}` →
      * `{ok:true}` / `{ok:false, errors}`；写 `capability-global-overrides.json`。
-     * `mcp` / `tools` 域成功后会热应用（重算 restrict / 指令段影子，不重挂 fiber）。
+     * v21.2：**只写配置、只影响新建会话**（不向已存在 live 会话传播）。
      */
     globalToggle(input: unknown): Promise<unknown>;
     /**
@@ -149,6 +149,9 @@ export interface PanelRpcService {
      *   - `{ok:true}` / `{ok:true, retained:[工作区]}` / `{ok:true, cleared:[工作区]}`；
      *   - `{ok:false, code:"visibility-conflicts", conflicts:[{workspace,projectRoot}], errors}`
      *     —— 未传 `resolveConflicts` 且存在冲突时**不写盘**。
+     *
+     * v21.2：写盘成功后**不再对 live 会话热应用**（可见性只影响新建会话；会话级
+     * 显式开关仍即时生效）。
      */
     setVisibility(input: unknown): Promise<unknown>;
     /**
@@ -176,10 +179,10 @@ export interface PanelRpcService {
      */
     inspect(input: unknown): Promise<unknown>;
     /**
-     * 设置 **全局默认**（能力面板开关，所有会话；写 `tools-global.json` 并扇出）。
+     * 设置 **全局默认**（能力面板开关；v21.2 只写配置、只影响新建会话）。
      *
      * `{units, enabled}` → `{ok:true, applied}` / `{ok:false, errors}`；
-     * 会话首屏的开关仍走 `tools.setSessionEnabled`（只写本会话覆盖）。
+     * 会话首屏的开关仍走 `tools.setSessionEnabled`（只写本会话覆盖、即时生效）。
      */
     setGlobalEnabled(input: unknown): Promise<unknown>;
   };
@@ -308,7 +311,7 @@ export async function handleEndpoint(service: PanelRpcService, endpoint: string,
         // 懒加载工具 schema（完整 description + parameters）；业务失败在 value 内。
         return { ok: true, value: await service.tools.inspect(p) };
       case "tools.setGlobalEnabled":
-        // 全局默认（能力面板）：写 tools-global.json + 异步扇出；业务失败在 value 内。
+        // 全局默认（能力面板）：只写配置（不传播到 live 会话）；业务失败在 value 内。
         return { ok: true, value: await service.tools.setGlobalEnabled(p) };
       case "session.setBulk":
         // 三域批量：业务失败（缺 sessionId / 非法 action / 未知域名）也在 value 内。

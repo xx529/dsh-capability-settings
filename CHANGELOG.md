@@ -3,6 +3,30 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.10.3] - 2026-11-02
+
+### 变更
+
+- **默认 / 可见性只影响新建会话**：全局默认、每工作区默认与可见性写盘后不再对已存在的
+  session 做热应用（不再 reconcile / refreshRestrictions / 重新 apply）。三域在会话创建时
+  **冻结默认快照**：Skills（`skillDefaults` / `defaultsFrozen`）、Tools
+  （`record.defaults/globals` + `frozenDefaultsOf`）、MCP（`SessionDefaultsSnapshot`）；
+  之后的 `tools/change`、面板列表读取、会话级开关触发的 remount、配置级重挂都复用基线。
+  某个 session 正在使用 A skill 时，全局关闭 A 不会影响它；新建 session 才按新配置投影。
+  会话级显式开关仍即时、只影响当前 session。`mcp.setEnabled`（`mcp.json` 的 `disabled`
+  配置级硬关闭）仍允许重挂，属于配置启停而非默认。
+- **Skills 详情增加 frontmatter 展示**：名称、描述、使用时机（触发规则）、模型/用户调用
+  策略、`metadata`（key-value，嵌套 JSON 预览）以及可折叠的原始 YAML（只输出真实存在的
+  字段，不臆造未知键）；注入行读取失败静默降级。
+- 可见性弹层与详情补「只对新建对话生效；已有对话可在会话「能力」Tab 调整」说明。
+
+### 验证
+
+- 后端自测 4/4（Skills/Tools/MCP 写默认或可见性后已有 session 的 shadow/deny/restrict
+  不变；新建 session 按新配置；配置变更触发的 remount 仍用创建时基线）。
+- 前端 jsdom 9/9（详情 read/frontmatter 字段/YAML/空 metadata/注入行失败降级/两处提示文案）。
+- `npx tsc --noEmit`、`pnpm build` 通过；v21 host/UI、v20.2 UI 回归。
+
 ## [1.10.2] - 2026-11-02
 
 ### 变更

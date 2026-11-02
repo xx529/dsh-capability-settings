@@ -33,11 +33,11 @@
  * 回退到旧文件。首次 `toggle()` 会把旧内容并入统一存储并删除项目内旧文件
  * （之后旧文件不再生效，避免同一份声明两处维护）。
  *
- * `skills` 域对**磁盘技能与注入技能**都生效：磁盘技能靠 agent 作用域 runtime
- * shadow（与全局层投影片同一条机制），注入技能同样是 runtime shadow；由组合根在
- * 写盘成功后对同项目的 live 会话（全局层则对所有 live 会话）做增量 reconcile
- * （见 `index.ts` / `skills/session.ts`）。`mcp` 域的全局默认由组合根在写盘后
- * 调 `loader.refreshRestrictions()` 热应用（不重挂 fiber）。
+ * **写盘语义（v21.2）**：默认关闭 / 可见性**只写配置、只对新建会话生效**——
+ * 写盘后**不**对已存在的 live 会话做任何传播（不 reconcile / 不 refreshRestrictions /
+ * 不扇出）。会话级显式开关（`skills.setSessionEnabled`、`mcp.setSessionEnabled`、
+ * `tools.setSessionEnabled`）仍即时只作用于当前会话。新建会话在 `agent/created`
+ * 初始化路径按文件内容计算（skills 投影 / mcp remount / tools 冻结快照）。
  *
  * 无工作区（cwd 为 undefined）时不适用任何项目级禁用：`sets()` 返回全空
  * 快照，`toggle()` 直接报错；全局层不受工作区影响。

@@ -947,7 +947,8 @@ export interface OverridesApi {
      * 项目内旧声明（`.agents` / `.dsh` / `.claude`）只做兼容读取，首次写入时并入并删除。
      *
      * `domain` 取 `"skills"` 时只对注入技能生效（合法的 kebab-case 名）；
-     * 写盘成功后宿主会对同项目的 live 会话热应用（注册/解除会话 shadow）。
+     * 写盘只改配置：**已有会话不受影响**（创建时的默认已冻结），只对新建会话生效；
+     * 当前会话请用会话级开关（sessionCapabilities）。
      *
      * v20.2（`domain: "mcp"`）：宿主按 **B2 三态**落盘——`mcp`（关闭）/
      * `enabledMcp`（重新打开全局默认关闭项）二选一，优先级
@@ -982,8 +983,8 @@ export interface OverridesApi {
      *
      * - `domain: "skills"`：`disabled=true` = 全局默认关闭；`false` = 恢复默认启用。
      * - `domain: "mcp"`：写 `capability-global-overrides.json` 的 `mcp` 名单
-     *   （外部注入实例；`key` = bridge serverName），宿主写盘后热应用
-     *   `loader.refreshRestrictions()`（不卸载共享实例，只按 session 重新 restrict）。
+     *   （外部注入实例；`key` = bridge serverName）。只写配置：**只影响新建会话**，
+     *   已有会话保持创建时冻结的基线，不会被重新 restrict。
      * - v21 `domain: "tools"`：写 `tools` 名单（Tools 全局默认兜底；与
      *   `tools-global.json` 在宿主侧取并集）。
      */
@@ -1000,7 +1001,7 @@ export interface OverridesApi {
      *   合并歧义；未配置的工作区缺省 = 可见 / 走兜底默认）。
      *
      * 写 `capability-global-overrides.json` v2 的 `visibility.<domain>.<key>`；成功后
-     * 宿主对 live 会话 reconcile（mcp → `refreshRestrictions`；tools → 重新 apply）。
+     * 只写配置：默认/可见性变更**不热应用到已有会话**（新建会话才读取新配置）。
      */
     setVisibility(input: {
         domain: ClientCapabilityDomain;

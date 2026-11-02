@@ -134,12 +134,13 @@ export interface McpLoader {
         headerCreatedAt?: number;
     }): Promise<void>;
     /**
-     * 全局默认（`capability-global-overrides.json` 的 `mcp`）变更后的**热应用**：
-     * 不重挂任何 fiber，只对所有 live session 重新解析屏蔽目标 →
-     * `applyRestrictions` → `refreshPromptShadows`（逐 session 串行）。
+     * 重新解析所有 live session 的屏蔽目标（显式/诊断入口；**默认变更不再调用**）。
      *
-     * 由组合根在 `overrides.globalToggle` 写盘成功后调用（见 `index.ts`）。
-     * 单个 session 失败只 warn，最后 `Promise.allSettled`，不向调用方抛。
+     * v21.2 语义：全局默认 / 可见性的写盘**只影响新建会话**（新建时 `remount` 按文件
+     * 计算 plan）；组合根已不再在 `overrides.globalToggle` / `setVisibility` 后调用本
+     * 方法。保留它是为了让显式刷新（如诊断工具 / 将来"立即应用"选项）有入口；调用
+     * 方自行承担"会影响已存在会话"的后果。单个 session 失败只 warn，最后
+     * `Promise.allSettled`，不向调用方抛。
      */
     refreshRestrictions(): Promise<void>;
 }

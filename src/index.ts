@@ -36,7 +36,6 @@ import { createMcpManager } from "./mcp/manager.js";
 import { createMcpUsageLog, registerMcpUsageGuard } from "./mcp/usage.js";
 import { scanInjectedMcpInstances } from "./mcp/runtime.js";
 import { createOverridesManager } from "./overrides/manager.js";
-import type { OverrideToggleInput } from "./overrides/manager.js";
 import { createImportsManager } from "./imports/manager.js";
 import { createJevManager } from "./jev/manager.js";
 import { createSessionState } from "./session-state.js";
@@ -48,7 +47,6 @@ import type { ToolsManager } from "./tools/manager.js";
 import { createToolsGlobalStore } from "./tools/global-state.js";
 import { createSessionBulk } from "./session-bulk.js";
 import type { SessionBulk } from "./session-bulk.js";
-import { findProjectRoot } from "./shared/project-root.js";
 import { annotateSkillDefaults } from "./shared/skill-defaults.js";
 import { mountRpcChannel } from "./remote.js";
 
@@ -243,105 +241,22 @@ export function apply(ctx: any, config: Config = {}) {
     state: sessionState,
   });
   /**
-   * skills 域的项目默认热应用钩子：写盘成功后对同项目的 live 会话增量
-   * reconcile（注册/解除 agent 作用域 runtime shadow）。由组合根注入到
-   * `skillSessions` 的构造里（延迟求值，避免构造顺序耦合）。
+   * 默认关闭 / 可见性变更 = **只写配置，只对新建会话生效**（v21.2 用户要求）。
+   *
+   * 语义边界（不要回退成热应用）：
+   *
+   *   - **默认 / 可见性**（全局文件、项目 overrides 的默认三态）只在
+   *     `agent/created`（新建 / resume 后重建的会话）时由各域初始化路径读取：
+   *     mcp `remount`、skills `applyProjectDefaults`、tools `applyForAgent`；
+   *   - **已经存在的 live session 不受影响**：正在使用某能力时，全局把它关掉 /
+   *     设不可见，都不会改变该会话的挂载、restrict、runtime shadow、工具 deny；
+   *   - **会话级显式开关**（`setSessionEnabled` / `setBulk` / composer 开关）仍即时
+   *     只作用于当前会话（会话状态自己的事）。
+   *
+   * 因此这里**不再**包装 `toggle` / `globalToggle` / `setVisibility` 做 live 会话
+   * 传播：overrides 就是纯配置读写（写盘 + 返回结果）。
    */
-  const reconcileProjectRef: { current?: (cwd?: string) => Promise<{ ok: true } | { ok: false; errors: string[] }> } = {};
-  const overrides = {
-    ...overridesRaw,
-    toggle: async (input: OverrideToggleInput) => {
-      const result = await overridesRaw.toggle(input);
-      if (!result.ok) return result;
-      if (input.domain === "mcp" && input.cwd !== undefined) {
-        await loader.reload(findProjectRoot(input.cwd));
-      }
-      // tools（v21）：工作区默认变更后重读兜底并扇出到 live agent 重算 restrict。
-      if (input.domain === "tools") {
-        try {
-          await tools.refreshFromVisibility();
-        } catch (error) {
-          ctx.logger?.warn?.(`capability-panel: 工作区 Tools 默认已写入，但运行时刷新失败：${String(error)}`);
-        }
-        return result;
-      }
-      // skills：项目默认变更后热应用到同项目的 live 会话（无 live 会话时是 no-op，
-      // 新会话在 agent/created 时按文件内容应用）。逐名独立、失败不回滚文件。
-      if (input.domain === "skills" && input.cwd !== undefined && reconcileProjectRef.current !== undefined) {
-        return reconcileProjectRef.current(input.cwd);
-      }
-      return result;
-    },
-    /**
-     * 全局默认开关（B2 Skills / v20.2 MCP / v21 Tools）：写
-     * `capability-global-overrides.json` 后热应用到 live 会话。
-     *
-     * - `domain === "skills"`：对**所有** live 会话 reconcile（全局层对所有项目
-     *   生效）。逐名失败（preset 同层冲突）以 `{ok:false, errors}` 返回，绝不静默
-     *   把列表当已生效。
-     * - `domain === "mcp"`：`loader.refreshRestrictions()` 重算 restrict + 指令段
-     *   影子（不重挂 fiber，共享实例不卸载）。失败降级为 `{ok:true}`（文件已写入），
-     *   只 warn。
-     */
-    globalToggle: async (input: Parameters<typeof overridesRaw.globalToggle>[0]) => {
-      const result = await overridesRaw.globalToggle(input);
-      if (!result.ok) return result;
-      const domain = (input as { domain?: unknown } | null | undefined)?.domain;
-      if (domain === "mcp") {
-        try {
-          await loader.refreshRestrictions();
-        } catch (error) {
-          // 文件已写入：运行时投影失败不能把 RPC 判成失败（下次 tools/change /
-          // 重挂仍会收敛），只留 warning。
-          ctx.logger?.warn?.(`capability-panel: 全局 MCP 默认已写入，但运行时屏蔽刷新失败：${String(error)}`);
-        }
-        return result;
-      }
-      if (domain === "tools") {
-        try {
-          await tools.refreshFromVisibility();
-        } catch (error) {
-          ctx.logger?.warn?.(`capability-panel: 全局 Tools 默认已写入，但运行时刷新失败：${String(error)}`);
-        }
-        return result;
-      }
-      if (reconcileProjectRef.current === undefined) return result;
-      const reconciled = await reconcileProjectRef.current(undefined);
-      if (reconciled.ok) return reconciled;
-      // 文件已写入但运行时投影未完全生效（preset 同层等硬边界）：逐名报错，
-      // 并明确告知「文件已写入」，避免前端把失败误读成没落盘。
-      return { ok: false, errors: ["全局默认已写入文件，但以下运行时投影失败：", ...reconciled.errors] };
-    },
-    /**
-     * 写能力可见性（v21 `overrides.setVisibility`）：写全局文件 v2 的
-     * `visibility`，成功后**三域热应用**（写盘已成功时运行时投影失败只 warn，
-     * 不把 RPC 判成失败）：
-     *
-     *   - skills → `reconcileProject(undefined)`（全局可见性对所有工作区生效）；
-     *   - mcp → `loader.refreshRestrictions()`（restrict + 指令段影子）；
-     *   - tools → `tools.refreshFromVisibility()`（重读兜底 + 扇出重算 restrict）。
-     */
-    setVisibility: async (input: Parameters<typeof overridesRaw.setVisibility>[0]) => {
-      const result = await overridesRaw.setVisibility(input);
-      if (!result.ok) return result;
-      const domain = (input as { domain?: unknown } | null | undefined)?.domain;
-      try {
-        if (domain === "skills" && reconcileProjectRef.current !== undefined) {
-          const reconciled = await reconcileProjectRef.current(undefined);
-          if (!reconciled.ok) {
-            return { ok: false, errors: ["可见性已写入文件，但以下运行时投影失败：", ...reconciled.errors] };
-          }
-        } else if (domain === "mcp") {
-          await loader.refreshRestrictions();
-        } else if (domain === "tools") {
-          await tools.refreshFromVisibility();
-        }
-      } catch (error) {
-        ctx.logger?.warn?.(`capability-panel: 可见性已写入，但运行时投影失败：${String(error)}`);
-      }
-      return result;
-    },
-  };
+  const overrides = overridesRaw;
   // MCP 工具调用的内存使用记录（只读、不落盘）：通过 root 作用域的 tools.guard
   // 旁路记录 mcp__* 调用，供面板详情页的「使用记录」展示。disposer 随插件卸载。
   const mcpUsage = createMcpUsageLog();
@@ -391,7 +306,6 @@ export function apply(ctx: any, config: Config = {}) {
   });
   skillSessionsRef.current = skillSessions;
   deriveSkillSessionsRef.current = skillSessions;
-  reconcileProjectRef.current = (cwd?: string) => skillSessions.reconcileProject(cwd);
   /**
    * 面板 `skills.list` 的组合视图：受管磁盘行 + 宿主 registry 注入行。
    *

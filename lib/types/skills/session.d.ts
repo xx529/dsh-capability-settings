@@ -25,6 +25,11 @@
  *      热更新 / 全局默认切换时 reconcile 进去。
  *
  * 优先级：**会话显式开关 > 工作区覆盖 > 全局默认**（显式开可以覆盖默认关）。
+ *
+ * **默认快照冻结（v21.2）**：默认 / 可见性 / 项目覆盖的变更**只影响新建会话**。
+ * 会话创建时（首次投影）把当时的有效默认快照冻结到 `record.capabilities` /
+ * `record.projectDefaults`；之后写盘不再传播到该会话（`reconcileProject` 只重放
+ * 冻结快照）。会话级显式开关仍按 `explicit` 即时生效。
  * `enabledInSession` 以**实际注册状态**为准（不只看意图），并且 register 之后
  * 会 read-after 校验胜者确实是本插件的 shadow，消灭「UI 已禁用、实际仍可见」
  * 的假成功。
@@ -185,7 +190,13 @@ export interface SkillSessionRegistry {
         sessionId: string;
         entries: ReadonlyArray<SessionSkillBatchEntry>;
     }): Promise<SessionSkillBatchResult>;
-    /** 项目默认变更后，对同项目的全部 live 会话增量 reconcile。 */
+    /**
+     * 对同项目的 live 会话重放**已冻结**的默认投影（幂等）。
+     *
+     * v21.2 起默认 / 可见性变更只影响新会话，因此本方法不再读取新配置：已冻结的
+     * 会话保持创建时快照（本方法基本是 no-op，仅用于重试 pending / 解除旧 shadow 等
+     * 自愈路径）；组合根已不再在默认写盘后调用它。
+     */
     reconcileProject(cwd?: string): Promise<SessionSkillOpResult>;
     /** 本会话被关闭的 skill 名（只读快照，测试/诊断用）。 */
     sessionState(sessionId: string): string[];

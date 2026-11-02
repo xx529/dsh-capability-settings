@@ -42,6 +42,7 @@ import type {
   ClientCapabilityVisibility,
   ClientGlobalOverrides,
   ClientOverrides,
+  ClientSkillDetail,
   ClientSkillSummary,
   SkillFilePayload,
   SkillsApi,
@@ -487,6 +488,123 @@ function globalDefaultEnabledOf(item: ClientSkillSummary): boolean {
  * 工作区视图的开关勾选态 = **有效默认值**（契约 §1.3：全局默认 < 工作区显式）。
  * 优先用宿主投影的 `effectiveDefaultEnabled`；旧宿主按可见字段回退。
  */
+/** frontmatter YAML 的 key 是否需要引号（只处理保守集合）。 */
+function yamlKey(key: string): string {
+  return /^[A-Za-z_][A-Za-z0-9_-]*$/.test(key) ? key : JSON.stringify(key);
+}
+
+/**
+ * frontmatter YAML 值序列化：标量按 YAML 安全形式输出（数字/布尔/null 原样，
+ * 其余字符串按需加双引号）；对象 / 数组用 JSON flow 形式（JSON 是合法 YAML），
+ * **不做字段推断**——只输出 spec 里真实存在的值。
+ */
+function yamlScalar(value: unknown): string {
+  if (typeof value === "string") {
+    const plain = value.length > 0 && /^[A-Za-z0-9_][A-Za-z0-9_./-]*$/.test(value);
+    const reserved = /^(?:true|false|null|yes|no|on|off|~|\d+(?:\.\d+)?)$/i.test(value);
+    return plain && !reserved ? value : JSON.stringify(value);
+  }
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value === null || value === undefined) return "null";
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return JSON.stringify(String(value));
+  }
+}
+
+/**
+ * 由 `SkillSpec` 还原 frontmatter YAML（字段与磁盘 frontmatter 一一对应：
+ * name / description / whenToUse / 扁平 invocation 键 / metadata）。不臆造未知字段。
+ */
+function frontmatterYamlOf(spec: ClientSkillDetail["spec"]): string {
+  const lines: string[] = [`name: ${yamlScalar(spec.name)}`, `description: ${yamlScalar(spec.description)}`];
+  if (spec.whenToUse !== undefined && spec.whenToUse.trim().length > 0) {
+    lines.push(`whenToUse: ${yamlScalar(spec.whenToUse)}`);
+  }
+  const invocation = spec.invocation ?? {};
+  for (const key of ["disable-model-invocation", "user-invocable"] as const) {
+    if (invocation[key] !== undefined) lines.push(`${yamlKey(key)}: ${yamlScalar(invocation[key])}`);
+  }
+  const metadata = spec.metadata ?? {};
+  const metadataEntries = Object.entries(metadata);
+  if (metadataEntries.length > 0) {
+    lines.push("metadata:");
+    for (const [key, value] of metadataEntries) lines.push(`  ${yamlKey(key)}: ${yamlScalar(value)}`);
+  }
+  return lines.join("\n");
+}
+
+/** metadata 值展示：标量原样；对象 / 数组用紧凑 JSON（嵌套对象可读预览）。 */
+function metadataValueText(value: unknown): string {
+  if (value === null) return "null";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+/**
+ * 「Frontmatter / 触发规则」区块（Skills 详情）：
+ * 展示 read 拿到的 spec（名称 / 描述 / 使用时机 / 调用策略 / metadata），
+ * 并提供由 spec 生成的原始 frontmatter YAML 折叠块。样式沿用 `.skp-detail-*`。
+ */
+function SkillFrontmatterSection({ spec }: { spec: ClientSkillDetail["spec"] }) {
+  const metadataEntries = Object.entries(spec.metadata ?? {});
+  const modelInvocable = spec.invocation?.["disable-model-invocation"] !== true;
+  const userInvocable = spec.invocation?.["user-invocable"] !== false;
+  return (
+    <section className="skp-frontmatter" aria-label="Frontmatter / 触发规则">
+      <div className="skp-detail-inspect-head">
+        <span className="skp-field-label">Frontmatter / 触发规则</span>
+        <span className="skp-test-stat">来自 SKILL.md frontmatter · 只读</span>
+      </div>
+      <dl className="skp-frontmatter-fields">
+        <dt>名称</dt>
+        <dd>
+          <code>{spec.name}</code>
+        </dd>
+        <dt>描述</dt>
+        <dd>{spec.description.length > 0 ? spec.description : "—"}</dd>
+        {spec.whenToUse !== undefined && spec.whenToUse.trim().length > 0 && (
+          <>
+            <dt>使用时机 / 触发规则</dt>
+            <dd>{spec.whenToUse}</dd>
+          </>
+        )}
+        <dt>调用策略</dt>
+        <dd>
+          模型 {modelInvocable ? "✓" : "✗"} · 用户 {userInvocable ? "✓" : "✗"}
+        </dd>
+        {metadataEntries.length > 0 && (
+          <>
+            <dt>metadata</dt>
+            <dd>
+              <ul className="skp-frontmatter-meta">
+                {metadataEntries.map(([key, value]) => (
+                  <li key={key} className="skp-frontmatter-meta-row">
+                    <span className="skp-frontmatter-key">{key}</span>
+                    <span className="skp-frontmatter-value" title={metadataValueText(value)}>
+                      {metadataValueText(value)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </dd>
+          </>
+        )}
+      </dl>
+      <details className="skp-frontmatter-raw">
+        <summary>原始 frontmatter（YAML）</summary>
+        <pre className="skp-frontmatter-yaml">{frontmatterYamlOf(spec)}</pre>
+      </details>
+    </section>
+  );
+}
+
 function effectiveDefaultEnabledOf(item: ClientSkillSummary): boolean {
   if (item.effectiveDefaultEnabled !== undefined) return item.effectiveDefaultEnabled;
   if (item.projectDefaultEnabled === true) return true;
@@ -1216,6 +1334,28 @@ function SkillDetail({
   const [exportPathOpen, setExportPathOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  /**
+   * v21.2：详情 frontmatter（`skills.read` 的 spec：name/description/whenToUse/
+   * invocation/metadata）。读取失败或注入行 fallback 失败时静默降级（不渲染区块，
+   * 不阻塞详情）；写操作后随 contentVersion 重读。
+   */
+  const [frontmatter, setFrontmatter] = useState<ClientSkillDetail["spec"] | undefined>(undefined);
+
+  useEffect(() => {
+    let alive = true;
+    setFrontmatter(undefined);
+    void api
+      .read(summary.name, skillRefOf(summary))
+      .then((detail) => {
+        if (alive && detail !== undefined) setFrontmatter(detail.spec);
+      })
+      .catch(() => {
+        /* 静默降级：保留摘要行，不渲染 frontmatter 区块 */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [api, summary.name, summary.root, summary.source, contentVersion]);
 
   const isGlobal = isGlobalSkillSource(summary.source);
   const isProject = isProjectSource(summary.source);
@@ -1602,6 +1742,8 @@ function SkillDetail({
           </button>
         )}
       </div>
+
+      {frontmatter !== undefined && <SkillFrontmatterSection spec={frontmatter} />}
 
       {opError !== undefined && <div className="skp-error">{opError}</div>}
 
