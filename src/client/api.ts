@@ -444,8 +444,20 @@ export interface ClientMcpRuntimeServer {
   transport?: "stdio" | "http";
   /** 与配置条目同款的命令/URL 摘要。 */
   summary?: string;
-  /** 项目级「默认关闭」（overrides 声明）：新建对话默认不启用，可按当前对话覆盖。 */
+  /**
+   * **本工作区有效默认关闭**（v20.2 语义扩展）：全局默认关闭名单 ∪ 本工作区默认
+   * 关闭名单，再减去本工作区显式重新打开（`enabledMcp`）。命中时本工作区新建对话
+   * 默认不启用，可按当前对话覆盖。缺省 = false（旧宿主：仅项目级声明）。
+   */
   disabledInProject?: boolean;
+  /**
+   * v20.2：该实例在**全局默认关闭名单**里（独立文件
+   * `capability-global-overrides.json` 的 `mcp`）；**原始名单成员**，不含本工作区
+   * 是否重新打开的判断。全局视图的行尾开关直接读写这份名单；工作区视图与
+   * `disabledInProject` 组合区分「继承全局默认关闭」（两者皆 true）与
+   * 「已覆盖全局默认」（本字段 true、`disabledInProject` 缺省）。缺省 = false（旧宿主）。
+   */
+  disabledGlobally?: boolean;
   /** 能否按项目屏蔽（工具在全局注册表可见才可；agent 作用域注入的不可）。 */
   restrictable: boolean;
   /** 本会话的生效开关（传 sessionId 时才有；restrictable 才有意义）。 */
@@ -802,10 +814,15 @@ export interface ClientOverrides {
   projectRoot?: string;
 }
 
-/** v20.1（B2）：全局默认关闭层（独立文件 `capability-global-overrides.json`）。 */
+/** v20.1（B2）/ v20.2：全局默认关闭层（独立文件 `capability-global-overrides.json`）。 */
 export interface ClientGlobalOverrides {
   /** 全局默认关闭的 skill 名（空数组 = 全部默认启用）。 */
   skills: string[];
+  /**
+   * v20.2：全局默认关闭的 MCP serverName 列表（外部注入实例；空数组 = 全部默认启用）。
+   * 旧宿主缺失该字段 ⇒ 适配器按空数组投影。
+   */
+  mcp: string[];
   /** 文件绝对路径（UI 展示「开关只改这个文件」；旧宿主缺省）。 */
   filePath?: string;
   /**
@@ -827,8 +844,13 @@ export interface OverridesApi {
    *
    * `domain` 取 `"skills"` 时只对注入技能生效（合法的 kebab-case 名）；
    * 写盘成功后宿主会对同项目的 live 会话热应用（注册/解除会话 shadow）。
+   *
+   * v20.2（`domain: "mcp"`）：宿主按 **B2 三态**落盘——`mcp`（关闭）/
+   * `enabledMcp`（重新打开全局默认关闭项）二选一，优先级
+   * 全局默认 < 工作区显式 < 会话显式。面板显式传 `options.enabled`；不传时
+   * 翻转的是「有效默认」而不是 `mcp` 成员（旧调用方须注意）。
    */
-  toggle(domain: CapabilityDomain, key: string): Promise<OpResult>;
+  toggle(domain: CapabilityDomain, key: string, options?: { enabled?: boolean }): Promise<OpResult>;
   /**
    * v20.1（B2）：显式设置某个 skill 在**本项目**的默认启用/禁用（不是翻转）。
    *
@@ -843,11 +865,15 @@ export interface OverridesApi {
   /** v20.1（B2）：读取**全局默认关闭层**（独立文件，不修改技能文件本身）。 */
   globalGet(): Promise<ClientGlobalOverrides>;
   /**
-   * v20.1（B2）：切换某个 skill 的**全局默认**开关。
-   * `disabled=true` = 全局默认关闭；`false` = 恢复全局默认启用。
-   * 写 `capability-global-overrides.json`，不碰任何技能文件。
+   * v20.1（B2）/ v20.2：切换**全局默认**开关（独立文件，不改任何技能文件 /
+   * 注入方配置）。
+   *
+   * - `domain: "skills"`：`disabled=true` = 全局默认关闭；`false` = 恢复默认启用。
+   * - `domain: "mcp"`：写 `capability-global-overrides.json` 的 `mcp` 名单
+   *   （外部注入实例；`key` = bridge serverName），宿主写盘后热应用
+   *   `loader.refreshRestrictions()`（不卸载共享实例，只按 session 重新 restrict）。
    */
-  globalToggle(input: { domain: "skills"; key: string; disabled: boolean }): Promise<OpResult>;
+  globalToggle(input: { domain: "skills" | "mcp"; key: string; disabled: boolean }): Promise<OpResult>;
 }
 
 // ---------------------------------------------------------------------------

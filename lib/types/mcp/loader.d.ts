@@ -133,6 +133,15 @@ export interface McpLoader {
         cwd?: string;
         headerCreatedAt?: number;
     }): Promise<void>;
+    /**
+     * 全局默认（`capability-global-overrides.json` 的 `mcp`）变更后的**热应用**：
+     * 不重挂任何 fiber，只对所有 live session 重新解析屏蔽目标 →
+     * `applyRestrictions` → `refreshPromptShadows`（逐 session 串行）。
+     *
+     * 由组合根在 `overrides.globalToggle` 写盘成功后调用（见 `index.ts`）。
+     * 单个 session 失败只 warn，最后 `Promise.allSettled`，不向调用方抛。
+     */
+    refreshRestrictions(): Promise<void>;
 }
 /** 创建挂载器：注册 agent 生命周期监听 + 全局层首轮挂载 + 存量 agent 补挂。 */
 export declare function createMcpLoader(ctx: any, deps?: McpLoaderDeps): McpLoader;

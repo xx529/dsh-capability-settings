@@ -237,7 +237,11 @@ export interface McpRuntimeServerView {
     /** 与配置条目同款的摘要（命令/URL）。 */
     summary?: string;
     /**
-     * 本项目是否已被声明禁用（走项目级 overrides + `tools.restrict` 屏蔽其工具）。
+     * 本工作区的**有效默认关闭**（v20.2 语义扩展）：`(global.mcp ∪ project.mcp)
+     * \ project.enabledMcp` 里包含该实例，即新会话默认不启用它（单个会话仍可手动
+     * 打开）。项目原生条目（`.mcp.json` / 引用）的既有语义不变：只看
+     * `projects.<根>.mcp`，不受全局默认层影响。
+     *
      * 仅当该实例工具在**全局**注册表里可见（restrictable）时才有意义。
      */
     disabledInProject?: boolean;
@@ -252,6 +256,20 @@ export interface McpRuntimeServerView {
         description?: string;
         parameters?: Record<string, unknown>;
     }>;
+    /**
+     * 为 true 表示这个实例的名字在**全局默认关闭名单**里（`global.mcp`，
+     * `capability-global-overrides.json`；v20.2）。
+     *
+     * 纯原始名单成员判定，**不含**「本工作区已重新打开」的扣减（契约裁决
+     * 2026-11-02）：展示层需要用它和 {@link disabledInProject} 组合区分
+     * 「继承全局默认」与「已覆盖全局默认」——`disabledGlobally && !disabledInProject`
+     * ⇒ 本工作区用 `enabledMcp` 重新打开了；两者都 true ⇒ 继承全局默认关闭。
+     * 全局视图（`cwd` 缺省）下项目集合为空，等价于「名字在全局名单里」。
+     *
+     * 数据来自 `overrides.mcpDefaultSets()`；面板全局视图的外部注入行开关
+     * 显示/更新这个值（写 `capability-global-overrides.json`）。
+     */
+    disabledGlobally?: boolean;
     /** 本会话的生效开关（传 sessionId 时才有；`restrictable` 才有意义）。 */
     enabledInSession?: boolean;
     /** 本次运行被调用过的次数（来自内存使用记录；0 = 没调用过或不可见）。 */

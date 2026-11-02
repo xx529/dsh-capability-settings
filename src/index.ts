@@ -228,13 +228,30 @@ export function apply(ctx: any, config: Config = {}) {
       return result;
     },
     /**
-     * 全局默认开关（B2）：写 `capability-global-overrides.json` 后对**所有** live
-     * 会话 reconcile（全局层对所有项目生效）。逐名失败（preset 同层冲突）以
-     * `{ok:false, errors}` 返回，绝不静默把列表当已生效。
+     * 全局默认开关（B2 Skills / v20.2 MCP）：写 `capability-global-overrides.json`
+     * 后热应用到 live 会话。
+     *
+     * - `domain === "skills"`：对**所有** live 会话 reconcile（全局层对所有项目
+     *   生效）。逐名失败（preset 同层冲突）以 `{ok:false, errors}` 返回，绝不静默
+     *   把列表当已生效。
+     * - `domain === "mcp"`：`loader.refreshRestrictions()` 重算 restrict + 指令段
+     *   影子（不重挂 fiber，共享实例不卸载）。失败降级为 `{ok:true}`（文件已写入），
+     *   只 warn。
      */
     globalToggle: async (input: Parameters<typeof overridesRaw.globalToggle>[0]) => {
       const result = await overridesRaw.globalToggle(input);
       if (!result.ok) return result;
+      const domain = (input as { domain?: unknown } | null | undefined)?.domain;
+      if (domain === "mcp") {
+        try {
+          await loader.refreshRestrictions();
+        } catch (error) {
+          // 文件已写入：运行时投影失败不能把 RPC 判成失败（下次 tools/change /
+          // 重挂仍会收敛），只留 warning。
+          ctx.logger?.warn?.(`capability-panel: 全局 MCP 默认已写入，但运行时屏蔽刷新失败：${String(error)}`);
+        }
+        return result;
+      }
       if (reconcileProjectRef.current === undefined) return result;
       const reconciled = await reconcileProjectRef.current(undefined);
       if (reconciled.ok) return reconciled;
@@ -610,6 +627,12 @@ export {
   EMPTY_SKILL_DEFAULT_SETS,
 } from "./shared/skill-defaults.js";
 export type { SkillDefaultSets, SkillDefaultFlags } from "./shared/skill-defaults.js";
+export {
+  mcpDefaultSets,
+  emptyMcpDefaultSets,
+  mcpDefaultEnabled,
+} from "./shared/mcp-defaults.js";
+export type { McpDefaultSets } from "./shared/mcp-defaults.js";
 export { createSkill, updateSkill, removeSkill, readSkillDetail, cloneSkill, listSkillNames } from "./skills/crud.js";
 export { installFromPath, installFromFiles, exportToPath, exportSkillFiles } from "./skills/transfer.js";
 export { installFromUrl, fetchSkillFiles, classifySkillUrl } from "./skills/download.js";
@@ -635,6 +658,10 @@ export type { McpScope, McpServerEntry, McpServerView, McpListResult, McpStatusV
 export type {
   CapabilityDomain,
   CapabilityOverrides,
+  GlobalOverrideToggleInput,
+  GlobalOverrides,
+  GlobalOverridesFile,
+  GlobalOverridesView,
   OverridesProjectEntry,
   OverridesSet,
   OverridesStore,

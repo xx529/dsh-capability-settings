@@ -5,6 +5,38 @@
 
 ## [Unreleased]
 
+### 新增（v20.2 MCP 全局默认）
+
+- **MCP 也支持「全局默认关闭」**（此前只有 Skills 有 B2 全局默认层）：
+  - 独立文件 `<dshHome>/dsh-capability-settings/capability-global-overrides.json`
+    增加 `mcp: string[]`（运行时注入实例的 `serverName` 名单）；空名单不落盘该字段；
+    原子写 + 0600 + 文件锁，读校验与 `skills` 同策略。
+  - 优先级 **全局默认 < 工作区显式 < 会话显式**：工作区用项目 overrides 的
+    `enabledMcp` 重新打开，会话显式开关仍最高；有效默认
+    `(global.mcp ∪ project.mcp) \ project.enabledMcp`。
+  - 生效方式：不卸载共享实例、不改注入方配置，按会话 `tools.restrict` 屏蔽
+    `mcp__<serverName>__*` 工具 + 同名空文本系统提示词段遮蔽；全局默认写入后调用
+    新接口 `loader.refreshRestrictions()` 热应用（不重挂 fiber）。
+  - 全局默认**不作用于**项目原生条目（`.mcp.json`）与项目级引用（imports）——它们
+    仍只受项目 overrides / 引用自身 `disabled` 控制。配置级硬关闭（`mcp.json` 的
+    `disabled`）语义不变。
+- 面板「外部注入」组从「只读」改为**配置只读、默认开关可写**：全局视图写全局默认
+  名单，工作区视图写本工作区默认（可覆盖全局默认）；行内标签区分「全局默认关闭 /
+  已覆盖全局默认 / 工作区默认关闭」，组头按作用域提示写入落点。
+- 新宿主模块 `src/shared/mcp-defaults.ts`（三层默认纯计算，面板与 loader 共用）；
+  `src/mcp/config-file.ts` 导出 `isMcpServerName`（全局默认写的 key 校验）。
+
+### 变更（v20.2 MCP 全局默认）
+
+- `overrides.globalGet` 返回值新增 `mcp`；`overrides.globalToggle` 的 `domain` 扩为
+  `"skills" | "mcp"`；`overrides.get` 新增 `enabledMcp`。
+- `overrides.toggle` 的 `mcp` 域改为 B2 三态：显式 `enabled` 写 `mcp` / `enabledMcp`，
+  不传时**翻转有效默认**（旧调用方注意：不再是单纯翻转 `mcp` 成员）。
+- `mcp.runtime` 行新增 `disabledGlobally`（原始全局名单成员）与语义扩展后的
+  `disabledInProject`（本工作区有效默认关闭）；旧宿主缺省时面板按 feature-detect 回退。
+- 外部注入 MCP 详情文案从「只读」改为「配置只读，默认开关可写」，并补
+  「全局默认 / 本工作区」状态行；`restrictable=false` 时开关仍置灰并给宿主契约原因。
+
 ## [1.9.0] - 2026-11-02
 
 ### 新增（v20.1 能力中心）

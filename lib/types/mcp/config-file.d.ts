@@ -11,6 +11,15 @@
 import type { McpServerEntry } from "./types.js";
 export { summarizeEntry, transportOf, validateEntry } from "./entry-util.js";
 /**
+ * 判断一个名字是否符合桥接层 `serverName` 文法（`[A-Za-z0-9_-]{1,32}`）。
+ *
+ * 全局默认关闭名单（`capability-global-overrides.json` 的 `mcp`）只接受该
+ * 文法的名字：名单最终要按 `mcp__<serverName>__*` 去工具表里匹配，存进来
+ * 非法名字只会变成永远 skipped 的噪音；写路径显式拒绝、读路径原样保留
+ * （不替用户猜测改名）。
+ */
+export declare function isMcpServerName(value: string): boolean;
+/**
  * 读取一个 MCP 配置文件。
  *
  * - 文件缺失 → 空 map（不报错）；

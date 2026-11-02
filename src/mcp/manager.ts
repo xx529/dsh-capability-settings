@@ -10,6 +10,8 @@
 
 import { findProjectRoot } from "../shared/project-root.js";
 import { displayNameOfSource } from "../shared/plugin-attribution.js";
+import { mcpDefaultSets as mcpDefaultSetsOf } from "../shared/mcp-defaults.js";
+import type { McpDefaultSets } from "../shared/mcp-defaults.js";
 import { MCP_USAGE_VIEW_LIMIT, type McpRuntimeServerView, type McpRuntimeView, type McpUsageView } from "./types.js";
 import { parseMcpToolName, type McpUsageLog } from "./usage.js";
 import { withFileLock } from "../shared/file-lock.js";
@@ -68,6 +70,14 @@ export interface McpUpsertInput extends McpWriteInput {
 
 /** 写操作的结果：成功或带错误信息列表。 */
 export type McpOpResult = { ok: true } | { ok: false; errors: string[] };
+
+/** 全空 MCP 三层默认（无 overrides 管理器 / 读取失败时的降级值）。 */
+const EMPTY_DEFAULT_SETS: McpDefaultSets = {
+  globalDisabled: [],
+  projectDisabled: [],
+  projectEnabled: [],
+  effectiveDisabled: [],
+};
 
 /** 「测试」入参：面板表单里的**草稿**也能直接测（不必先保存）。 */
 export interface McpTestInput {
@@ -392,6 +402,28 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
   }
 
   /**
+   * 读 MCP 三层默认集合（v20.2）：优先 `overrides.mcpDefaultSets`（全局默认 ∪
+   * 工作区显式），兼容只实现 `sets()` 的旧注入管理器（那时没有全局默认层）。
+   * 任何失败降级为全空，不影响外部实例列表。
+   */
+  async function defaultSetsOf(cwd?: string): Promise<McpDefaultSets> {
+    if (overrides === undefined) return EMPTY_DEFAULT_SETS;
+    if (typeof overrides.mcpDefaultSets === "function") {
+      try {
+        return await overrides.mcpDefaultSets(cwd);
+      } catch {
+        return EMPTY_DEFAULT_SETS;
+      }
+    }
+    try {
+      const mcp = (await overrides.sets(cwd))?.mcp ?? [];
+      return mcpDefaultSetsOf({ globalDisabled: [], projectDisabled: mcp, projectEnabled: [] });
+    } catch {
+      return EMPTY_DEFAULT_SETS;
+    }
+  }
+
+  /**
    * **运行时注入**的 MCP 实例（只读）：不是本插件配置文件里的条目，而是其它插件或
    * profile 在运行时挂载的 mcp-client。
    *
@@ -402,7 +434,8 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
    *  3. 内存使用记录：补上只在 agent 作用域可见、或只被调用过的实例（并给出调用次数）。
    *
    * 本插件自己管理（或配置文件里声明过）的 serverName 一律排除；`cwd` 用于判断
-   * "本项目是否已禁用"（项目级 overrides）——外部实例的开关走的就是这条链路。
+   * 本工作区是否被默认关闭（v20.2 起为「有效默认」：全局默认 ∪ 项目默认 \
+   * 项目重新打开），外部实例的开关走的就是这条链路。
    */
   async function runtime(input?: { cwd?: string; sessionId?: string }): Promise<McpRuntimeView> {
     if (input?.sessionId !== undefined) {
@@ -419,8 +452,10 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
     } catch {
       /* 文件读失败不影响外部视图 */
     }
-    // 项目级「默认关闭」的键（overrides）——外部实例的默认开关也写在这里。
-    const disabledByProject = new Set<string>((await overrides?.sets(input?.cwd))?.mcp ?? []);
+    // 三层默认（v20.2）：全局默认关闭 / 工作区有效默认关闭。
+    const defaults = await defaultSetsOf(input?.cwd);
+    const globalDisabled = new Set(defaults.globalDisabled);
+    const effectiveDisabled = new Set(defaults.effectiveDisabled);
     // serverName → 视图（先放发现器给的来源/配置，随后用工具注册表补工具）。
     const groups = new Map<string, McpRuntimeServerView>();
     const ensure = (serverName: string, origin: McpRuntimeServerView["origin"]): McpRuntimeServerView => {
@@ -498,8 +533,14 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
     const toggles = loader.sessionToggleState?.(input?.sessionId) ?? {};
     for (const view of groups.values()) {
       view.restrictable = view.tools.length > 0;
-      const defaultEnabled = !disabledByProject.has(view.serverName);
+      // 全局默认关闭 = **原始**全局名单成员（不含本工作区重新打开的判断；cwd 缺省
+      // 时同一口径）。工作区视图据此与 disabledInProject 组合出「已覆盖全局默认」
+      // （disabledGlobally && !disabledInProject），见 types.ts 的字段注释。
+      if (globalDisabled.has(view.serverName)) view.disabledGlobally = true;
+      // 本工作区有效默认关闭：全局默认 ∪ 项目默认 \ 项目重新打开。
+      const defaultEnabled = !effectiveDisabled.has(view.serverName);
       if (!defaultEnabled) view.disabledInProject = true;
+      // 显式会话开关最高，其次跟随有效默认。
       const enabledInSession = Object.hasOwn(toggles, `server:${view.serverName}`)
         ? toggles[`server:${view.serverName}`]
         : defaultEnabled;

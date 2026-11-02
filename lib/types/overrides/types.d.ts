@@ -1,18 +1,20 @@
 /**
  * 默认关闭声明的共享类型（全局层 + 项目层）。
  *
- * **全局层（B2，v20.1 新增）**：`<dshHome>/dsh-capability-settings/capability-global-overrides.json`
+ * **全局层（B2，v20.1 新增 Skills；v20.2 新增 MCP）**：
+ * `<dshHome>/dsh-capability-settings/capability-global-overrides.json`
  *
  * ```jsonc
- * { "version": 1, "skills": ["foo", "bar"] }   // = 全局默认关闭名单；空数组不落盘字段
+ * { "version": 1, "skills": ["foo", "bar"], "mcp": ["figma"] }   // = 全局默认关闭名单；空数组不落盘字段
  * ```
  *
- * 用于「全局默认关闭某 Skill」，**不改技能文件**；工作区可以重新打开
- * （项目覆盖的 `enabledSkills`），会话显式开关仍最后覆盖。
+ * 用于「全局默认关闭某 Skill / 某 MCP server」，**不改技能文件、不改注入方配置**；
+ * 工作区可以重新打开（项目覆盖的 `enabledSkills` / `enabledMcp`），会话显式开关
+ * 仍最后覆盖。
  *
  * **项目层**：`<dshHome>/dsh-capability-settings/capability-overrides.json`
  * ——一个文件按**项目根**分 key，记录每个项目默认关闭的 MCP server / Skill，
- * 以及（B2）本项目显式重新打开的 Skill：
+ * 以及（B2）本项目显式重新打开的能力：
  *
  * ```jsonc
  * {
@@ -23,14 +25,16 @@
  *       "cwd": "/abs/path/to/project/sub",
  *       "mcp": ["github"],
  *       "skills": ["project-disabled"],        // 本项目关闭
- *       "enabledSkills": ["global-disabled"]   // 本项目重新打开（覆盖全局默认）
+ *       "enabledSkills": ["global-disabled"],  // 本项目重新打开（覆盖全局默认）
+ *       "enabledMcp": ["figma"]                // 本项目重新打开（覆盖全局默认，v20.2）
  *     }
  *   }
  * }
  * ```
  *
- * 同一名字同时出现在 `skills` 与 `enabledSkills` 时**禁用优先**（读取时规范化，
- * 见 `shared/skill-defaults.ts`；UI 不应产生这种数据）。
+ * 同一名字同时出现在 `skills` / `enabledSkills`（或 `mcp` / `enabledMcp`）时
+ * **禁用优先**（读取时规范化，见 `shared/skill-defaults.ts` /
+ * `shared/mcp-defaults.ts`；UI 不应产生这种数据）。
  *
  * 旧格式（项目内 `.agents/capability-overrides.json` 的 `{ mcp, skills }`）
  * 仍然兼容读取，并在首次写入统一存储时迁移删除；对应 {@link CapabilityOverrides}。
@@ -50,6 +54,11 @@ export interface CapabilityOverrides {
      * 旧文件一般没有该字段，读取时按缺省处理。
      */
     enabledSkills?: string[];
+    /**
+     * 被本项目显式重新打开的 MCP serverName 列表（v20.2；覆盖全局默认关闭）。
+     * 旧文件一般没有该字段，读取时按缺省处理。
+     */
+    enabledMcp?: string[];
 }
 /**
  * 一个能力域 → 该域的项目级清单（规范化后：去重、trim、排序）。
@@ -64,14 +73,17 @@ export interface OverridesDomainSet {
     skills: string[];
 }
 /**
- * 完整项目级声明（B2）：两域禁用清单 + 项目重新打开名单。
+ * 完整项目级声明（B2 / v20.2）：两域禁用清单 + 项目重新打开名单。
  *
- * `enabledSkills` 不属于 `CapabilityDomain` 的两域之一，所以显式展开而不是
- * 映射类型；该字段只在内部计算 / 写盘路径使用（不改变 `sets()` 的既有返回）。
+ * `enabledSkills` / `enabledMcp` 不属于 `CapabilityDomain` 的两域之一，所以显式
+ * 展开而不是映射类型；这两个字段只在内部计算 / 写盘路径使用（不改变 `sets()`
+ * 的既有返回）。
  */
 export interface OverridesSet extends OverridesDomainSet {
     /** 本项目显式重新打开的技能名（覆盖全局默认关闭）。 */
     enabledSkills: string[];
+    /** 本项目显式重新打开的 MCP serverName（覆盖全局默认关闭，v20.2）。 */
+    enabledMcp: string[];
 }
 /** 统一存储里一个项目的记录。 */
 export interface OverridesProjectEntry {
@@ -85,6 +97,8 @@ export interface OverridesProjectEntry {
     skills?: string[];
     /** 本项目显式重新打开的技能名（B2）。 */
     enabledSkills?: string[];
+    /** 本项目显式重新打开的 MCP serverName（v20.2）。 */
+    enabledMcp?: string[];
 }
 /** 统一存储文件的完整形状（`version: 1`）。 */
 export interface OverridesStore {
@@ -94,6 +108,10 @@ export interface OverridesStore {
 }
 /** 面板视角的完整禁用状态（attach 上声明文件的绝对路径）。 */
 export interface OverridesView extends OverridesDomainSet {
+    /** 本项目显式重新打开的技能名（B2；additive，`sets()` 形状不变）。 */
+    enabledSkills: string[];
+    /** 本项目显式重新打开的 MCP serverName（v20.2；additive）。 */
+    enabledMcp: string[];
     /** 统一存储文件绝对路径（无项目时缺省）。 */
     filePath?: string;
     /** 当前项目根（统一存储的 key；无项目时缺省）。 */
@@ -105,17 +123,21 @@ export interface GlobalOverridesFile {
     version: number;
     /** 全局默认关闭的技能名；空数组不落盘字段。 */
     skills?: string[];
+    /** 全局默认关闭的 MCP serverName（`[A-Za-z0-9_-]{1,32}`）；空数组不落盘字段。 */
+    mcp?: string[];
 }
 /** 全局覆盖的规范化内存形状。 */
 export interface GlobalOverrides {
     /** 全局默认关闭的技能名（去重 / trim / 排序后的快照）。 */
     skills: string[];
+    /** 全局默认关闭的 MCP serverName（去重 / trim / 排序后的快照）。 */
+    mcp: string[];
 }
 /**
  * `overrides.globalGet` 视图：规范化清单 + 文件绝对路径。
  *
- * `errors` 是**附加**字段（契约 §2.1 只要求 `skills` / `filePath`）：全局文件
- * 损坏时读路径降级为空清单，同时把可读错误挂在这里，面板可选择性展示。
+ * `errors` 是**附加**字段：全局文件损坏时读路径降级为空清单，同时把可读错误
+ * 挂在这里，面板可选择性展示。
  */
 export interface GlobalOverridesView extends GlobalOverrides {
     /** 全局覆盖文件绝对路径（缺失时也给出期望路径，便于排查）。 */
@@ -123,10 +145,10 @@ export interface GlobalOverridesView extends GlobalOverrides {
     /** 读路径降级原因（文件损坏 / 版本不认识）；缺失或正常时缺省。 */
     errors?: string[];
 }
-/** `overrides.globalToggle` 的入参（全局层目前只有 skills 域）。 */
+/** `overrides.globalToggle` 的入参（技能 / MCP 两个全局默认域）。 */
 export interface GlobalOverrideToggleInput {
-    domain: "skills";
-    /** 要切换默认关闭状态的技能名（kebab-case）。 */
+    domain: "skills" | "mcp";
+    /** 要切换默认关闭状态的技能名（kebab-case）或 MCP serverName。 */
     key: string;
     /** true = 加入全局默认关闭名单；false = 从名单移除（恢复默认开启）。 */
     disabled: boolean;

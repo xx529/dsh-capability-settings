@@ -158,6 +158,8 @@ export { readOverrides, writeOverrides, readOverridesStore, writeOverridesStore,
 export { readGlobalOverrides, writeGlobalOverrides, emptyGlobalOverrides, GLOBAL_OVERRIDES_VERSION } from "./overrides/global-file.js";
 export { skillDefaultSets, effectiveDisabledSkills, skillDefaultFlags, annotateSkillDefaults, EMPTY_SKILL_DEFAULT_SETS, } from "./shared/skill-defaults.js";
 export type { SkillDefaultSets, SkillDefaultFlags } from "./shared/skill-defaults.js";
+export { mcpDefaultSets, emptyMcpDefaultSets, mcpDefaultEnabled, } from "./shared/mcp-defaults.js";
+export type { McpDefaultSets } from "./shared/mcp-defaults.js";
 export { createSkill, updateSkill, removeSkill, readSkillDetail, cloneSkill, listSkillNames } from "./skills/crud.js";
 export { installFromPath, installFromFiles, exportToPath, exportSkillFiles } from "./skills/transfer.js";
 export { installFromUrl, fetchSkillFiles, classifySkillUrl } from "./skills/download.js";
@@ -170,7 +172,7 @@ export { globalMcpFile, projectMcpFile } from "./mcp/paths.js";
 export { readMcpFile, writeMcpFile, sanitizeServerName, toClientConfig, validateEntry } from "./mcp/config-file.js";
 export type { SkillSummaryView, SkillSpec, SkillFormat, WritableScope, InvocationPolicy, InjectedSkillFields, RegistryResourceBaseKind, SkillOrigin, SkillSource, } from "./skills/types.js";
 export type { McpScope, McpServerEntry, McpServerView, McpListResult, McpStatusView, McpMountState } from "./mcp/types.js";
-export type { CapabilityDomain, CapabilityOverrides, OverridesProjectEntry, OverridesSet, OverridesStore, OverridesView, } from "./overrides/types.js";
+export type { CapabilityDomain, CapabilityOverrides, GlobalOverrideToggleInput, GlobalOverrides, GlobalOverridesFile, GlobalOverridesView, OverridesProjectEntry, OverridesSet, OverridesStore, OverridesView, } from "./overrides/types.js";
 export type { OverridesManager } from "./overrides/manager.js";
 /**
  * Cordis 以 `module.default || module` 解析插件包。这里提供默认导出

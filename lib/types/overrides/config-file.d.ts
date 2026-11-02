@@ -11,8 +11,12 @@
  *
  * v20.1 B2：项目条目新增 `enabledSkills`（本项目显式重新打开的技能，覆盖全局
  * 默认关闭）；同一名字同时出现在 `skills` / `enabledSkills` 时**禁用优先**
- * （{@link normalizeOverridesSet} 读取与写盘两侧都强制）。全局层的
- * `capability-global-overrides.json` 在 `global-file.ts`，与本文件读写逻辑独立。
+ * （{@link normalizeOverridesSet} 读取与写盘两侧都强制）。
+ *
+ * v20.2：同一层扩到 MCP——项目条目新增 `enabledMcp`（本项目显式重新打开的
+ * serverName，覆盖全局默认关闭），`mcp` / `enabledMcp` 同样**禁用优先**。
+ * 全局层的 `capability-global-overrides.json` 在 `global-file.ts`，与本文件读写
+ * 逻辑独立。
  *
  * 写入原子（临时文件 + rename）、父目录按需创建；读取对"文件缺失 / 文件为空"
  * 宽容（视为空声明），对"JSON 非法 / 形状不符合预期 / 版本不认识"抛出带文件名的
@@ -25,14 +29,16 @@ import type { CapabilityDomain, OverridesSet, OverridesStore } from "./types.js"
 /** 能力域在声明文件里的键名（与 CapabilityDomain 一一对应）。 */
 export declare const DOMAIN_KEYS: readonly CapabilityDomain[];
 /**
- * 构造一份空的规范化声明（每个域都是空数组；`enabledSkills` 也是空）。
+ * 构造一份空的规范化声明（每个域都是空数组；`enabledSkills` / `enabledMcp`
+ * 也是空）。
  */
 export declare function emptyOverrides(): OverridesSet;
 /**
- * 规范化一份声明并强制「同一名字不同时出现在 skills / enabledSkills」。
+ * 规范化一份声明并强制「同一名字不同时出现在禁用 / 重新打开两个名单」。
  *
  * 契约 §1.2 的「禁用优先」在这里落地：`enabledSkills` 里与 `skills` 同名的
- * 条目被剔除（写读两侧都走本函数，保证磁盘上不会长期保留矛盾数据）。
+ * 条目、`enabledMcp` 里与 `mcp` 同名的条目都被剔除（写读两侧都走本函数，
+ * 保证磁盘上不会长期保留矛盾数据）。
  *
  * @param input 任意来源（磁盘 / 调用方）的清单
  * @returns 规范化后的声明（每域 trim、去重、排序）
@@ -61,6 +67,7 @@ export declare function normalizeList(values: unknown): string[];
  *   （手改文件写坏时显式暴露，而不是静默丢弃）；
  * - `enabledSkills`（B2）可选；旧文件没有该键时按空处理；与 `skills` 同时
  *   出现时禁用优先（{@link normalizeOverridesSet}）。
+ * - `enabledMcp`（v20.2）同上，与 `mcp` 同时出现时禁用优先。
  */
 export declare function readOverrides(filePath: string): Promise<OverridesSet>;
 /**
@@ -85,6 +92,6 @@ export declare function readOverridesStore(filePath: string): Promise<OverridesS
 /**
  * 原子写入统一存储（自动创建父目录）。
  *
- * 只写非空条目（三个名单都为空的项目直接省略），保持文件最小化。
+ * 只写非空条目（四个名单都为空的项目直接省略），保持文件最小化。
  */
 export declare function writeOverridesStore(filePath: string, store: OverridesStore): Promise<void>;

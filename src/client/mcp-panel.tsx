@@ -7,8 +7,9 @@
  * 「全局 MCP」/「HtDot · MCP」+ 计数 + 作用域提示 + 内联「＋ 添加 MCP」。
  *
  * - **全局作用域**：`~/.agents/mcp.json` 条目（行尾开关 = 全局默认，写配置
- *   文件 `disabled`），「外部注入」（其它插件 / profile 在运行时挂载的
- *   mcp-client）作为第二组只读展示，开关禁用并显示原因（全局视图不改配置）；
+ *   文件 `disabled`）；「外部注入」（其它插件 / profile 在运行时挂载的
+ *   mcp-client）作为第二组，**配置只读、默认开关可写**：全局视图写独立文件
+ *   `capability-global-overrides.json` 的 `mcp` 名单（不改注入方配置、不卸载实例）；
  * - **工作区作用域**：该工作区 `.mcp.json` 条目 + 引用的全局配置；行尾开关 =
  *   该工作区的默认（写项目 overrides，仅此工作区生效）；
  * - 按契约 §3.6：**不展示某会话的挂载状态**；连接健康以详情「查看工具与参数」
@@ -182,8 +183,15 @@ function McpServerRow({
 }
 
 /**
- * 一条「外部注入」实例行：只读，同样有行尾「默认」开关（能否按项目屏蔽由
- * `restrictable` 决定；不可屏蔽时置灰 + tooltip 说明原因）。
+ * 一条「外部注入」实例行：**配置只读、默认开关可写**。
+ *
+ * - 全局视图：开关 = **全局默认**（写独立文件 `capability-global-overrides.json`
+ *   的 `mcp` 名单，所有工作区新建对话生效；不改注入方配置、不卸载共享实例）；
+ * - 工作区视图：开关 = **本工作区默认**（写项目 overrides 的 `mcp` / `enabledMcp`
+ *   三态，可覆盖全局默认）。
+ *
+ * 能否写由 `restrictable` 决定（工具在全局注册表可见才能 `tools.restrict` 屏蔽；
+ * 按 agent 作用域注入的实例置灰 + tooltip 说明宿主契约上限）。
  */
 /** 注入方展示名（R4）：优先 `channel`，没有则 undefined（不猜）。 */
 function externalChannelOf(server: ClientMcpRuntimeServer): string | undefined {
@@ -193,6 +201,18 @@ function externalChannelOf(server: ClientMcpRuntimeServer): string | undefined {
 /** true = 命名空间合成行（没有 mcp-client 实例，工具来自 `mcp__<ns>__*` 命名空间）。 */
 function isSynthesized(server: ClientMcpRuntimeServer): boolean {
   return server.synthesized === true || server.origin === "namespace";
+}
+
+/** 外部注入实例「不可写」的统一 tooltip（宿主 `tools.restrict` 契约上限）。 */
+const EXTERNAL_TOGGLE_BLOCKED_TITLE = "该实例按 agent 作用域注入，无法用 tools.restrict 屏蔽（宿主契约上限）";
+
+/**
+ * 工作区视图下外部实例的**有效默认关闭**（决定行尾开关 checked）：
+ * 优先宿主投影的 `disabledInProject`（v20.2 = 全局默认 ∪ 工作区默认 − 工作区重新打开）；
+ * 旧宿主缺该字段时退化到 `disabledGlobally`（全局视图口径）。
+ */
+function disabledInWorkspaceOf(server: ClientMcpRuntimeServer): boolean {
+  return server.disabledInProject !== undefined ? server.disabledInProject : server.disabledGlobally === true;
 }
 
 /**
@@ -245,7 +265,7 @@ function externalAttributionLabel(server: ClientMcpRuntimeServer): string | unde
   }
 }
 
-/** true = 来源含推测成分（MCP 详情同样加「推测」标识，不改变只读语义）。 */
+/** true = 来源含推测成分（MCP 详情同样加「推测」标识，不改变「配置只读」语义）。 */
 function externalAttributionIsSpeculative(server: ClientMcpRuntimeServer): boolean {
   const attribution = server.attribution;
   if (attribution === undefined) return false;
@@ -283,6 +303,7 @@ function McpExternalRow({
   server,
   scope,
   projectName,
+  globalDefaultDisabled,
   selected,
   busy,
   onSelect,
@@ -291,40 +312,68 @@ function McpExternalRow({
   server: ClientMcpRuntimeServer;
   scope: "global" | "workspace";
   projectName?: string;
+  /**
+   * 名字是否在**全局默认关闭名单**里（原始成员关系，来自 `overrides.globalGet`，
+   * 与宿主行字段 `disabledGlobally` 取并集：旧宿主缺字段时仍能给出标签）。
+   */
+  globalDefaultDisabled: boolean;
   selected: boolean;
   busy: boolean;
   onSelect(): void;
   onToggleDefault(): void;
 }) {
-  const defaultOff = server.disabledInProject === true;
-  /** 只有「工作区 + 可 restrict」才允许写工作区默认；全局视图一律禁用并给原因。 */
-  const canToggle = scope === "workspace" && server.restrictable;
-  const checked = scope === "workspace" ? !defaultOff : true;
+  /** 全局默认关闭（原始名单；宿主 `disabledGlobally` 为 true 时也必然是关闭）。 */
+  const globalOff = globalDefaultDisabled || server.disabledGlobally === true;
+  /** 当前视图的默认关闭态：全局视图看全局默认；工作区视图看本工作区有效默认。 */
+  const defaultOff = scope === "global" ? globalOff : disabledInWorkspaceOf(server);
+  /** 工具在全局注册表可见才可写（两种作用域同一判据；agent 作用域注入的不可）。 */
+  const canToggle = server.restrictable;
+  const checked = !defaultOff;
   const dot = checked ? { className: "skp-dot skp-dot-enabled", style: undefined } : { className: "skp-dot", style: { background: "var(--skp-warn)" } };
   const toolText = server.tools.length > 0 ? `${server.tools.length} 个工具` : "工具数未知";
   const meta = server.calls > 0 ? `${toolText} · 调用 ${server.calls} 次` : toolText;
   const summary = isSynthesized(server)
-    ? "由工具命名空间合成 · 无 mcp-client 实例（只读）"
-    : (server.summary ?? "运行时注入，不由能力面板管理（只读）");
+    ? "由工具命名空间合成 · 无 mcp-client 实例（配置只读）"
+    : (server.summary ?? "运行时注入，由注入方管理（默认开关可写）");
   const switchLabel = scope === "workspace" ? `${projectName ?? "工作区"} 默认` : "全局默认";
-  const switchTitle =
+  /** 行内状态标签：全局默认关闭 / 已覆盖全局默认 / 工作区默认关闭。 */
+  const stateTag =
     scope === "global"
-      ? "外部注入的 MCP 不写入配置文件：全局视图开关只对配置条目生效；切到「工作区」作用域可设置工作区默认"
-      : canToggle
+      ? globalOff
+        ? { label: "全局默认关闭", title: "该实例在全局默认关闭名单里（所有工作区新建对话默认不启用）" }
+        : undefined
+      : globalOff
         ? defaultOff
-          ? "工作区默认关闭；点此改为默认启用（仅此工作区）"
-          : "工作区默认启用；点此改为默认关闭（仅此工作区）"
-        : "该实例按作用域注入，无法按工作区默认屏蔽（宿主 tools.restrict 契约边界）";
+          ? { label: "全局默认关闭", title: "继承全局默认关闭；本工作区未重新打开" }
+          : { label: "已覆盖全局默认", title: "全局默认关闭，但本工作区已显式重新打开" }
+        : defaultOff
+          ? { label: "工作区默认关闭", title: "该工作区默认关闭；只影响本工作区" }
+          : undefined;
+  const switchTitle = !canToggle
+    ? EXTERNAL_TOGGLE_BLOCKED_TITLE
+    : scope === "global"
+      ? checked
+        ? "关闭：写入全局默认关闭名单（所有工作区新建对话默认不启用；不改注入方配置、不卸载共享实例）"
+        : "打开：从全局默认关闭名单移除（恢复所有工作区默认启用）"
+      : checked
+        ? "关闭：仅此工作区默认不启用（写工作区覆盖，其它工作区不受影响）"
+        : globalOff
+          ? "打开：本工作区显式重新打开（覆盖全局默认关闭，写 enabledMcp）"
+          : "打开：仅此工作区默认启用（写工作区覆盖）";
   return (
     <li className={selected ? "skp-row-wrap skp-row-wrap-active" : "skp-row-wrap"}>
       <button type="button" className={selected ? "skp-row skp-row-active" : "skp-row"} style={{ minHeight: 72 }} onClick={onSelect}>
         {/* 名称行只放状态点 + serverName；来源两枚标签移到 meta 行。 */}
         <span className="skp-row-name">
-          <span className={dot.className} style={dot.style} title={defaultOff ? "工作区默认关闭" : "运行时注入的实例"} />
+          <span
+            className={dot.className}
+            style={dot.style}
+            title={defaultOff ? (globalOff ? "全局默认关闭" : "本工作区默认关闭") : "运行时注入的实例"}
+          />
           <span className="skp-row-title" title={server.serverName}>
             {server.serverName}
           </span>
-          <span className="skp-tag skp-tag-warn" title="不是本插件配置文件里的条目：由其它插件 / profile 运行时注入（只读）">
+          <span className="skp-tag skp-tag-warn" title="不是本插件配置文件里的条目：由其它插件 / profile 运行时注入（配置只读、默认开关可写）">
             外部注入
           </span>
         </span>
@@ -334,9 +383,9 @@ function McpExternalRow({
             <span className="skp-tag skp-tag-flat">{server.source}</span>
           )}
           {server.transport !== undefined && <span className="skp-tag skp-tag-flat">{server.transport}</span>}
-          {defaultOff && (
-            <span className="skp-tag skp-tag-warn" title="该工作区默认关闭；只影响本工作区">
-              工作区默认关闭
+          {stateTag !== undefined && (
+            <span className="skp-tag skp-tag-warn" title={stateTag.title}>
+              {stateTag.label}
             </span>
           )}
           <span>{meta}</span>
@@ -374,9 +423,10 @@ function baseName(path: string): string {
  * MCP 视图主组件（v20.1）：**两栏**（列表 + 详情），不再有左栏 ScopeNav。
  *
  * - **全局作用域**：全局 `~/.agents/mcp.json` 条目（开关 = 全局默认，写配置文件
- *   `disabled`）+ 「外部注入」只读第二组（开关禁用 + 原因）；
+ *   `disabled`）+ 「外部注入」（配置只读，行尾开关写全局默认关闭名单）；
  * - **工作区作用域**：该工作区 `.mcp.json` 条目（本项目） + 引用的全局配置；
- *   行尾开关 = **该工作区的默认**（写项目 overrides，仅此工作区生效）；
+ *   行尾开关 = **该工作区的默认**（写项目 overrides，仅此工作区生效；外部注入
+ *   行可覆盖全局默认）；
  * - **搜索**来自根组件头部输入框（`query` prop），只过滤当前列表；
  * - 列表标题栏固定「类型 + 作用域」+ 计数 + 内联「＋ 添加 MCP」，落点由
  *   当前作用域直接确定；行内没有文字按钮——启停/编辑/删除/导入/探测都在详情卡。
@@ -427,23 +477,38 @@ export function McpView({
   const projectName =
     workspace === undefined ? undefined : (projects.find((project) => project.path === workspace)?.title ?? baseName(workspace));
   /**
-   * 拉取 list + runtime（挂载时、作用域变化时自动执行，写操作后显式 reload）。
-   * 不再拉 `mcp.status`：面板不展示某会话的挂载状态（契约 §3.6）。
+   * 拉取 list + runtime + 全局默认关闭名单（挂载时、作用域变化时自动执行，写操作后
+   * 显式 reload）。不再拉 `mcp.status`：面板不展示某会话的挂载状态（契约 §3.6）。
+   *
+   * 额外读一次 `globalGet`：宿主 `disabledGlobally` 已是原始名单成员（v20.2），
+   * 这里取同一份名单做防御（旧宿主缺字段 / 工作区视图需要区分「继承」与
+   * 「已覆盖」），复用已有 RPC 的 `mcp` 字段，不新增端点；失败不影响主列表。
    */
   const { data, loading, error, reload } = useAsyncList(
     async () => {
-      const [list, runtime] = await Promise.all([
+      const [list, runtime, globalOverrides] = await Promise.all([
         mcpApi.list(),
-        // 运行时注入的 MCP（其它插件/profile 挂的 mcp-client）：只读展示，失败不影响主列表。
+        // 运行时注入的 MCP（其它插件/profile 挂的 mcp-client）：配置只读展示，失败不影响主列表。
         mcpApi.runtime({ cwd: workspace }).catch(() => ({ servers: [] })),
+        // 全局默认关闭名单：失败不影响主列表（行内退化为宿主投影的 disabledGlobally）。
+        api.overrides.globalGet().catch(() => undefined),
       ]);
-      return { servers: list.servers, listErrors: list.errors, runtimeServers: runtime.servers };
+      return {
+        servers: list.servers,
+        listErrors: list.errors,
+        runtimeServers: runtime.servers,
+        globalDisabledMcp: globalOverrides?.mcp ?? [],
+      };
     },
-    [mcpApi, workspace],
+    [api, mcpApi, workspace],
   );
   const servers = data?.servers ?? [];
   const listErrors = data?.listErrors ?? [];
   const runtimeServers = data?.runtimeServers ?? [];
+  /** 全局默认关闭名单（原始成员关系；用于区分「继承全局默认关闭 / 已覆盖」）。 */
+  const globalDisabledMcp = data?.globalDisabledMcp ?? [];
+  const globalDefaultDisabledOf = (server: ClientMcpRuntimeServer): boolean =>
+    globalDisabledMcp.includes(server.serverName) || server.disabledGlobally === true;
 
   const globalServers = servers.filter((server) => server.scope === "global");
   const projectServers = servers.filter((server) => server.scope === "project");
@@ -508,20 +573,25 @@ export function McpView({
   };
 
   /**
-   * 行尾默认开关（v20.1 按作用域分派）：
+   * 行尾默认开关（按作用域分派）：
    *   - 全局视图 → `mcp.setEnabled({scope:"global"})`（写配置文件 `disabled`）；
-   *   - 工作区视图 → `overrides.toggle("mcp", key)`（写项目 overrides，仅此工作区）。
+   *   - 工作区视图 → `overrides.toggle("mcp", key, { enabled })`（B2 三态，仅此工作区；
+   *     显式传 enabled，避免宿主按「有效默认」翻转时写错名单）。
    */
   const toggleRow = async (server: ClientMcpServer) => {
     const id = rowId(server);
     if (busyKey !== undefined) return;
+    // 当前勾选态（与 McpServerRow 的行内口径一致）：全局配置条目看配置级 enabled；
+    // 全局视图看配置级 enabled；工作区视图的全局条目看本工作区有效默认。
+    const current =
+      scope === "global" ? server.enabled : server.scope === "global" ? server.disabledInProject !== true : server.enabled;
     setBusyKey(id);
     setDefaultError(undefined);
     try {
       const result =
         scope === "global"
           ? await mcpApi.setEnabled({ scope: "global", key: server.key, enabled: !server.enabled })
-          : await api.overrides.toggle("mcp", server.key);
+          : await api.overrides.toggle("mcp", server.key, { enabled: !current });
       if (!result.ok) setDefaultError(result.errors.join("; "));
     } catch (failure) {
       setDefaultError(String(failure));
@@ -531,14 +601,24 @@ export function McpView({
     }
   };
 
-  /** 外部注入实例的工作区默认开关（仅「工作区 + 可 restrict」可写）。 */
+  /**
+   * 外部注入实例的行尾默认开关（v20.2：两种作用域都可写，限制只看 `restrictable`）：
+   *   - 全局视图 → `overrides.globalToggle({domain:"mcp"})`，写全局默认关闭名单；
+   *   - 工作区视图 → `overrides.toggle("mcp", serverName, { enabled })`，写工作区覆盖
+   *     （B2 三态：全局默认关闭时「打开」写 `enabledMcp`）。
+   * 都是「不卸载共享实例、只按会话重新 restrict」的写入路径。
+   */
   const toggleExternal = async (server: ClientMcpRuntimeServer) => {
     const id = `external:${server.serverName}`;
-    if (busyKey !== undefined || scope !== "workspace" || !server.restrictable) return;
+    if (busyKey !== undefined || !server.restrictable) return;
+    const checked = scope === "global" ? server.disabledGlobally !== true : !disabledInWorkspaceOf(server);
     setBusyKey(id);
     setDefaultError(undefined);
     try {
-      const result = await api.overrides.toggle("mcp", server.serverName);
+      const result =
+        scope === "global"
+          ? await api.overrides.globalToggle({ domain: "mcp", key: server.serverName, disabled: checked })
+          : await api.overrides.toggle("mcp", server.serverName, { enabled: !checked });
       if (!result.ok) setDefaultError(result.errors.join("; "));
     } catch (failure) {
       setDefaultError(String(failure));
@@ -648,11 +728,18 @@ export function McpView({
     </div>
   );
 
-  /** 全局 scope 的第二组：外部注入（只读，保留组头与计数；为空时不占位）。 */
+  /**
+   * 「外部注入」组（全局 / 工作区两个视图共用）：配置只读、行尾默认开关可写。
+   * 组头备注按作用域说明写入落点；保留组头与计数，为空时不占位。
+   */
   const renderExternalGroup = () =>
     visibleExternal.length > 0 ? (
       <section className="skp-group" role="group" aria-label={`外部注入（${visibleExternal.length}）`}>
-        {renderGroupHead("外部注入", runtimeServers.length, "运行时注入 · 只读")}
+        {renderGroupHead(
+          "外部注入",
+          runtimeServers.length,
+          scope === "global" ? "运行时注入 · 可设全局默认" : "运行时注入 · 可设本工作区默认",
+        )}
         <div className="skp-group-scroll">
           <ul className="skp-list" role="listbox" aria-label="外部注入 MCP">
             {visibleExternal.map((server) => (
@@ -661,6 +748,7 @@ export function McpView({
                 server={server}
                 scope={scope}
                 projectName={projectName}
+                globalDefaultDisabled={globalDefaultDisabledOf(server)}
                 selected={selectedExternalName === server.serverName}
                 busy={busyKey !== undefined}
                 onSelect={() => selectExternal(server)}
@@ -761,6 +849,7 @@ export function McpView({
               server={selectedExternal}
               scope={scope}
               projectName={projectName}
+              globalDefaultDisabled={globalDefaultDisabledOf(selectedExternal)}
               workspaces={projects}
               onSelectWorkspace={onSelectWorkspace}
             />
@@ -930,18 +1019,22 @@ function McpScopeChain({
 }
 
 /**
- * 「外部注入」MCP 的**只读**详情。
+ * 「外部注入」MCP 的详情：**配置只读，默认开关可写**。
  *
- * 这些实例不在本插件配置文件里（其它插件/profile 在运行时挂的 mcp-client），所以
- * 只展示能观察到的信息：来源插件、注入方式、命名空间、传输/命令摘要（能读到才有）、
- * 每个工具的说明与参数（来自工具注册表，与「查看工具与参数」同源），以及使用记录。
- * 不提供编辑/删除/测试——配置与生命周期都在注入方。
+ * 这些实例不在本插件配置文件里（其它插件/profile 在运行时挂的 mcp-client），
+ * 配置与生命周期由注入方管理，能力面板不能编辑/删除/卸载；但**默认开关可写**：
+ * 全局视图 = 全局默认关闭名单（独立文件 `capability-global-overrides.json`），
+ * 工作区视图 = 本工作区默认（项目 overrides，可覆盖全局默认）；两者都不卸载
+ * 共享实例，只按会话重新 `tools.restrict`。详情只展示能观察到的信息：来源插件、
+ * 注入方式、命名空间、传输/命令摘要（能读到才有）、每个工具的说明与参数
+ * （来自工具注册表，与「查看工具与参数」同源），以及使用记录。
  */
 function McpExternalDetail({
   api,
   server,
   scope,
   projectName,
+  globalDefaultDisabled,
   workspaces,
   onSelectWorkspace,
 }: {
@@ -949,6 +1042,8 @@ function McpExternalDetail({
   server: ClientMcpRuntimeServer;
   scope: "global" | "workspace";
   projectName?: string;
+  /** 名字是否在全局默认关闭名单里（原始成员关系；见 McpExternalRow 同名字段）。 */
+  globalDefaultDisabled: boolean;
   workspaces: Array<{ path: string; title?: string }>;
   onSelectWorkspace(path: string): void;
 }) {
@@ -956,6 +1051,10 @@ function McpExternalDetail({
   // 「使用记录」：宿主内存里的 MCP 工具调用记录（只读、不落盘），打开才拉取。
   const [usageOpen, setUsageOpen] = useState(false);
   const hasTools = server.tools.length > 0;
+  /** 全局默认关闭（原始名单；宿主 `disabledGlobally` 为 true 时也必然是关闭）。 */
+  const globalOff = globalDefaultDisabled || server.disabledGlobally === true;
+  /** 本工作区有效默认关闭（含全局默认继承；本工作区重新打开后为 false）。 */
+  const workspaceOff = disabledInWorkspaceOf(server);
   return (
     <div className="skp-detail-card">
       <div className="skp-detail-head">
@@ -967,23 +1066,29 @@ function McpExternalDetail({
               推测
             </span>
           )}
-          <span className="skp-tag skp-tag-flat">只读</span>
+          <span className="skp-tag skp-tag-flat" title="配置由注入方管理（只读）；默认开关可在列表行尾设置（可写）">
+            配置只读
+          </span>
         </span>
       </div>
       <McpScopeChain
         scope={scope}
         projectName={projectName}
         globalSeg={{
-          on: true,
-          title: "运行时注入 · 只读",
-          note: "不写入任何配置文件 · 生命周期由注入方管理",
+          on: !globalOff,
+          title: globalOff ? "全局默认关闭" : "全局默认启用",
+          note: "全局默认写 capability-global-overrides.json · 不改注入方配置",
         }}
         workspaceSeg={{
-          on: server.disabledInProject !== true,
-          title: server.disabledInProject === true ? "已关闭（覆盖）" : "默认启用",
-          note: server.restrictable
-            ? "来源：工作区覆盖 · 可在列表行尾按工作区默认屏蔽"
-            : "按作用域注入 · 无法按工作区默认屏蔽",
+          on: !workspaceOff,
+          title: !workspaceOff
+            ? globalOff
+              ? "已覆盖全局默认"
+              : "默认启用"
+            : globalOff
+              ? "继承全局默认关闭"
+              : "本工作区默认关闭",
+          note: server.restrictable ? "行尾开关可写本工作区默认（不卸载共享实例）" : EXTERNAL_TOGGLE_BLOCKED_TITLE,
         }}
         workspaces={workspaces}
         onSelectWorkspace={onSelectWorkspace}
@@ -998,8 +1103,8 @@ function McpExternalDetail({
       )}
       <div className="skp-note">
         {isSynthesized(server)
-          ? `只读原因：该实例由工具命名空间 mcp__${server.serverName}__* 合成（没有 mcp-client 实例，无配置可编辑），能力面板只能查看工具与调用记录。`
-          : `只读原因：该 MCP 由 ${externalChannelOf(server) ?? server.source ?? "其它插件"} 在运行时注入，能力面板只能查看与记录调用，不能编辑或删除。`}
+          ? `配置只读：该实例由工具命名空间 mcp__${server.serverName}__* 合成（没有 mcp-client 实例，无配置可编辑）；默认开关可写（全局默认 / 本工作区）。`
+          : `配置只读：该 MCP 由 ${externalChannelOf(server) ?? server.source ?? "其它插件"} 在运行时注入，能力面板不能编辑或删除；默认开关可写（全局默认 / 本工作区），不卸载共享实例。`}
       </div>
       <div className="skp-detail-actions">
         <button
@@ -1037,19 +1142,35 @@ function McpExternalDetail({
             </dd>
           </>
         )}
-        <dt>工作区默认</dt>
+        <dt>全局默认</dt>
+        <dd>
+          {globalOff
+            ? "关闭（在「全局」作用域用列表行尾开关恢复；不改注入方配置、不卸载共享实例）"
+            : "启用"}
+        </dd>
+        <dt>本工作区</dt>
+        <dd>
+          {!workspaceOff
+            ? globalOff
+              ? "已覆盖全局默认：本工作区显式重新打开"
+              : "继承全局默认（启用）"
+            : globalOff
+              ? "继承全局默认（关闭）"
+              : "本工作区默认关闭"}
+        </dd>
+        <dt>默认开关</dt>
         <dd>
           {server.restrictable
-            ? "在「工作区」作用域里，列表行尾开关决定该工作区默认是否可用（写工作区覆盖，不卸载共享实例）。"
-            : "该实例按作用域注入，无法按工作区默认屏蔽（宿主 tools.restrict 契约边界）。"}
+            ? "列表行尾开关可写：全局视图 = 全局默认（独立文件，所有工作区生效）；工作区视图 = 本工作区默认（可覆盖全局默认）。均不卸载共享实例。"
+            : EXTERNAL_TOGGLE_BLOCKED_TITLE}
         </dd>
         <dt>本次运行调用</dt>
         <dd>{server.calls > 0 ? `${server.calls} 次` : "还没有调用记录"}</dd>
         <dt>管理</dt>
         <dd>
           {isSynthesized(server)
-            ? "工具命名空间无法在这里编辑或卸载；请在注入方管理。"
-            : "由注入方管理；能力面板只读展示，不提供编辑/删除/卸载。"}
+            ? "工具命名空间无法在这里编辑或卸载；请在注入方管理（默认开关仍可写）。"
+            : "配置由注入方管理；能力面板不提供编辑/删除/卸载，但默认开关可写。"}
         </dd>
       </dl>
       {toolsOpen && (

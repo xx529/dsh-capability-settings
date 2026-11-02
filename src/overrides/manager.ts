@@ -1,20 +1,25 @@
 /**
  * 默认关闭管理服务（挂载为 `ctx.capabilityPanel.overrides`）。
  *
- * **两层存储**（B2，v20.1）：
+ * **三层存储**（B2，v20.1；v20.2 扩到 MCP）：
  *
  *   1. **全局层**：`<dshHome>/dsh-capability-settings/capability-global-overrides.json`
- *      ——`{ version: 1, skills: string[] }`，全局默认关闭名单；不改技能文件。
- *      面板全局视图的 Skills 开关写这里（见 {@link globalToggle}）。
+ *      ——`{ version: 1, skills: string[], mcp: string[] }`，全局默认关闭名单；
+ *      不改技能文件、不改 MCP 注入方配置、不卸载共享实例。
+ *      面板全局视图的 Skills / 外部注入 MCP 开关写这里（见 {@link globalToggle}）。
  *   2. **项目层（统一存储）**：`<dshHome>/dsh-capability-settings/capability-overrides.json`
  *      ——一个文件按**项目根**（`findProjectRoot(cwd)`）分 key，记录每个项目默认
- *      关闭的 MCP server / Skill，以及（B2）本项目**显式重新打开**的 Skill
- *      （`enabledSkills`）。MCP 列表读取、MCP 自动挂载、技能默认投影共用它的
- *      `sets()` 快照；面板通过 `get()` 读全量、`toggle()` 切换某一条。
+ *      关闭的 MCP server / Skill，以及（B2）本项目**显式重新打开**的 Skill /
+ *      MCP server（`enabledSkills` / `enabledMcp`）。MCP 列表读取、MCP 自动挂载、
+ *      技能默认投影共用它的 `sets()` 快照；面板通过 `get()` 读全量、`toggle()`
+ *      切换某一条。
  *
- * **有效默认**（契约 §1.3）：`(global.skills ∪ project.skills) \ project.enabledSkills`；
- * `defaultSets()` / {@link effectiveDisabledSkills} 是唯一计算入口，供面板列表与
- * `skills/session.ts` 的运行时投影共用（见 `shared/skill-defaults.ts`）。
+ * **有效默认**（契约 §1.3）：
+ *
+ *   - Skills：`(global.skills ∪ project.skills) \ project.enabledSkills`；
+ *     `defaultSets()` / {@link effectiveDisabledSkills} 是唯一计算入口；
+ *   - MCP：`(global.mcp ∪ project.mcp) \ project.enabledMcp`；
+ *     {@link mcpDefaultSets} 是唯一计算入口（实现见 `shared/mcp-defaults.ts`）。
  *
  * **旧位置兼容**：`<项目根>/.agents/capability-overrides.json`（以及更早的
  * `.dsh` / `.claude`）仍会被读取；某个项目在统一存储里还没有记录时，`sets()`
@@ -24,7 +29,8 @@
  * `skills` 域对**磁盘技能与注入技能**都生效：磁盘技能靠 agent 作用域 runtime
  * shadow（与全局层投影片同一条机制），注入技能同样是 runtime shadow；由组合根在
  * 写盘成功后对同项目的 live 会话（全局层则对所有 live 会话）做增量 reconcile
- * （见 `index.ts` / `skills/session.ts`）。
+ * （见 `index.ts` / `skills/session.ts`）。`mcp` 域的全局默认由组合根在写盘后
+ * 调 `loader.refreshRestrictions()` 热应用（不重挂 fiber）。
  *
  * 无工作区（cwd 为 undefined）时不适用任何项目级禁用：`sets()` 返回全空
  * 快照，`toggle()` 直接报错；全局层不受工作区影响。
@@ -37,11 +43,14 @@ import { withFileLock } from "../shared/file-lock.js";
 import { errMessage } from "../shared/errors.js";
 import { locateConfigFile, removeFiles, type ConfigFileLocation } from "../shared/config-location.js";
 import { isSkillName } from "../skills/validate.js";
+import { isMcpServerName } from "../mcp/config-file.js";
 import {
   effectiveDisabledSkills as effectiveDisabledSetOf,
   skillDefaultSets,
 } from "../shared/skill-defaults.js";
 import type { SkillDefaultSets } from "../shared/skill-defaults.js";
+import { mcpDefaultSets as mcpDefaultSetsOf } from "../shared/mcp-defaults.js";
+import type { McpDefaultSets } from "../shared/mcp-defaults.js";
 import {
   DOMAIN_KEYS,
   domainSetOf,
@@ -60,6 +69,7 @@ import { OVERRIDES_FILE_NAME, globalOverridesFile, overridesStoreFile, projectOv
 import type {
   CapabilityDomain,
   GlobalOverrideToggleInput,
+  GlobalOverrides,
   GlobalOverridesView,
   OverridesProjectEntry,
   OverridesSet,
@@ -81,10 +91,11 @@ export interface OverrideToggleInput {
   /**
    * 可选：显式指定目标状态（B2 项目层语义；不传时保持旧的「翻转」行为）。
    *
-   *   - `true`：恢复启用 —— 从项目 `skills` 移除；**仅当全局默认关闭时**才写入
-   *     `enabledSkills`（否则清掉该名字的项目态，等价显式启用）；
-   *   - `false`：禁用 —— 加入项目 `skills`，并从 `enabledSkills` 移除；
-   *   - 不传：翻转**有效默认**（`mcp` 域仍是翻转禁用清单成员）。
+   *   - `true`：恢复启用 —— 从项目禁用名单（`skills` / `mcp`）移除；**仅当全局
+   *     默认关闭时**才写入 `enabledSkills` / `enabledMcp`（否则清掉该名字的项目
+   *     重新打开标记，等价显式启用）；
+   *   - `false`：禁用 —— 加入项目禁用名单，并从重新打开名单移除；
+   *   - 不传：翻转**有效默认**（全局默认 < 工作区显式）。
    */
   enabled?: boolean;
 }
@@ -127,6 +138,7 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
       mcp: entry?.mcp ?? [],
       skills: entry?.skills ?? [],
       enabledSkills: entry?.enabledSkills ?? [],
+      enabledMcp: entry?.enabledMcp ?? [],
     });
   }
 
@@ -154,7 +166,7 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
    * 列表 / 投影路径不该被一个损坏的全局文件拖垮，所以这里降级；错误由
    * `globalGet()` 透出给面板，写入路径（`globalToggle`）会显式报错。
    */
-  async function readGlobalSafe(): Promise<{ overrides: { skills: string[] }; errors?: string[] }> {
+  async function readGlobalSafe(): Promise<{ overrides: GlobalOverrides; errors?: string[] }> {
     try {
       return { overrides: await readGlobalOverrides(globalOverridesFile(deps.dshHome)) };
     } catch (error) {
@@ -214,10 +226,35 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
     return [...set].sort((a, b) => a.localeCompare(b));
   }
 
+  /**
+   * MCP 三层默认值集合快照（全局默认 ∪ 工作区显式，v20.2）。
+   *
+   * 这是面板（`mcp.runtime` 行字段）与运行时（loader 的 `resolveSessionPlan`）
+   * 的唯一计算入口；全局 / 项目文件任一损坏都降级为空名单，不抛。
+   *
+   * @param cwd 工作区路径；缺省 = 全局视图（项目两份名单为空）
+   */
+  async function mcpDefaultSets(cwd?: string): Promise<McpDefaultSets> {
+    const global = (await readGlobalSafe()).overrides;
+    const project = await projectSets(cwd);
+    return mcpDefaultSetsOf({
+      globalDisabled: global.mcp,
+      projectDisabled: project.mcp,
+      projectEnabled: project.enabledMcp,
+    });
+  }
+
   /** 读取全量视图（attach 统一存储路径 + 项目根；无工作区时返回空视图）。 */
   async function get(cwd?: string): Promise<OverridesView> {
     const loc = locationFor(cwd);
-    const view: OverridesView = domainSetOf(await projectSets(cwd));
+    const set = await projectSets(cwd);
+    // 兼容既有 `{mcp, skills}` 形状：两域禁用清单照旧，重新打开名单（B2 /
+    // v20.2）作为 additive 字段并列给出。
+    const view: OverridesView = {
+      ...domainSetOf(set),
+      enabledSkills: [...set.enabledSkills],
+      enabledMcp: [...set.enabledMcp],
+    };
     if (loc !== undefined) {
       view.filePath = loc.storeFile;
       view.projectRoot = loc.projectRoot;
@@ -226,34 +263,42 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
   }
 
   /**
-   * 全局视图（`overrides.globalGet`）：规范化清单 + 文件路径。
+   * 全局视图（`overrides.globalGet`）：规范化清单（skills / mcp）+ 文件路径。
    *
-   * 契约 §2.1 只要求 `skills` / `filePath`；文件损坏时额外带回 `errors`
-   * （可读原因），供面板选择性展示，不让读取抛穿 RPC。
+   * 文件缺失 / 损坏时降级为空名单；损坏原因额外带回 `errors`（可读原因），
+   * 供面板选择性展示，不让读取抛穿 RPC。
    */
   async function globalGet(): Promise<GlobalOverridesView> {
     const filePath = globalOverridesFile(deps.dshHome);
     const { overrides, errors } = await readGlobalSafe();
-    const view: GlobalOverridesView = { skills: [...overrides.skills], filePath };
+    const view: GlobalOverridesView = { skills: [...overrides.skills], mcp: [...overrides.mcp], filePath };
     if (errors !== undefined && errors.length > 0) view.errors = errors;
     return view;
   }
 
   /**
-   * 切换某个能力的**全局默认**（B2）：`disabled=true` 加入全局默认关闭名单，
-   * `false` 从名单移除。读→改→写按全局文件串行化；文件损坏时显式报错
-   * （不静默覆盖用户数据）。
+   * 切换某个能力的**全局默认**（B2 Skills / v20.2 MCP）：`disabled=true` 加入
+   * 全局默认关闭名单，`false` 从名单移除。读→改→写按全局文件串行化；文件损坏
+   * 时显式报错（不静默覆盖用户数据）。
+   *
+   * `mcp` 域额外校验 serverName 文法（桥接层 `[A-Za-z0-9_-]{1,32}`）。
    */
   async function globalToggle(input: GlobalOverrideToggleInput | Record<string, unknown>): Promise<OverrideOpResult> {
     const domain = (input as { domain?: unknown }).domain;
-    if (domain !== "skills") {
-      return { ok: false, errors: [`global defaults only support the "skills" domain (got "${String(domain)}")`] };
+    if (domain !== "skills" && domain !== "mcp") {
+      return { ok: false, errors: [`global defaults only support the "skills" / "mcp" domains (got "${String(domain)}")`] };
     }
     const rawKey = (input as { key?: unknown }).key;
     const key = typeof rawKey === "string" ? rawKey.trim() : "";
     if (key.length === 0) return { ok: false, errors: ["key must not be empty"] };
-    if (!isSkillName(key)) {
+    if (domain === "skills" && !isSkillName(key)) {
       return { ok: false, errors: [`invalid skill name "${key}" — must match kebab-case /^[a-z0-9]+(?:-[a-z0-9]+)*$/`] };
+    }
+    if (domain === "mcp" && !isMcpServerName(key)) {
+      return {
+        ok: false,
+        errors: [`invalid MCP server name "${key}" — must match bridge serverName /^[A-Za-z0-9_-]{1,32}$/`],
+      };
     }
     const disabled = (input as { disabled?: unknown }).disabled;
     if (typeof disabled !== "boolean") return { ok: false, errors: ['"disabled" must be a boolean'] };
@@ -262,10 +307,14 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
     try {
       return await withFileLock(file, async () => {
         const current = await readGlobalOverrides(file);
-        const set = new Set(current.skills);
+        const set = new Set(domain === "skills" ? current.skills : current.mcp);
         if (disabled) set.add(key);
         else set.delete(key);
-        await writeGlobalOverrides(file, { skills: [...set].sort((a, b) => a.localeCompare(b)) });
+        const next = [...set].sort((a, b) => a.localeCompare(b));
+        await writeGlobalOverrides(
+          file,
+          domain === "skills" ? { skills: next, mcp: current.mcp } : { skills: current.skills, mcp: next },
+        );
         return { ok: true };
       });
     } catch (error) {
@@ -280,13 +329,21 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
       : [...list, key].sort((a, b) => a.localeCompare(b));
   }
 
+  /** 加入一个名单成员（幂等；先排序，保持落盘稳定）。 */
+  function withAdded(list: readonly string[], key: string): string[] {
+    const set = new Set(list);
+    set.add(key);
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }
+
   /**
-   * 切换某个能力在本项目的默认关闭状态。
+   * 切换某个能力在本项目的默认关闭状态（B2 三态；v20.2 扩到 MCP）。
    *
-   * - `mcp` 域：翻转项目禁用清单成员（语义与旧版一致）；
-   * - `skills` 域（B2 三态）：
-   *   - 传 `enabled` 时显式设为启用 / 禁用；
+   * - `skills` / `mcp` 域：
+   *   - 传 `enabled` 时显式设为启用 / 禁用（幂等，不翻转）；
    *   - 不传时翻转**有效默认**（全局默认 < 项目显式 < 会话显式中的第二层）。
+   * - 启用时只有「全局默认关闭」才写重新打开名单（`enabledSkills` / `enabledMcp`），
+   *   否则清掉该项目态；禁用时加入项目禁用名单并清掉重新打开标记（禁用优先）。
    *
    * 读→改→写整段按统一存储文件串行化，避免并发写者互相覆盖。某个项目首次
    * 写入时：把项目内旧声明（`.agents` / `.dsh` / `.claude`）并入统一存储，
@@ -304,12 +361,17 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
     if (input.domain === "skills" && !isSkillName(key)) {
       return { ok: false, errors: [`invalid skill name "${key}" — must match kebab-case /^[a-z0-9]+(?:-[a-z0-9]+)*$/`] };
     }
-    // 全局默认关闭集：B2 计算需要它；全局文件损坏时降级为空（不阻塞项目编辑）。
-    let globalDisabled = new Set<string>();
+    // 全局默认关闭集：B2 / v20.2 计算需要它；全局文件损坏时降级为空
+    // （不阻塞项目编辑；与既有 skills 分支同策略）。
+    let globalSkills = new Set<string>();
+    let globalMcp = new Set<string>();
     try {
-      globalDisabled = new Set((await readGlobalOverrides(loc.globalFile)).skills);
+      const global = await readGlobalOverrides(loc.globalFile);
+      globalSkills = new Set(global.skills);
+      globalMcp = new Set(global.mcp);
     } catch {
-      globalDisabled = new Set<string>();
+      globalSkills = new Set<string>();
+      globalMcp = new Set<string>();
     }
     try {
       return await withFileLock(loc.storeFile, async () => {
@@ -319,13 +381,35 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
         const current = existing !== undefined ? setOf(existing) : await readOverrides(loc.legacy.readFile);
         let next: OverridesSet;
         if (input.domain === "mcp") {
-          next = normalizeOverridesSet({ ...current, mcp: flipped(current.mcp, key) });
+          const projectDisabledNow = current.mcp.includes(key);
+          const projectEnabledNow = current.enabledMcp.includes(key);
+          const effectiveDefaultEnabled = projectEnabledNow
+            ? true
+            : projectDisabledNow || globalMcp.has(key)
+              ? false
+              : true;
+          const desired = typeof input.enabled === "boolean" ? input.enabled : !effectiveDefaultEnabled;
+          if (desired) {
+            // 启用：移除项目禁用；只有全局默认关闭时才需要写 enabledMcp。
+            next = normalizeOverridesSet({
+              ...current,
+              mcp: current.mcp.filter((item) => item !== key),
+              enabledMcp: globalMcp.has(key) ? withAdded(current.enabledMcp, key) : current.enabledMcp.filter((item) => item !== key),
+            });
+          } else {
+            // 禁用：加入项目禁用并移除 enabledMcp（禁用优先）。
+            next = normalizeOverridesSet({
+              ...current,
+              mcp: withAdded(current.mcp, key),
+              enabledMcp: current.enabledMcp.filter((item) => item !== key),
+            });
+          }
         } else {
           const projectDisabled = current.skills.includes(key);
           const projectEnabled = current.enabledSkills.includes(key);
           const effectiveDefaultEnabled = projectEnabled
             ? true
-            : projectDisabled || globalDisabled.has(key)
+            : projectDisabled || globalSkills.has(key)
               ? false
               : true;
           const desired = typeof input.enabled === "boolean" ? input.enabled : !effectiveDefaultEnabled;
@@ -334,8 +418,8 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
             next = normalizeOverridesSet({
               ...current,
               skills: current.skills.filter((item) => item !== key),
-              enabledSkills: globalDisabled.has(key)
-                ? [...current.enabledSkills, key].sort((a, b) => a.localeCompare(b))
+              enabledSkills: globalSkills.has(key)
+                ? withAdded(current.enabledSkills, key)
                 : current.enabledSkills.filter((item) => item !== key),
             });
           } else {
@@ -351,8 +435,14 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
         if (next.mcp.length > 0) entry.mcp = next.mcp;
         if (next.skills.length > 0) entry.skills = next.skills;
         if (next.enabledSkills.length > 0) entry.enabledSkills = next.enabledSkills;
-        // 三个名单都空 ⇒ 删除该项目条目（空条目不落盘）。
-        if (entry.mcp === undefined && entry.skills === undefined && entry.enabledSkills === undefined) {
+        if (next.enabledMcp.length > 0) entry.enabledMcp = next.enabledMcp;
+        // 四个名单都空 ⇒ 删除该项目条目（空条目不落盘）。
+        if (
+          entry.mcp === undefined &&
+          entry.skills === undefined &&
+          entry.enabledSkills === undefined &&
+          entry.enabledMcp === undefined
+        ) {
           delete store.projects[loc.projectRoot];
         } else {
           store.projects[loc.projectRoot] = entry;
@@ -367,7 +457,7 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
     }
   }
 
-  return { sets, projectSets, get, toggle, globalGet, globalToggle, defaultSets, effectiveDisabledSkills };
+  return { sets, projectSets, get, toggle, globalGet, globalToggle, defaultSets, effectiveDisabledSkills, mcpDefaultSets };
 }
 
 /** 管理服务的完整类型（构造函数的返回值）。 */

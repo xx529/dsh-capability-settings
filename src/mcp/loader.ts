@@ -61,6 +61,8 @@
 import { locateConfigFile } from "../shared/config-location.js";
 import { errMessage } from "../shared/errors.js";
 import { findProjectRoot } from "../shared/project-root.js";
+import { mcpDefaultSets as mcpDefaultSetsOf } from "../shared/mcp-defaults.js";
+import type { McpDefaultSets } from "../shared/mcp-defaults.js";
 import { readMcpFile, sanitizeServerName, toClientConfig } from "./config-file.js";
 import { GLOBAL_MCP_FILE_NAME, globalMcpDirs, projectMcpFile } from "./paths.js";
 import type { OverridesManager } from "../overrides/manager.js";
@@ -206,6 +208,15 @@ export interface McpLoader {
   sessionToggleState(sessionId?: string): Record<string, boolean>;
   /** 读取前主动从磁盘恢复该 session 的显式开关（幂等；冷会话面板用）。 */
   hydrateSession(sessionId: string, meta?: { cwd?: string; headerCreatedAt?: number }): Promise<void>;
+  /**
+   * 全局默认（`capability-global-overrides.json` 的 `mcp`）变更后的**热应用**：
+   * 不重挂任何 fiber，只对所有 live session 重新解析屏蔽目标 →
+   * `applyRestrictions` → `refreshPromptShadows`（逐 session 串行）。
+   *
+   * 由组合根在 `overrides.globalToggle` 写盘成功后调用（见 `index.ts`）。
+   * 单个 session 失败只 warn，最后 `Promise.allSettled`，不向调用方抛。
+   */
+  refreshRestrictions(): Promise<void>;
 }
 
 /**
@@ -449,6 +460,38 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
       .map(([key, entry]) => ({ key, entry }));
   }
 
+  /** 全空三层默认（无 overrides 管理器 / 读取失败时的降级值）。 */
+  function emptyDefaultSets(): McpDefaultSets {
+    return { globalDisabled: [], projectDisabled: [], projectEnabled: [], effectiveDisabled: [] };
+  }
+
+  /**
+   * 读 MCP 三层默认集合（全局默认 ∪ 工作区显式，v20.2）。
+   *
+   * - 优先用 `overrides.mcpDefaultSets(cwd)`（唯一计算入口，坏文件降级空）；
+   * - 兼容只实现 `sets()` 的旧注入管理器：那时没有全局默认层，项目默认关闭
+   *   语义 = `sets(cwd).mcp`（旧回归脚本 / headless 装配仍可用）；
+   * - 任何失败降级为全空（"跟随默认"退化为"跟随配置"），不影响挂载。
+   */
+  async function resolveDefaultSets(cwd: string | undefined): Promise<McpDefaultSets> {
+    const overrides = deps.overrides;
+    if (overrides === undefined) return emptyDefaultSets();
+    if (typeof overrides.mcpDefaultSets === "function") {
+      try {
+        return await overrides.mcpDefaultSets(cwd);
+      } catch (error) {
+        logger.warn?.(`capability-panel: 读取 MCP 默认关闭集合失败（${errMessage(error)}），按全空处理`);
+        return emptyDefaultSets();
+      }
+    }
+    try {
+      const mcp = (await overrides.sets(cwd))?.mcp ?? [];
+      return mcpDefaultSetsOf({ globalDisabled: [], projectDisabled: mcp, projectEnabled: [] });
+    } catch {
+      return emptyDefaultSets();
+    }
+  }
+
   /**
    * 为某个 session 解析**项目层**要挂的条目 + 要屏蔽的全局 server：
    *
@@ -460,16 +503,24 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
    *     原生条目时原生优先（引用不参与）；禁用态引用 → 屏蔽全局同名条目；
    *     启用态引用 → 全局层已提供则不重复挂，只有全局条目自身
    *     `disabled === true`（全局层不挂）时在会话内补挂；
-   *   - `overrides.sets(cwd).mcp` 列出的键 → 本项目禁用的全局 server，屏蔽。
+   *   - **全局层实例 / 外部注入实例**：屏蔽候选来自「有效默认关闭」
+   *     `(global.mcp ∪ project.mcp) \ project.enabledMcp`（见
+   *     `shared/mcp-defaults.ts`）。全局默认**不作用于**上面两类项目条目
+   *     （项目原生条目 / 项目引用仍只受 `project.mcp` 控制）。
    *
+   * 三层优先级：显式会话开关 > 有效默认 > 配置里的 `disabled` 硬关闭。
    * 单个文件读失败只记 warn，不中断另一个文件。
    */
   async function resolveSessionPlan(cwd: string | undefined, sessionId?: string): Promise<{
     session: Array<{ key: string; entry: McpServerEntry }>;
     restrict: RestrictTarget[];
   }> {
-    // 项目级禁用的全局 server 键集合（无 cwd 或读取失败时为空集合）。
-    const disabledByProject = new Set((await deps.overrides?.sets(cwd))?.mcp ?? []);
+    // 三层默认快照（无 cwd / 读取失败时降级为全空）。
+    const defaults = await resolveDefaultSets(cwd);
+    // 项目层禁用（项目原生条目 / 引用的既有语义）：只看 projects.<根>.mcp。
+    const disabledByProject = new Set(defaults.projectDisabled);
+    // 全局层实例 / 外部注入实例的有效默认关闭（v20.2）。
+    const effectiveDisabled = defaults.effectiveDisabled;
     // 三个来源并行解析；单个失败只记 warn。
     const refsPromise: Promise<Record<string, { disabled?: boolean }>> =
       cwd !== undefined && deps.imports !== undefined
@@ -540,11 +591,12 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
       // 自身 `disabled: true`（全局层不会挂它）时才在会话内补挂。
       if (globalServers[key].disabled === true) session.push({ key, entry: globalServers[key] });
     }
-    // 全局配置条目 + 外部注入实例：候选 = 项目默认关闭的键 ∪ 本会话显式开关过的键。
-    // 生效规则：显式会话开关 > 项目级默认；关掉即用 tools.restrict 屏蔽其全局工具
-    // （共享实例不卸载；按 agent 作用域注入的实例 restrict 会失败→降级 skipped）。
+    // 全局配置条目 + 外部注入实例：候选 = **有效默认关闭**的键 ∪ 本会话显式
+    // 开关过的键。生效规则：显式会话开关 > 有效默认（全局默认 ∪ 项目默认 \
+    // 项目重开）；关掉即用 tools.restrict 屏蔽其全局工具（共享实例不卸载；
+    // 按 agent 作用域注入的实例 restrict 会失败→降级 skipped）。
     const serverCandidates = new Map<string, string>(); // serverName → 展示用 key（config key 优先）
-    for (const key of disabledByProject) {
+    for (const key of effectiveDisabled) {
       // 项目原生条目（且全局没有同名）由"是否在会话内挂载"控制，不是全局/外部实例，
       // 不能当成 server 屏蔽候选——否则会平白产生一条 skipped 记录。
       if (Object.hasOwn(projectServers, key) && !globalEnabled(key) && !Object.hasOwn(refs, key)) continue;
@@ -561,8 +613,9 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
         if (!explicit) restrict.set(key, { key, serverName });
         continue;
       }
-      // 未显式设置 ⇒ 跟随项目默认：只有"项目默认关闭"才需要屏蔽。
-      const defaultDisabled = [...disabledByProject].some((item) => sanitizeServerName(item) === serverName);
+      // 未显式设置 ⇒ 跟随有效默认：只有"有效默认关闭"才需要屏蔽
+      // （全局默认 ∪ 项目默认，已扣掉本工作区显式重新打开的名字）。
+      const defaultDisabled = effectiveDisabled.some((item) => sanitizeServerName(item) === serverName);
       if (defaultDisabled) restrict.set(key, { key, serverName });
     }
     return { session, restrict: [...restrict.values()] };
@@ -1217,11 +1270,46 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
     if (record !== undefined) await scheduleRemount(record);
   }
 
+  /**
+   * 全局默认（`capability-global-overrides.json` 的 `mcp`）写入后的**热应用**。
+   *
+   * 只重算「全局层实例 / 外部注入实例」的屏蔽目标，**不重挂任何 fiber**（共享
+   * 实例不卸载、项目层挂载不换代）：
+   *
+   *   1. 逐 session 串行（各自 `record.queue`，与 remount 同一队列，避免交错）；
+   *   2. `resolveSessionPlan` 重算 → 更新 `record.restrictTargets`；
+   *   3. `applyRestrictions`（`tools.restrict`，幂等短路）+ `refreshPromptShadows`
+   *      （同名空文本段影子，幂等增量）。
+   *
+   * 单个 session 失败只 warn，不向调用方抛（全局默认文件已经写成功，运行时投影
+   * 失败不能把 RPC 判成失败；下一次 `tools/change` / 重挂仍会收敛）。
+   */
+  async function refreshRestrictions(): Promise<void> {
+    if (!enabled) return;
+    const tasks: Promise<void>[] = [];
+    for (const record of sessions.values()) {
+      const run = record.queue.then(async () => {
+        try {
+          const plan = await resolveSessionPlan(record.cwd, record.agent?.id);
+          record.restrictTargets = plan.restrict;
+          applyRestrictions(record);
+          refreshPromptShadows(record);
+        } catch (error) {
+          logger.warn?.(`capability-panel: 刷新全局 MCP 屏蔽失败（session ${record.agent?.id}）：${errMessage(error)}`);
+        }
+      });
+      record.queue = run.catch(() => undefined);
+      tasks.push(run);
+    }
+    await Promise.allSettled(tasks);
+  }
+
   return {
     setSessionEnabled,
     setSessionEnabledMany,
     sessionToggleState,
     hydrateSession,
+    refreshRestrictions,
     /** 状态视图；传 cwd 时按项目根过滤 session，全局层哨兵恒返回（见模块头注释）。 */
     status(cwd?: string): McpStatusView[] {
       if (!enabled) return [];

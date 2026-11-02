@@ -105,22 +105,27 @@ export interface PanelRpcService {
         setSessionEnabled(input: unknown): Promise<unknown>;
     };
     overrides: {
-        /** 项目级默认声明（含 B2 的 `enabledSkills`）+ 有效默认计算入口。 */
+        /**
+         * 项目级默认声明（含 B2 的 `enabledSkills` / v20.2 的 `enabledMcp`）+
+         * 有效默认计算入口。
+         */
         get(cwd?: string): Promise<unknown>;
         /**
-         * 切换项目级默认。`mcp` = 翻转项目禁用清单；`skills`（B2 三态）：
-         * `enabled=true` → 写 `enabledSkills` 并移出 `skills`；`enabled=false` →
-         * 写 `skills` 并移出 `enabledSkills`；不传则翻转有效默认。
+         * 切换项目级默认（`domain: "mcp" | "skills"`，两者均为三态）：
+         * `enabled=true` → 写 `enabledMcp` / `enabledSkills` 并移出 `mcp` / `skills`；
+         * `enabled=false` → 写禁用清单并移出重新打开名单；不传则翻转有效默认。
          */
         toggle(input: unknown): Promise<unknown>;
         /**
-         * 全局默认（B2）：`{}` → `{ skills: string[], filePath: string, errors? }`。
+         * 全局默认（B2 Skills / v20.2 MCP）：`{}` →
+         * `{ skills: string[], mcp: string[], filePath: string, errors? }`。
          * 文件缺失 / 空 → 空名单；损坏 → 降级为空名单 + `errors`（可读原因）。
          */
         globalGet(): Promise<unknown>;
         /**
-         * 全局默认开关（B2）：`{domain:"skills", key, disabled}` →
+         * 全局默认开关：`{domain:"skills"|"mcp", key, disabled}` →
          * `{ok:true}` / `{ok:false, errors}`；写 `capability-global-overrides.json`。
+         * `mcp` 域成功后会热应用（重算 restrict / 指令段影子，不重挂 fiber）。
          */
         globalToggle(input: unknown): Promise<unknown>;
     };
