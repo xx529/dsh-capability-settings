@@ -213,33 +213,31 @@ function McpServerRow({
           {server.summary}
         </span>
       </button>
-      <label
-        className="skp-row-toggle"
-        title={
-          invisible
-            ? "该能力对所有工作区都不可见：不参与默认开关；先在「可见范围」里打开可见性"
-            : scope === "global"
-              ? server.enabled
-                ? "关闭：所有工作区默认不启用（写配置文件 disabled）"
-                : "打开：所有工作区默认启用（移除配置文件 disabled）"
-              : checked
-                ? "关闭：仅此工作区默认不启用（写项目覆盖，其它工作区不受影响）"
-                : "打开：仅此工作区默认启用（写项目覆盖）"
-        }
-      >
-        <span className="skp-row-default-label">{switchLabel}</span>
-        <span className="skp-switch">
-          <input
-            type="checkbox"
-            role="switch"
-            aria-label={`${switchLabel} ${server.key}`}
-            checked={checked}
-            disabled={busy || invisible}
-            onChange={onToggleDefault}
-          />
-          <span className="skp-switch-track" />
-        </span>
-      </label>
+      {/* v21 UX 修订：全局视图行尾不再有单开关（默认在「可见范围」里按工作区配）；
+          工作区视图保留默认开关 = 本工作区覆盖。 */}
+      {scope === "workspace" && (
+        <label
+          className="skp-row-toggle"
+          title={
+            checked
+              ? "关闭：仅此工作区默认不启用（写项目覆盖，其它工作区不受影响）"
+              : "打开：仅此工作区默认启用（写项目覆盖）"
+          }
+        >
+          <span className="skp-row-default-label">{switchLabel}</span>
+          <span className="skp-switch">
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label={`${switchLabel} ${server.key}`}
+              checked={checked}
+              disabled={busy}
+              onChange={onToggleDefault}
+            />
+            <span className="skp-switch-track" />
+          </span>
+        </label>
+      )}
     </li>
   );
 }
@@ -492,20 +490,23 @@ function McpExternalRow({
           {summary}
         </span>
       </button>
-      <label className="skp-row-toggle" title={switchTitle}>
-        <span className="skp-row-default-label">{switchLabel}</span>
-        <span className="skp-switch">
-          <input
-            type="checkbox"
-            role="switch"
-            aria-label={`${switchLabel} ${server.serverName}`}
-            checked={checked}
-            disabled={!canToggle || busy || invisible}
-            onChange={onToggleDefault}
-          />
-          <span className="skp-switch-track" />
-        </span>
-      </label>
+      {/* v21 UX 修订：全局视图行尾不再有单开关；工作区视图保留默认开关。 */}
+      {scope === "workspace" && (
+        <label className="skp-row-toggle" title={canToggle ? switchTitle : EXTERNAL_TOGGLE_BLOCKED_TITLE}>
+          <span className="skp-row-default-label">{switchLabel}</span>
+          <span className="skp-switch">
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label={`${switchLabel} ${server.serverName}`}
+              checked={checked}
+              disabled={!canToggle || busy}
+              onChange={onToggleDefault}
+            />
+            <span className="skp-switch-track" />
+          </span>
+        </label>
+      )}
     </li>
   );
 }

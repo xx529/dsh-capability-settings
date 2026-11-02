@@ -164,6 +164,19 @@ export function defaultSummaryOf(
   return { on, off };
 }
 
+/** 详情一行式可见范围摘要（v21 UX 修订：详情不再内联表格/分段）。 */
+export function visibilitySummaryText(
+  entry: ClientCapabilityVisibility | undefined,
+  workspaces: VisibilityWorkspace[],
+  globalOff: boolean,
+): string {
+  const mode = visibilityModeOf(entry);
+  if (mode === "none") return "可见范围：不可见（所有工作区与对话首屏都不出现）";
+  const scopeText = mode === "selected" ? `指定 ${visibleWorkspaceCountOf(entry, workspaces)} 个工作区` : "全部工作区";
+  const summary = defaultSummaryOf(entry, workspaces, globalOff);
+  return summary === undefined ? `可见范围：${scopeText}` : `可见范围：${scopeText} · 默认：${summary.on} 开 / ${summary.off} 关`;
+}
+
 /** 工作区视图的「跟随全局默认 / 已覆盖」状态。 */
 export type WorkspaceOverrideState = "inherit" | "on" | "off";
 
@@ -254,7 +267,13 @@ export function VisibilityRowMeta({
   );
 }
 
-/** 详情「可见范围」分段 + 工作区表格 + 编辑入口（全局视图用）。 */
+/**
+ * 详情「可见范围」摘要 + 编辑入口（全局视图用；v21 UX 修订）。
+ *
+ * 详情不再内联分段控件与工作区表格（太长、把详情裁掉），只保留一行摘要：
+ * 「可见范围：全部工作区 · 默认：N 开 / M 关」；模式与每工作区默认都在
+ * 「编辑可见范围」弹层里配置（弹层内已有分段 + 表格）。
+ */
 export function VisibilityDetailFields({
   api,
   domain,
@@ -279,57 +298,19 @@ export function VisibilityDetailFields({
   onSaved: () => void;
 }): ReactNode {
   const [open, setOpen] = useState(false);
-  const mode = visibilityModeOf(entry);
-  const visibleCount = visibleWorkspaceCountOf(entry, workspaces);
-  const segments: Array<{ value: ClientVisibilityMode; label: string }> = [
-    { value: "all", label: "全部" },
-    { value: "selected", label: `指定 ${mode === "selected" ? visibleCount : ""}`.trim() },
-    { value: "none", label: "不可见" },
-  ];
+  const summary = visibilitySummaryText(entry, workspaces, globalOff);
   return (
     <>
       <dt>可见范围</dt>
       <dd>
         <div className="skp-vis-detail-head">
-          <div className="skp-scope-seg" role="group" aria-label="可见范围">
-            {segments.map((segment) => (
-              <button
-                key={segment.value}
-                type="button"
-                className={segment.value === mode ? "skp-scope-seg-btn skp-scope-seg-btn-active" : "skp-scope-seg-btn"}
-                aria-pressed={segment.value === mode}
-                title={mode === segment.value ? "当前可见范围" : "在「编辑可见范围」里修改"}
-                onClick={() => setOpen(true)}
-              >
-                {segment.label}
-              </button>
-            ))}
-          </div>
+          <span className="skp-vis-detail-summary" title={summary}>
+            {summary}
+          </span>
           <button type="button" className="skp-btn" onClick={() => setOpen(true)}>
             编辑可见范围
           </button>
         </div>
-        {mode === "none" ? (
-          <div className="skp-note">不可见：不出现在任何工作区与对话首屏；运行时强制关闭（会话开关不能打开）。</div>
-        ) : workspaces.length === 0 ? (
-          <div className="skp-note">还没有已知工作区；新建工作区后可在「编辑可见范围」里配置。</div>
-        ) : (
-          <ul className="skp-vis-ws-list" aria-label="各工作区可见性与默认">
-            {workspaces.map((workspace) => {
-              const visible = isWorkspaceVisible(entry, workspace.path);
-              const defaultOn = workspaceDefaultOf(entry, workspace.path, globalOff);
-              return (
-                <li key={workspace.path} className="skp-vis-ws-row" title={workspace.path}>
-                  <span className="skp-vis-ws-name">{visibilityWorkspaceTitle(workspace)}</span>
-                  <span className={visible ? "skp-tag skp-tag-flat" : "skp-tag skp-tag-warn"}>
-                    {visible ? "可见" : "不可见"}
-                  </span>
-                  {visible && <span className="skp-vis-ws-default">默认{defaultOn ? "开" : "关"}</span>}
-                </li>
-              );
-            })}
-          </ul>
-        )}
         {open && (
           <VisibilityModal
             api={api}

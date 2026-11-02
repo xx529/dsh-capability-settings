@@ -874,15 +874,10 @@ function SkillsView({
             : state === "partial"
               ? "部分禁用"
               : "已禁用";
-    // v21：全局视图不可见行 → 开关禁用并标「不可见 · 不参与默认」。
-    const switchLabel = invisible
-      ? "不可见 · 不参与默认"
-      : scope === "global"
-        ? "全局默认"
-        : `${projectName ?? "工作区"} 默认 · ${overrideState === "inherit" ? "跟随全局" : "已覆盖"}`;
-    const switchTitle = invisible
-      ? "该能力对所有工作区都不可见：不参与默认开关；先在「可见范围」里打开可见性"
-      : switcher.title;
+    // v21 UX 修订：全局视图行尾不再有单开关（默认按工作区在弹层里配）；
+    // 工作区视图保留行尾默认开关（写本工作区覆盖）。
+    const switchLabel = `${projectName ?? "工作区"} 默认 · ${overrideState === "inherit" ? "跟随全局" : "已覆盖"}`;
+    const switchTitle = switcher.title;
     return (
       <div
         role="option"
@@ -938,26 +933,28 @@ function SkillsView({
               </span>
             )}
           </div>
-          {/* 行尾开关：标签写明作用域（全局默认 / HtDot 默认），点击不改变选中。 */}
-          <label
-            className="skp-row-toggle"
-            title={switchTitle}
-            onClick={(event) => event.stopPropagation()}
-            onKeyDown={(event) => event.stopPropagation()}
-          >
-            <span className="skp-row-default-label">{switchLabel}</span>
-            <span className="skp-switch">
-              <input
-                type="checkbox"
-                role="switch"
-                aria-label={`启用 ${item.name}`}
-                checked={checked}
-                disabled={switcher.disabled || invisible || busyRow === key}
-                onChange={(event) => void toggleRow(item, event.target.checked)}
-              />
-              <span className="skp-switch-track" />
-            </span>
-          </label>
+          {/* 行尾开关（仅工作区视图 = 本工作区默认覆盖；全局默认在「可见范围」弹层里按工作区配）。 */}
+          {scope === "workspace" && (
+            <label
+              className="skp-row-toggle"
+              title={switchTitle}
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              <span className="skp-row-default-label">{switchLabel}</span>
+              <span className="skp-switch">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  aria-label={`启用 ${item.name}`}
+                  checked={checked}
+                  disabled={switcher.disabled || busyRow === key}
+                  onChange={(event) => void toggleRow(item, event.target.checked)}
+                />
+                <span className="skp-switch-track" />
+              </span>
+            </label>
+          )}
         </div>
         <div className="skp-row-desc">{item.description.length > 0 ? item.description : "（无描述）"}</div>
       </div>

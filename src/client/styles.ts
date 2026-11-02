@@ -511,7 +511,9 @@ button.skp-tag:focus-visible{outline:none;box-shadow:0 0 0 2px var(--skp-accent-
 .skp-tag-relation:hover{background:var(--skp-accent-soft);}
 .skp-dot-hollow{background:transparent;box-shadow:inset 0 0 0 1.5px var(--skp-text-3);}
 .skp-dot{margin-right:6px;}
-.skp-detail-fixed{display:flex;padding:20px 24px;overflow:hidden;}
+/* v21 滚动修复：详情栏自身纵向滚动（长详情不再被裁掉）；横向不滚、保留 padding。
+   Skills 内容区仍保留文件树/阅读器的内部滚动，这里只兜底「详情整体超出」的情况。 */
+.skp-detail-fixed{display:flex;padding:20px 24px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:var(--dsw-alias-scrollbar-bg-l2,rgba(0,0,0,.18)) transparent;}
 .skp-detail-fixed .skp-detail-empty{flex:1 1 auto;width:100%;}
 .skp-detail-fixed .skp-detail-card{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;min-width:0;gap:0;font-size:14px;color:var(--skp-text-2);}
 .skp-detail-fixed .skp-detail-head{display:flex;align-items:center;justify-content:flex-start;gap:8px;flex:none;min-height:40px;margin-bottom:10px;min-width:0;}
@@ -869,11 +871,10 @@ button.skp-dock-rail-fail:hover{filter:brightness(.9);}
 
 /* v21 可见性（全局行标签 / 详情分段 / 可见范围弹层；优先复用既有 token） */
 .skp-vis-summary{flex:none;font-size:11px;color:var(--skp-text-3);white-space:nowrap;}
-.skp-vis-detail-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:2px 0 8px;}
-.skp-vis-ws-list{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:4px;}
-.skp-vis-ws-row{display:flex;align-items:center;gap:8px;min-width:0;font-size:12.5px;color:var(--skp-text-2);}
-.skp-vis-ws-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.skp-vis-ws-default{margin-left:auto;flex:none;font-size:11.5px;color:var(--skp-text-3);white-space:nowrap;}
+/* v21 UX 修订：详情只保留一行「可见范围」摘要 + 编辑按钮（不再内联分段/长表格）。 */
+.skp-vis-detail-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:2px 0 4px;}
+.skp-vis-detail-summary{min-width:0;flex:1 1 auto;font-size:12.5px;line-height:1.6;color:var(--skp-text-2);word-break:break-word;}
+.skp-vis-detail-head .skp-btn{flex:none;}
 .skp-vis-modal{display:flex;flex-direction:column;gap:12px;min-width:0;}
 .skp-vis-mode-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
 .skp-vis-modal-note{font-size:12.5px;line-height:1.6;color:var(--skp-text-3);}

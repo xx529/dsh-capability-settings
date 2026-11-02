@@ -504,20 +504,24 @@ export function ToolsView({
             {visibilityMeta}
           </span>
         </button>
-        <label className="skp-row-toggle" title={switchTitle}>
-          <span className="skp-row-default-label">{switchLabel}</span>
-          <span className="skp-switch">
-            <input
-              type="checkbox"
-              role="switch"
-              aria-label={`默认启用 ${unit.name}`}
-              checked={state.checked}
-              disabled={state.disabled || busyUnit === unit.unit}
-              onChange={(event) => void toggleDefault(unit, event.target.checked)}
-            />
-            <span className="skp-switch-track" />
-          </span>
-        </label>
+        {/* v21 UX 修订：全局视图行尾不再有单开关（默认在「可见范围」里按工作区配）；
+            工作区视图保留默认开关 = 本工作区覆盖。 */}
+        {scope === "workspace" && (
+          <label className="skp-row-toggle" title={switchTitle}>
+            <span className="skp-row-default-label">{switchLabel}</span>
+            <span className="skp-switch">
+              <input
+                type="checkbox"
+                role="switch"
+                aria-label={`默认启用 ${unit.name}`}
+                checked={state.checked}
+                disabled={state.disabled || busyUnit === unit.unit}
+                onChange={(event) => void toggleDefault(unit, event.target.checked)}
+              />
+              <span className="skp-switch-track" />
+            </span>
+          </label>
+        )}
       </li>
     );
   };

@@ -61,6 +61,8 @@ export declare function defaultSummaryOf(entry: ClientCapabilityVisibility | und
     on: number;
     off: number;
 } | undefined;
+/** 详情一行式可见范围摘要（v21 UX 修订：详情不再内联表格/分段）。 */
+export declare function visibilitySummaryText(entry: ClientCapabilityVisibility | undefined, workspaces: VisibilityWorkspace[], globalOff: boolean): string;
 /** 工作区视图的「跟随全局默认 / 已覆盖」状态。 */
 export type WorkspaceOverrideState = "inherit" | "on" | "off";
 /** 从项目 overrides 判断某能力在本工作区是否有显式默认覆盖。 */
@@ -85,7 +87,13 @@ export declare function VisibilityRowMeta({ entry, workspaces, globalOff, mode, 
     invisible?: boolean;
     summaryClassName?: string;
 }): ReactNode;
-/** 详情「可见范围」分段 + 工作区表格 + 编辑入口（全局视图用）。 */
+/**
+ * 详情「可见范围」摘要 + 编辑入口（全局视图用；v21 UX 修订）。
+ *
+ * 详情不再内联分段控件与工作区表格（太长、把详情裁掉），只保留一行摘要：
+ * 「可见范围：全部工作区 · 默认：N 开 / M 关」；模式与每工作区默认都在
+ * 「编辑可见范围」弹层里配置（弹层内已有分段 + 表格）。
+ */
 export declare function VisibilityDetailFields({ api, domain, capabilityKey, name, entry, workspaces, globalOff, onSaved, }: {
     api: CapabilityPanelApi;
     domain: ClientCapabilityDomain;
