@@ -26,10 +26,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type {
   CapabilityPanelApi,
+  ClientCapabilityVisibility,
+  ClientGlobalOverrides,
   ClientMcpRuntimeServer,
   ClientMcpServer,
   ClientMcpTool,
   ClientMcpUsageView,
+  ClientOverrides,
   McpApi,
   McpTestResult,
   OpResult,
@@ -42,6 +45,20 @@ import { ScopeChain } from "./scope-chain.js";
 import { ToolParameterTable, toolParameters } from "./tool-schema.js";
 import { SkpSelect } from "./select.js";
 import { hasWorkspaceLabel, useAsyncList } from "./panel-common.js";
+import {
+  EMPTY_VISIBILITY_SETS,
+  VisibilityDetailFields,
+  VisibilityRowMeta,
+  isRowInvisible,
+  safeGlobalGet,
+  safeOverridesGet,
+  visibilityEntryOf,
+  visibilityModeOf,
+  visibleWorkspaceCountOf,
+  workspaceOverrideOf,
+  type VisibilityWorkspace,
+  type WorkspaceOverrideState,
+} from "./visibility.js";
 
 /** 复合行 id：同一个 key 可能同时存在于 project 与 global 两个作用域。 */
 function rowId(server: Pick<ClientMcpServer, "scope" | "key">): string {
@@ -83,6 +100,11 @@ function McpServerRow({
   scope,
   projectName,
   toolCount,
+  visibilityEntry,
+  projects,
+  globalOff,
+  invisible,
+  overrideState,
   selected,
   busy,
   onSelect,
@@ -95,6 +117,16 @@ function McpServerRow({
   projectName?: string;
   /** 本次运行内探测成功回填的工具数（未探测时缺省 → 「工具数未知」）。 */
   toolCount?: number;
+  /** v21：可见性配置（仅全局条目；项目原生 / 引用条目不参与）。 */
+  visibilityEntry?: ClientCapabilityVisibility;
+  /** v21：全部已知工作区（可见性标签 / 默认摘要）。 */
+  projects: VisibilityWorkspace[];
+  /** v21：兜底默认是否关闭（MCP 全局默认名单）。 */
+  globalOff: boolean;
+  /** v21：该能力对所有工作区不可见（全局视图行尾默认开关禁用）。 */
+  invisible: boolean;
+  /** v21：工作区视图下本工作区是否显式覆盖了默认（跟随 / 已覆盖）。 */
+  overrideState: WorkspaceOverrideState;
   selected: boolean;
   /** 写操作进行中（同一时间只允许一个开关操作）。 */
   busy: boolean;
@@ -115,7 +147,13 @@ function McpServerRow({
           ? { label: "全局", className: "skp-tag skp-tag-global" }
           : { label: "本项", className: "skp-tag skp-tag-project" };
   const defaultOff = scope === "workspace" && isGlobal && server.disabledInProject === true;
-  const switchLabel = scope === "global" ? "全局默认" : `${projectName ?? "工作区"} 默认`;
+  const switchLabel = invisible
+    ? "不可见 · 不参与默认"
+    : scope === "global"
+      ? "全局默认"
+      : `${projectName ?? "工作区"} 默认 · ${overrideState === "inherit" ? "跟随全局" : "已覆盖"}`;
+  /** 只有全局视图的全局条目能编辑可见性（项目原生 / 引用不参与）。 */
+  const showVisibility = scope === "global" && isGlobal;
   return (
     <li className={selected ? "skp-row-wrap skp-row-wrap-active" : "skp-row-wrap"}>
       <button type="button" className={selected ? "skp-row skp-row-active" : "skp-row"} style={{ minHeight: 72 }} onClick={onSelect}>
@@ -143,6 +181,28 @@ function McpServerRow({
               被遮蔽
             </span>
           )}
+          {showVisibility && (
+            <VisibilityRowMeta
+              entry={visibilityEntry}
+              workspaces={projects}
+              globalOff={globalOff}
+              mode={server.visibilityMode ?? visibilityModeOf(visibilityEntry)}
+              count={server.visibleWorkspaceCount ?? visibleWorkspaceCountOf(visibilityEntry, projects)}
+              invisible={invisible}
+            />
+          )}
+          {scope === "workspace" && overrideState !== "inherit" && isGlobal && (
+            <span
+              className="skp-tag skp-tag-warn"
+              title={
+                overrideState === "on"
+                  ? "本工作区显式打开（覆盖全局的每工作区默认）"
+                  : "本工作区显式关闭（覆盖全局的每工作区默认）"
+              }
+            >
+              已覆盖
+            </span>
+          )}
           <span>
             {toolCount !== undefined
               ? `${toolCount} 个工具`
@@ -156,13 +216,15 @@ function McpServerRow({
       <label
         className="skp-row-toggle"
         title={
-          scope === "global"
-            ? server.enabled
-              ? "关闭：所有工作区默认不启用（写配置文件 disabled）"
-              : "打开：所有工作区默认启用（移除配置文件 disabled）"
-            : checked
-              ? "关闭：仅此工作区默认不启用（写项目覆盖，其它工作区不受影响）"
-              : "打开：仅此工作区默认启用（写项目覆盖）"
+          invisible
+            ? "该能力对所有工作区都不可见：不参与默认开关；先在「可见范围」里打开可见性"
+            : scope === "global"
+              ? server.enabled
+                ? "关闭：所有工作区默认不启用（写配置文件 disabled）"
+                : "打开：所有工作区默认启用（移除配置文件 disabled）"
+              : checked
+                ? "关闭：仅此工作区默认不启用（写项目覆盖，其它工作区不受影响）"
+                : "打开：仅此工作区默认启用（写项目覆盖）"
         }
       >
         <span className="skp-row-default-label">{switchLabel}</span>
@@ -172,7 +234,7 @@ function McpServerRow({
             role="switch"
             aria-label={`${switchLabel} ${server.key}`}
             checked={checked}
-            disabled={busy}
+            disabled={busy || invisible}
             onChange={onToggleDefault}
           />
           <span className="skp-switch-track" />
@@ -304,6 +366,10 @@ function McpExternalRow({
   scope,
   projectName,
   globalDefaultDisabled,
+  visibilityEntry,
+  projects,
+  invisible,
+  overrideState,
   selected,
   busy,
   onSelect,
@@ -317,6 +383,14 @@ function McpExternalRow({
    * 与宿主行字段 `disabledGlobally` 取并集：旧宿主缺字段时仍能给出标签）。
    */
   globalDefaultDisabled: boolean;
+  /** v21：可见性配置（外部注入实例同样按 serverName 存可见性）。 */
+  visibilityEntry?: ClientCapabilityVisibility;
+  /** v21：全部已知工作区（标签 / 默认摘要）。 */
+  projects: VisibilityWorkspace[];
+  /** v21：该实例对所有工作区不可见 ⇒ 默认开关禁用 + 标「不可见 · 不参与默认」。 */
+  invisible: boolean;
+  /** v21：工作区视图下本工作区是否显式覆盖了默认。 */
+  overrideState: WorkspaceOverrideState;
   selected: boolean;
   busy: boolean;
   onSelect(): void;
@@ -335,7 +409,11 @@ function McpExternalRow({
   const summary = isSynthesized(server)
     ? "由工具命名空间合成 · 无 mcp-client 实例（配置只读）"
     : (server.summary ?? "运行时注入，由注入方管理（默认开关可写）");
-  const switchLabel = scope === "workspace" ? `${projectName ?? "工作区"} 默认` : "全局默认";
+  const switchLabel = invisible
+    ? "不可见 · 不参与默认"
+    : scope === "global"
+      ? "全局默认"
+      : `${projectName ?? "工作区"} 默认 · ${overrideState === "inherit" ? "跟随全局" : "已覆盖"}`;
   /** 行内状态标签：全局默认关闭 / 已覆盖全局默认 / 工作区默认关闭。 */
   const stateTag =
     scope === "global"
@@ -349,7 +427,9 @@ function McpExternalRow({
         : defaultOff
           ? { label: "工作区默认关闭", title: "该工作区默认关闭；只影响本工作区" }
           : undefined;
-  const switchTitle = !canToggle
+  const switchTitle = invisible
+    ? "该实例对所有工作区都不可见：不参与默认开关；先在「可见范围」里打开可见性"
+    : !canToggle
     ? EXTERNAL_TOGGLE_BLOCKED_TITLE
     : scope === "global"
       ? checked
@@ -388,6 +468,24 @@ function McpExternalRow({
               {stateTag.label}
             </span>
           )}
+          {scope === "global" && (
+            <VisibilityRowMeta
+              entry={visibilityEntry}
+              workspaces={projects}
+              globalOff={globalOff}
+              mode={server.visibilityMode ?? visibilityModeOf(visibilityEntry)}
+              count={server.visibleWorkspaceCount ?? visibleWorkspaceCountOf(visibilityEntry, projects)}
+              invisible={invisible}
+            />
+          )}
+          {scope === "workspace" && overrideState !== "inherit" && (
+            <span
+              className="skp-tag skp-tag-warn"
+              title={overrideState === "on" ? "本工作区显式打开（覆盖全局的每工作区默认）" : "本工作区显式关闭（覆盖全局的每工作区默认）"}
+            >
+              已覆盖
+            </span>
+          )}
           <span>{meta}</span>
         </span>
         <span className="skp-row-desc" style={ROW_SUMMARY_STYLE} title={summary}>
@@ -402,7 +500,7 @@ function McpExternalRow({
             role="switch"
             aria-label={`${switchLabel} ${server.serverName}`}
             checked={checked}
-            disabled={!canToggle || busy}
+            disabled={!canToggle || busy || invisible}
             onChange={onToggleDefault}
           />
           <span className="skp-switch-track" />
@@ -472,6 +570,10 @@ export function McpView({
   const [confirmImport, setConfirmImport] = useState<string | undefined>(undefined);
   /** 本次运行内探测成功回填的工具数（serverName → 工具数）；不落盘、不新增宿主字段。 */
   const [toolCounts, setToolCounts] = useState<Record<string, number>>({});
+  /** v21：工作区视图的项目 overrides（判断「跟随全局默认 / 已覆盖」）。 */
+  const [projectOverrides, setProjectOverrides] = useState<ClientOverrides | undefined>(undefined);
+  /** 写操作计数：overrides 变化后重读项目覆盖态。 */
+  const [writeVersion, setWriteVersion] = useState(0);
 
   const scope: "global" | "workspace" = workspace === undefined ? "global" : "workspace";
   const projectName =
@@ -489,15 +591,17 @@ export function McpView({
       const [list, runtime, globalOverrides] = await Promise.all([
         mcpApi.list(),
         // 运行时注入的 MCP（其它插件/profile 挂的 mcp-client）：配置只读展示，失败不影响主列表。
-        mcpApi.runtime({ cwd: workspace }).catch(() => ({ servers: [] })),
-        // 全局默认关闭名单：失败不影响主列表（行内退化为宿主投影的 disabledGlobally）。
-        api.overrides.globalGet().catch(() => undefined),
+        mcpApi.runtime({ cwd: workspace }).catch(() => ({ servers: [], hiddenCount: 0 })),
+        // 全局层（v20.2 默认关闭名单 + v21 可见性）：失败不影响主列表。
+        safeGlobalGet(api),
       ]);
       return {
         servers: list.servers,
         listErrors: list.errors,
+        listHiddenCount: list.hiddenCount ?? 0,
         runtimeServers: runtime.servers,
-        globalDisabledMcp: globalOverrides?.mcp ?? [],
+        runtimeHiddenCount: runtime.hiddenCount ?? 0,
+        globalOverrides,
       };
     },
     [api, mcpApi, workspace],
@@ -505,20 +609,48 @@ export function McpView({
   const servers = data?.servers ?? [];
   const listErrors = data?.listErrors ?? [];
   const runtimeServers = data?.runtimeServers ?? [];
-  /** 全局默认关闭名单（原始成员关系；用于区分「继承全局默认关闭 / 已覆盖」）。 */
-  const globalDisabledMcp = data?.globalDisabledMcp ?? [];
-  const globalDefaultDisabledOf = (server: ClientMcpRuntimeServer): boolean =>
-    globalDisabledMcp.includes(server.serverName) || server.disabledGlobally === true;
+  const globalOverrides = data?.globalOverrides;
+  const visibilitySets = globalOverrides?.visibility ?? EMPTY_VISIBILITY_SETS;
+  /** v21：工作区视图被可见性隐藏的条目数（配置条目 + 外部实例）。 */
+  const hiddenCount = scope === "workspace" ? (data?.listHiddenCount ?? 0) + (data?.runtimeHiddenCount ?? 0) : 0;
+
+  /** 某 serverName 的可见性配置（配置条目与外部注入共用 serverName）。 */
+  const visibilityOfName = (serverName: string): ClientCapabilityVisibility | undefined =>
+    visibilityEntryOf(visibilitySets, "mcp", serverName);
+  /** 兜底默认是否关闭（全局默认关闭名单原始成员；外部实例也看 disabledGlobally）。 */
+  const globalOffOf = (serverName: string, disabledGlobally?: boolean): boolean =>
+    globalOverrides?.mcp.includes(serverName) === true || disabledGlobally === true;
+  const invisibleOf = (row: { visibilityMode?: string; visibleWorkspaceCount?: number; disabledByVisibility?: boolean }, entry: ClientCapabilityVisibility | undefined): boolean =>
+    isRowInvisible(row as { visibilityMode?: "all" | "selected" | "none"; visibleWorkspaceCount?: number; disabledByVisibility?: boolean }, entry, projects);
+
+  // v21：工作区视图读项目 overrides（判断「跟随全局默认 / 已覆盖」）。
+  useEffect(() => {
+    if (scope !== "workspace") {
+      setProjectOverrides(undefined);
+      return;
+    }
+    let alive = true;
+    void safeOverridesGet(api).then((value) => {
+      if (alive) setProjectOverrides(value);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [api, scope, workspace, writeVersion]);
 
   const globalServers = servers.filter((server) => server.scope === "global");
   const projectServers = servers.filter((server) => server.scope === "project");
+  /** 工作区视图里因可见性被隐藏、不应渲染的全局配置条目（旧宿主自动过滤用）。 */
+  const workspaceGlobalServers =
+    scope === "workspace" ? globalServers.filter((server) => server.visibleInWorkspace !== false) : globalServers;
   /** 当前作用域总数（Tab 与列表标题共用同一口径；外部注入单独成组计数）。 */
-  const scopeTotal = scope === "global" ? globalServers.length : [...projectServers, ...globalServers].length;
+  const scopeTotal =
+    scope === "global" ? globalServers.length : projectServers.length + workspaceGlobalServers.length;
 
   useEffect(() => {
     if (data === undefined) return;
-    onCount?.(scope === "global" ? globalServers.length : projectServers.length + globalServers.length);
-  }, [data, scope, globalServers.length, projectServers.length, onCount]);
+    onCount?.(scope === "global" ? globalServers.length : projectServers.length + workspaceGlobalServers.length);
+  }, [data, scope, globalServers.length, projectServers.length, workspaceGlobalServers.length, onCount]);
 
   /** 作用域切换：清空选中与待确认态（详情跟走）。 */
   useEffect(() => {
@@ -542,10 +674,13 @@ export function McpView({
     (server.channel ?? "").toLowerCase().includes(q) ||
     (server.source ?? "").toLowerCase().includes(q) ||
     (server.summary ?? "").toLowerCase().includes(q);
-  const visibleGlobal = globalServers.filter(matchesServer);
+  const visibleGlobal = workspaceGlobalServers.filter(matchesServer);
   const visibleProject = projectServers.filter(matchesServer);
   // R4：有插件展示名的排前面（按展示名升序），无 channel 的排后面（按 serverName）。
-  const visibleExternal = runtimeServers
+  // v21：工作区视图里隐藏实例不渲染（宿主已过滤，这里防旧宿主）。
+  const scenarioRuntimes =
+    scope === "workspace" ? runtimeServers.filter((server) => server.visibleInWorkspace !== false) : runtimeServers;
+  const visibleExternal = scenarioRuntimes
     .filter(matchesExternal)
     .sort((a, b) => {
       const aChannel = a.channel ?? "";
@@ -597,6 +732,7 @@ export function McpView({
       setDefaultError(String(failure));
     } finally {
       setBusyKey(undefined);
+      setWriteVersion((value) => value + 1);
       reload({ silent: true });
     }
   };
@@ -624,6 +760,7 @@ export function McpView({
       setDefaultError(String(failure));
     } finally {
       setBusyKey(undefined);
+      setWriteVersion((value) => value + 1);
       reload({ silent: true });
     }
   };
@@ -689,19 +826,32 @@ export function McpView({
   const renderServerScroll = (list: ClientMcpServer[], label: string) => (
     <div className="skp-group-scroll">
       <ul className="skp-list" role="listbox" aria-label={label}>
-        {list.map((server) => (
-          <McpServerRow
-            key={rowId(server)}
-            server={server}
-            scope={scope}
-            projectName={projectName}
-            toolCount={toolCounts[server.serverName]}
-            selected={selected === rowId(server)}
-            busy={busyKey !== undefined}
-            onSelect={() => selectServer(server)}
-            onToggleDefault={() => void toggleRow(server)}
-          />
-        ))}
+        {list.map((server) => {
+          const isGlobal = server.scope === "global";
+          const entry = isGlobal ? visibilityOfName(server.serverName) : undefined;
+          return (
+            <McpServerRow
+              key={rowId(server)}
+              server={server}
+              scope={scope}
+              projectName={projectName}
+              toolCount={toolCounts[server.serverName]}
+              visibilityEntry={entry}
+              projects={projects}
+              globalOff={globalOffOf(server.serverName)}
+              invisible={isGlobal && invisibleOf(server, entry)}
+              overrideState={
+                scope === "workspace" && isGlobal
+                  ? workspaceOverrideOf(projectOverrides, "mcp", server.serverName)
+                  : "inherit"
+              }
+              selected={selected === rowId(server)}
+              busy={busyKey !== undefined}
+              onSelect={() => selectServer(server)}
+              onToggleDefault={() => void toggleRow(server)}
+            />
+          );
+        })}
       </ul>
     </div>
   );
@@ -737,7 +887,7 @@ export function McpView({
       <section className="skp-group" role="group" aria-label={`外部注入（${visibleExternal.length}）`}>
         {renderGroupHead(
           "外部注入",
-          runtimeServers.length,
+          scenarioRuntimes.length,
           scope === "global" ? "运行时注入 · 可设全局默认" : "运行时注入 · 可设本工作区默认",
         )}
         <div className="skp-group-scroll">
@@ -748,7 +898,15 @@ export function McpView({
                 server={server}
                 scope={scope}
                 projectName={projectName}
-                globalDefaultDisabled={globalDefaultDisabledOf(server)}
+                globalDefaultDisabled={globalOffOf(server.serverName, server.disabledGlobally)}
+                visibilityEntry={visibilityOfName(server.serverName)}
+                projects={projects}
+                invisible={invisibleOf(server, visibilityOfName(server.serverName))}
+                overrideState={
+                  scope === "workspace"
+                    ? workspaceOverrideOf(projectOverrides, "mcp", server.serverName)
+                    : "inherit"
+                }
                 selected={selectedExternalName === server.serverName}
                 busy={busyKey !== undefined}
                 onSelect={() => selectExternal(server)}
@@ -778,7 +936,17 @@ export function McpView({
         </div>
       );
     }
-    if (visibleProject.length === 0 && visibleGlobal.length === 0 && visibleExternal.length === 0) return renderEmpty();
+    if (visibleProject.length === 0 && visibleGlobal.length === 0 && visibleExternal.length === 0) {
+      if (hiddenCount > 0) {
+        return (
+          <div className="skp-group-scroll skp-group-scroll-plain">
+            <div className="skp-empty">本工作区没有可见的 MCP。</div>
+            <div className="skp-pane-note">另有 {hiddenCount} 个能力未对此外工作区开放</div>
+          </div>
+        );
+      }
+      return renderEmpty();
+    }
     return (
       <div className="skp-group-scroll skp-group-scroll-plain">
         {visibleProject.length > 0 && (
@@ -789,11 +957,16 @@ export function McpView({
         )}
         {visibleGlobal.length > 0 && (
           <>
-            {renderGroupHead("引用的全局配置", globalServers.length, `默认开关作用于 ${projectName ?? "此工作区"}`)}
+            {renderGroupHead("引用的全局配置", workspaceGlobalServers.length, `默认开关作用于 ${projectName ?? "此工作区"}`)}
             {renderServerScroll(visibleGlobal, "引用的全局 MCP")}
           </>
         )}
         {renderExternalGroup()}
+        {hiddenCount > 0 && (
+          <div className="skp-pane-note" title="这些能力/实例在全局视图里未被开放给本工作区；请在全局视图的「可见范围」里开启">
+            另有 {hiddenCount} 个能力未对此外工作区开放
+          </div>
+        )}
       </div>
     );
   };
@@ -846,10 +1019,18 @@ export function McpView({
             <McpExternalDetail
               key={selectedExternal.serverName}
               api={mcpApi}
+              panelApi={api}
               server={selectedExternal}
               scope={scope}
               projectName={projectName}
-              globalDefaultDisabled={globalDefaultDisabledOf(selectedExternal)}
+              globalDefaultDisabled={globalOffOf(selectedExternal.serverName, selectedExternal.disabledGlobally)}
+              visibilityEntry={visibilityOfName(selectedExternal.serverName)}
+              projects={projects}
+              globalOff={globalOffOf(selectedExternal.serverName, selectedExternal.disabledGlobally)}
+              onVisibilitySaved={() => {
+                setWriteVersion((value) => value + 1);
+                reload({ silent: true });
+              }}
               workspaces={projects}
               onSelectWorkspace={onSelectWorkspace}
             />
@@ -857,10 +1038,20 @@ export function McpView({
             <McpDetail
               key={rowId(selectedServer)}
               api={mcpApi}
+              panelApi={api}
               server={selectedServer}
               scope={scope}
               workspace={workspace}
               projectName={projectName}
+              visibilityEntry={
+                selectedServer.scope === "global" ? visibilityOfName(selectedServer.serverName) : undefined
+              }
+              projects={projects}
+              globalOff={globalOffOf(selectedServer.serverName)}
+              onVisibilitySaved={() => {
+                setWriteVersion((value) => value + 1);
+                reload({ silent: true });
+              }}
               workspaces={projects}
               onSelectWorkspace={onSelectWorkspace}
               confirmingDelete={confirmDelete === rowId(selectedServer)}
@@ -1031,19 +1222,34 @@ function McpScopeChain({
  */
 function McpExternalDetail({
   api,
+  panelApi,
   server,
   scope,
   projectName,
   globalDefaultDisabled,
+  visibilityEntry,
+  projects,
+  globalOff: globalOffProp,
+  onVisibilitySaved,
   workspaces,
   onSelectWorkspace,
 }: {
   api: McpApi;
+  /** v21：可见性编辑需要面板级 api（`overrides.setVisibility`）。 */
+  panelApi: CapabilityPanelApi;
   server: ClientMcpRuntimeServer;
   scope: "global" | "workspace";
   projectName?: string;
   /** 名字是否在全局默认关闭名单里（原始成员关系；见 McpExternalRow 同名字段）。 */
   globalDefaultDisabled: boolean;
+  /** v21：可见性配置（按 serverName 存）。 */
+  visibilityEntry?: ClientCapabilityVisibility;
+  /** v21：全部已知工作区（可见性分段表格）。 */
+  projects: VisibilityWorkspace[];
+  /** v21：兜底默认是否关闭（与行内摘要同一口径）。 */
+  globalOff: boolean;
+  /** v21：可见性保存成功后的回调（父级重拉列表）。 */
+  onVisibilitySaved: () => void;
   workspaces: Array<{ path: string; title?: string }>;
   onSelectWorkspace(path: string): void;
 }) {
@@ -1052,7 +1258,7 @@ function McpExternalDetail({
   const [usageOpen, setUsageOpen] = useState(false);
   const hasTools = server.tools.length > 0;
   /** 全局默认关闭（原始名单；宿主 `disabledGlobally` 为 true 时也必然是关闭）。 */
-  const globalOff = globalDefaultDisabled || server.disabledGlobally === true;
+  const globalOff = globalOffProp || globalDefaultDisabled || server.disabledGlobally === true;
   /** 本工作区有效默认关闭（含全局默认继承；本工作区重新打开后为 false）。 */
   const workspaceOff = disabledInWorkspaceOf(server);
   return (
@@ -1142,6 +1348,18 @@ function McpExternalDetail({
             </dd>
           </>
         )}
+        {scope === "global" && (
+          <VisibilityDetailFields
+            api={panelApi}
+            domain="mcp"
+            capabilityKey={server.serverName}
+            name={server.serverName}
+            entry={visibilityEntry}
+            workspaces={projects}
+            globalOff={globalOff}
+            onSaved={onVisibilitySaved}
+          />
+        )}
         <dt>全局默认</dt>
         <dd>
           {globalOff
@@ -1205,10 +1423,15 @@ function McpExternalDetail({
  */
 function McpDetail({
   api,
+  panelApi,
   server,
   scope,
   workspace,
   projectName,
+  visibilityEntry,
+  projects,
+  globalOff,
+  onVisibilitySaved,
   workspaces,
   onSelectWorkspace,
   confirmingDelete,
@@ -1221,6 +1444,8 @@ function McpDetail({
 }: {
   /** 面板 API：详情页的「查看工具与参数」直接复用 `mcp.test` 探测通道。 */
   api: McpApi;
+  /** v21：可见性编辑需要面板级 api（`overrides.setVisibility`）。 */
+  panelApi: CapabilityPanelApi;
   server: ClientMcpServer;
   /** 当前面板作用域（global / workspace）。 */
   scope: "global" | "workspace";
@@ -1228,6 +1453,14 @@ function McpDetail({
   workspace?: string;
   /** 工作区展示名（HtDot 口径）。 */
   projectName?: string;
+  /** v21：可见性配置（仅全局配置条目；项目原生 / 引用不参与）。 */
+  visibilityEntry?: ClientCapabilityVisibility;
+  /** v21：全部已知工作区（可见性分段表格）。 */
+  projects: VisibilityWorkspace[];
+  /** v21：兜底默认是否关闭（MCP 全局默认名单）。 */
+  globalOff: boolean;
+  /** v21：可见性保存成功后的回调（父级重拉列表）。 */
+  onVisibilitySaved: () => void;
   /** 全部工作区（全局视图作用域链第二段的下拉选项）。 */
   workspaces: Array<{ path: string; title?: string }>;
   /** 选中工作区后切换面板作用域。 */
@@ -1429,6 +1662,18 @@ function McpDetail({
       </div>
       {isReference && <div className="skp-note">引用：内容跟随全局配置，默认开关只作用于本工作区。</div>}
       <dl className="skp-detail-fields">
+        {scope === "global" && isGlobal && (
+          <VisibilityDetailFields
+            api={panelApi}
+            domain="mcp"
+            capabilityKey={server.serverName}
+            name={server.key}
+            entry={visibilityEntry}
+            workspaces={projects}
+            globalOff={globalOff}
+            onSaved={onVisibilitySaved}
+          />
+        )}
         <dt>命名空间</dt>
         <dd>mcp__{server.serverName}__*</dd>
         {typeof server.entry.description === "string" && server.entry.description.trim().length > 0 && (

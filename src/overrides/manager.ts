@@ -1,12 +1,14 @@
 /**
  * 默认关闭管理服务（挂载为 `ctx.capabilityPanel.overrides`）。
  *
- * **三层存储**（B2，v20.1；v20.2 扩到 MCP）：
+ * **三层存储**（B2，v20.1；v20.2 扩到 MCP；v21 扩到 Tools + 可见性 + 全局文件 v2）：
  *
  *   1. **全局层**：`<dshHome>/dsh-capability-settings/capability-global-overrides.json`
  *      ——`{ version: 1, skills: string[], mcp: string[] }`，全局默认关闭名单；
  *      不改技能文件、不改 MCP 注入方配置、不卸载共享实例。
- *      面板全局视图的 Skills / 外部注入 MCP 开关写这里（见 {@link globalToggle}）。
+ *      面板全局视图的 Skills / 外部注入 MCP / Tools 兜底默认写这里
+ *      （见 {@link globalToggle} / {@link globalToggleMany}）；v21 起的 `visibility`
+ *      也在这里（{@link setVisibility}）。
  *   2. **项目层（统一存储）**：`<dshHome>/dsh-capability-settings/capability-overrides.json`
  *      ——一个文件按**项目根**（`findProjectRoot(cwd)`）分 key，记录每个项目默认
  *      关闭的 MCP server / Skill，以及（B2）本项目**显式重新打开**的 Skill /
@@ -19,7 +21,12 @@
  *   - Skills：`(global.skills ∪ project.skills) \ project.enabledSkills`；
  *     `defaultSets()` / {@link effectiveDisabledSkills} 是唯一计算入口；
  *   - MCP：`(global.mcp ∪ project.mcp) \ project.enabledMcp`；
- *     {@link mcpDefaultSets} 是唯一计算入口（实现见 `shared/mcp-defaults.ts`）。
+ *     {@link mcpDefaultSets} 是旧计算入口（实现见 `shared/mcp-defaults.ts`）。
+ *
+ * **v21 的统一计算入口**是 {@link capabilityDefaults} / {@link capabilityDefaultsMany}：
+ * `visible && (projectOverride ?? workspaces[ws].defaultEnabled ?? !兜底全局默认关闭)`
+ * ——可见性 + 每工作区默认 + 项目三态合并成一个快照，三域列表投影与运行时 gate
+ * 都从它取值（见 `shared/visibility.ts`）。
  *
  * **旧位置兼容**：`<项目根>/.agents/capability-overrides.json`（以及更早的
  * `.dsh` / `.claude`）仍会被读取；某个项目在统一存储里还没有记录时，`sets()`
@@ -52,6 +59,18 @@ import type { SkillDefaultSets } from "../shared/skill-defaults.js";
 import { mcpDefaultSets as mcpDefaultSetsOf } from "../shared/mcp-defaults.js";
 import type { McpDefaultSets } from "../shared/mcp-defaults.js";
 import {
+  emptyVisibilitySets,
+  invisibleKeysForWorkspace,
+  isGloballyDisabled,
+  normalizeMode,
+  normalizeWorkspaceVisibility,
+  perWorkspaceDefault,
+  visibilityEntryOf,
+  visibleIn,
+  visibleWorkspaceCount,
+} from "../shared/visibility.js";
+import type { VisibilityDomain, VisibilitySets, WorkspaceTarget } from "../shared/visibility.js";
+import {
   DOMAIN_KEYS,
   domainSetOf,
   emptyOverrides,
@@ -63,14 +82,17 @@ import {
 import {
   emptyGlobalOverrides,
   readGlobalOverrides,
+  readGlobalOverridesDocument,
   writeGlobalOverrides,
 } from "./global-file.js";
 import { OVERRIDES_FILE_NAME, globalOverridesFile, overridesStoreFile, projectOverridesDirs } from "./paths.js";
 import type {
+  CapabilityDefaults,
   CapabilityDomain,
   GlobalOverrideToggleInput,
   GlobalOverrides,
   GlobalOverridesView,
+  GlobalVisibilityInput,
   OverridesProjectEntry,
   OverridesSet,
   OverridesView,
@@ -79,6 +101,14 @@ import type {
 /** 管理服务的构造依赖。 */
 export interface OverridesManagerDeps {
   dshHome?: string;
+  /**
+   * Tools 的**旧全局默认兜底**（`tools-global.json` 的 disabled 集合）。
+   *
+   * v21 起 Tools 的全局默认写入 `capability-global-overrides.json` 的 `tools`，
+   * 但旧文件继续按「并集」参与兜底（不删、不改写），保证已有用户语义不变。
+   * 缺省 = 无旧文件（只用新名单）。
+   */
+  toolsGlobalDisabled?: () => ReadonlySet<string> | Promise<ReadonlySet<string>>;
 }
 
 /** toggle 的入参（B2 起支持可选的 `enabled`）。 */
@@ -132,13 +162,15 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
     };
   }
 
-  /** 统一存储条目 → 规范化清单（缺失域 = 空数组；B2 不变量在此强制）。 */
+  /** 统一存储条目 → 规范化清单（缺失域 = 空数组；禁用优先不变量在此强制）。 */
   function setOf(entry: OverridesProjectEntry | undefined): OverridesSet {
     return normalizeOverridesSet({
       mcp: entry?.mcp ?? [],
       skills: entry?.skills ?? [],
+      tools: entry?.tools ?? [],
       enabledSkills: entry?.enabledSkills ?? [],
       enabledMcp: entry?.enabledMcp ?? [],
+      enabledTools: entry?.enabledTools ?? [],
     });
   }
 
@@ -161,17 +193,123 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
   }
 
   /**
-   * 读全局覆盖（严格读取）；失败时降级为空名单并带回可读错误。
+   * 读全局覆盖（宽容可见性）；名单 / 版本错误降级为空名单并带回可读错误。
    *
    * 列表 / 投影路径不该被一个损坏的全局文件拖垮，所以这里降级；错误由
-   * `globalGet()` 透出给面板，写入路径（`globalToggle`）会显式报错。
+   * `globalGet()` 透出给面板，写入路径（`globalToggle` / `setVisibility`）
+   * 会显式报错（严格读取）。
    */
   async function readGlobalSafe(): Promise<{ overrides: GlobalOverrides; errors?: string[] }> {
     try {
-      return { overrides: await readGlobalOverrides(globalOverridesFile(deps.dshHome)) };
+      const { overrides, errors } = await readGlobalOverridesDocument(globalOverridesFile(deps.dshHome));
+      return errors.length > 0 ? { overrides, errors } : { overrides };
     } catch (error) {
       return { overrides: emptyGlobalOverrides(), errors: [errMessage(error)] };
     }
+  }
+
+  /** 工作区匹配目标（projectRoot 用于「项目根精确命中」，cwd 用于「path 精确 / 最长前缀」）。 */
+  function workspaceTargetOf(cwd?: string): WorkspaceTarget | undefined {
+    if (cwd === undefined) return undefined;
+    return { projectRoot: findProjectRoot(cwd), cwd };
+  }
+
+  /**
+   * 某域的「兜底全局默认关闭」名单：
+   *   - skills / mcp：全局文件对应名单；
+   *   - tools：全局文件 `tools` ∪ 旧 `tools-global.json` 的 disabled（并集，只读兼容）。
+   */
+  async function globalOffListOf(domain: VisibilityDomain, global: GlobalOverrides): Promise<ReadonlySet<string>> {
+    const off = new Set<string>(domain === "skills" ? global.skills : domain === "mcp" ? global.mcp : global.tools);
+    if (domain === "tools" && deps.toolsGlobalDisabled !== undefined) {
+      try {
+        for (const unit of await deps.toolsGlobalDisabled()) off.add(unit);
+      } catch {
+        /* 旧文件读取失败不影响新名单 */
+      }
+    }
+    return off;
+  }
+
+  /** 项目层某域的禁用 / 重新打开名单（按 CapabilityDomain 取值）。 */
+  function projectListOf(set: OverridesSet, domain: VisibilityDomain, kind: "disabled" | "enabled"): readonly string[] {
+    if (kind === "disabled") return domain === "skills" ? set.skills : domain === "mcp" ? set.mcp : set.tools;
+    return domain === "skills" ? set.enabledSkills : domain === "mcp" ? set.enabledMcp : set.enabledTools;
+  }
+
+  /**
+   * 批量计算能力的默认态快照（可见性 + 每工作区默认 + 项目覆盖）——
+   * **列表投影与三处运行时 gate 的唯一计算入口**（契约 §3）。
+   *
+   * @param domain 可见性域
+   * @param keys 能力 key（skills = 技能名；mcp = serverName；tools = unit id）
+   * @param cwd 工作区路径；缺省 = 全局视图（可见恒 true、项目覆盖为空）
+   */
+  async function capabilityDefaultsMany(
+    domain: VisibilityDomain,
+    keys: readonly string[],
+    cwd?: string,
+  ): Promise<Map<string, CapabilityDefaults>> {
+    const out = new Map<string, CapabilityDefaults>();
+    if (keys.length === 0) return out;
+    const global = (await readGlobalSafe()).overrides;
+    const project = await projectSets(cwd);
+    const off = await globalOffListOf(domain, global);
+    const target = workspaceTargetOf(cwd);
+    for (const rawKey of keys) {
+      const key = typeof rawKey === "string" ? rawKey.trim() : "";
+      if (key.length === 0) continue;
+      const entry = visibilityEntryOf(global.visibility, domain, key);
+      const visible = visibleIn(global.visibility, domain, key, target);
+      const globalDefaultEnabled = perWorkspaceDefault(global.visibility, domain, key, target, off);
+      const projectDisabled = projectListOf(project, domain, "disabled").includes(key);
+      const projectEnabled = projectListOf(project, domain, "enabled").includes(key);
+      const projectOverride = projectEnabled ? true : projectDisabled ? false : undefined;
+      const workspaceDefaultEnabled = projectOverride ?? globalDefaultEnabled;
+      out.set(key, {
+        visible,
+        visibilityMode: normalizeMode(entry?.mode),
+        visibleWorkspaceCount: visibleWorkspaceCount(entry),
+        globalDefaultEnabled,
+        ...(projectOverride !== undefined ? { projectOverride } : {}),
+        workspaceDefaultEnabled,
+        effectiveDefaultEnabled: visible && workspaceDefaultEnabled,
+      });
+    }
+    return out;
+  }
+
+  /** 单个能力的默认态快照（`capabilityDefaultsMany` 的单条包装）。 */
+  async function capabilityDefaults(domain: VisibilityDomain, key: string, cwd?: string): Promise<CapabilityDefaults> {
+    const map = await capabilityDefaultsMany(domain, [key], cwd);
+    const found = map.get(key.trim());
+    if (found !== undefined) return found;
+    // key 非法（空）：返回「全局视图缺省」形状，调用方按 visible=true 处理。
+    return {
+      visible: true,
+      visibilityMode: "all",
+      visibleWorkspaceCount: 0,
+      globalDefaultEnabled: true,
+      workspaceDefaultEnabled: true,
+      effectiveDefaultEnabled: true,
+    };
+  }
+
+  /** 全局可见性快照（坏文件降级全 all，不抛）。 */
+  async function visibilitySets(): Promise<VisibilitySets> {
+    return (await readGlobalSafe()).overrides.visibility;
+  }
+
+  /** 某域在可见性里出现过的能力 key（运行时 gate 用来发现「可能不可见」的名字）。 */
+  async function visibilityKeys(domain: VisibilityDomain): Promise<string[]> {
+    const sets = await visibilitySets();
+    return Object.keys(sets[domain] ?? {}).sort();
+  }
+
+  /** 某工作区里不可见的能力 key（运行时 gate 用；未配置的名字不会出现）。 */
+  async function invisibleKeys(domain: VisibilityDomain, cwd?: string): Promise<string[]> {
+    const sets = await visibilitySets();
+    return invisibleKeysForWorkspace(sets, domain, workspaceTargetOf(cwd));
   }
 
   /**
@@ -248,12 +386,14 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
   async function get(cwd?: string): Promise<OverridesView> {
     const loc = locationFor(cwd);
     const set = await projectSets(cwd);
-    // 兼容既有 `{mcp, skills}` 形状：两域禁用清单照旧，重新打开名单（B2 /
-    // v20.2）作为 additive 字段并列给出。
+    // 兼容既有 `{mcp, skills}` 形状：两域禁用清单照旧，其余名单（B2 / v20.2 /
+    // v21）作为 additive 字段并列给出。
     const view: OverridesView = {
       ...domainSetOf(set),
+      tools: [...set.tools],
       enabledSkills: [...set.enabledSkills],
       enabledMcp: [...set.enabledMcp],
+      enabledTools: [...set.enabledTools],
     };
     if (loc !== undefined) {
       view.filePath = loc.storeFile;
@@ -263,58 +403,187 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
   }
 
   /**
-   * 全局视图（`overrides.globalGet`）：规范化清单（skills / mcp）+ 文件路径。
+   * 全局视图（`overrides.globalGet`）：三名单 + 可见性 + 文件路径。
    *
-   * 文件缺失 / 损坏时降级为空名单；损坏原因额外带回 `errors`（可读原因），
-   * 供面板选择性展示，不让读取抛穿 RPC。
+   * 文件缺失 / 损坏时降级为空名单 / 全可见；损坏原因额外带回 `errors`
+   * （可读原因），供面板选择性展示，不让读取抛穿 RPC。
    */
   async function globalGet(): Promise<GlobalOverridesView> {
     const filePath = globalOverridesFile(deps.dshHome);
     const { overrides, errors } = await readGlobalSafe();
-    const view: GlobalOverridesView = { skills: [...overrides.skills], mcp: [...overrides.mcp], filePath };
+    const view: GlobalOverridesView = {
+      skills: [...overrides.skills],
+      mcp: [...overrides.mcp],
+      tools: [...overrides.tools],
+      visibility: overrides.visibility,
+      filePath,
+    };
     if (errors !== undefined && errors.length > 0) view.errors = errors;
     return view;
   }
 
+  /** 校验一个全局默认域 + key；返回错误列表（空 = 合法）。 */
+  function validateGlobalToggleTarget(domain: unknown, key: string): string[] {
+    if (domain !== "skills" && domain !== "mcp" && domain !== "tools") {
+      return [`global defaults only support the "skills" / "mcp" / "tools" domains (got "${String(domain)}")`];
+    }
+    if (key.length === 0) return ["key must not be empty"];
+    if (domain === "skills" && !isSkillName(key)) {
+      return [`invalid skill name "${key}" — must match kebab-case /^[a-z0-9]+(?:-[a-z0-9]+)*$/`];
+    }
+    if (domain === "mcp" && !isMcpServerName(key)) {
+      return [`invalid MCP server name "${key}" — must match bridge serverName /^[A-Za-z0-9_-]{1,32}$/`];
+    }
+    if (domain === "tools" && key.length > 200) return [`invalid tools unit id "${key}": too long (max 200)`];
+    return [];
+  }
+
+  /** 把一份全局覆盖写成「某域名单 = 给定值」的完整对象（其它域原样保留）。 */
+  function withGlobalList(global: GlobalOverrides, domain: "skills" | "mcp" | "tools", values: string[]): GlobalOverrides {
+    const next: GlobalOverrides = {
+      skills: global.skills,
+      mcp: global.mcp,
+      tools: global.tools,
+      visibility: global.visibility,
+    };
+    next[domain] = [...values].sort((a, b) => a.localeCompare(b));
+    return next;
+  }
+
   /**
-   * 切换某个能力的**全局默认**（B2 Skills / v20.2 MCP）：`disabled=true` 加入
-   * 全局默认关闭名单，`false` 从名单移除。读→改→写按全局文件串行化；文件损坏
-   * 时显式报错（不静默覆盖用户数据）。
-   *
-   * `mcp` 域额外校验 serverName 文法（桥接层 `[A-Za-z0-9_-]{1,32}`）。
+   * 切换某个能力的**全局默认**（B2 Skills / v20.2 MCP / v21 Tools）：
+   * `disabled=true` 加入全局默认关闭名单，`false` 从名单移除（写 v2 全局文件；
+   * 可见性原样保留）。读→改→写按全局文件串行化；文件损坏时显式报错。
    */
   async function globalToggle(input: GlobalOverrideToggleInput | Record<string, unknown>): Promise<OverrideOpResult> {
     const domain = (input as { domain?: unknown }).domain;
-    if (domain !== "skills" && domain !== "mcp") {
-      return { ok: false, errors: [`global defaults only support the "skills" / "mcp" domains (got "${String(domain)}")`] };
-    }
     const rawKey = (input as { key?: unknown }).key;
     const key = typeof rawKey === "string" ? rawKey.trim() : "";
-    if (key.length === 0) return { ok: false, errors: ["key must not be empty"] };
-    if (domain === "skills" && !isSkillName(key)) {
-      return { ok: false, errors: [`invalid skill name "${key}" — must match kebab-case /^[a-z0-9]+(?:-[a-z0-9]+)*$/`] };
-    }
-    if (domain === "mcp" && !isMcpServerName(key)) {
-      return {
-        ok: false,
-        errors: [`invalid MCP server name "${key}" — must match bridge serverName /^[A-Za-z0-9_-]{1,32}$/`],
-      };
-    }
+    const targetErrors = validateGlobalToggleTarget(domain, key);
+    if (targetErrors.length > 0) return { ok: false, errors: targetErrors };
     const disabled = (input as { disabled?: unknown }).disabled;
     if (typeof disabled !== "boolean") return { ok: false, errors: ['"disabled" must be a boolean'] };
+    const listDomain = domain as "skills" | "mcp" | "tools";
 
     const file = globalOverridesFile(deps.dshHome);
     try {
       return await withFileLock(file, async () => {
         const current = await readGlobalOverrides(file);
-        const set = new Set(domain === "skills" ? current.skills : current.mcp);
+        const set = new Set(current[listDomain]);
         if (disabled) set.add(key);
         else set.delete(key);
-        const next = [...set].sort((a, b) => a.localeCompare(b));
-        await writeGlobalOverrides(
-          file,
-          domain === "skills" ? { skills: next, mcp: current.mcp } : { skills: current.skills, mcp: next },
-        );
+        await writeGlobalOverrides(file, withGlobalList(current, listDomain, [...set]));
+        return { ok: true };
+      });
+    } catch (error) {
+      return { ok: false, errors: [errMessage(error)] };
+    }
+  }
+
+  /**
+   * 批量设置某个域的**全局默认**（v21；Tools 面板/兜底写入用）。
+   *
+   * 一次读-改-写完成（避免逐条加锁）；返回实际变化的条数。
+   */
+  async function globalToggleMany(input: {
+    domain?: unknown;
+    keys?: unknown;
+    disabled?: unknown;
+  }): Promise<{ ok: true; applied: number } | { ok: false; errors: string[] }> {
+    const domain = input?.domain;
+    if (domain !== "skills" && domain !== "mcp" && domain !== "tools") {
+      return { ok: false, errors: [`global defaults only support the "skills" / "mcp" / "tools" domains (got "${String(domain)}")`] };
+    }
+    if (!Array.isArray(input?.keys)) return { ok: false, errors: ["keys must be an array"] };
+    if (typeof input?.disabled !== "boolean") return { ok: false, errors: ['"disabled" must be a boolean'] };
+    const keys: string[] = [];
+    for (const raw of input.keys) {
+      if (typeof raw !== "string") continue;
+      const key = raw.trim();
+      if (key.length === 0 || keys.includes(key)) continue;
+      const errors = validateGlobalToggleTarget(domain, key);
+      if (errors.length > 0) return { ok: false, errors };
+      keys.push(key);
+    }
+    if (keys.length === 0) return { ok: true, applied: 0 };
+    const file = globalOverridesFile(deps.dshHome);
+    try {
+      return await withFileLock(file, async () => {
+        const current = await readGlobalOverrides(file);
+        const set = new Set(current[domain]);
+        let applied = 0;
+        for (const key of keys) {
+          if (input.disabled === true) {
+            if (!set.has(key)) {
+              set.add(key);
+              applied += 1;
+            }
+          } else if (set.delete(key)) {
+            applied += 1;
+          }
+        }
+        if (applied > 0) await writeGlobalOverrides(file, withGlobalList(current, domain, [...set]));
+        return { ok: true, applied };
+      });
+    } catch (error) {
+      return { ok: false, errors: [errMessage(error)] };
+    }
+  }
+
+  /**
+   * 写某个能力的**可见性**（v21 `overrides.setVisibility`）。
+   *
+   * `workspaces` 是完整映射（整份替换）：key = 工作区 path（**原样，不做
+   * projectRoot 归一化**；运行时按「projectRoot 精确 → path 精确 → cwd 最长前缀」
+   * 匹配）。`mode=all` 且 workspaces 为空 ⇒ 删除该条目（等价缺省全可见）。
+   * 读→改→写按全局文件串行化；坏 visibility 显式报错（严格读，不静默丢配置）。
+   */
+  async function setVisibility(input: GlobalVisibilityInput | Record<string, unknown>): Promise<OverrideOpResult> {
+    const domain = (input as { domain?: unknown }).domain;
+    if (domain !== "skills" && domain !== "mcp" && domain !== "tools") {
+      return { ok: false, errors: [`visibility only supports the "skills" / "mcp" / "tools" domains (got "${String(domain)}")`] };
+    }
+    const rawKey = (input as { key?: unknown }).key;
+    const key = typeof rawKey === "string" ? rawKey.trim() : "";
+    if (key.length === 0) return { ok: false, errors: ["key must not be empty"] };
+    if (key.length > 256) return { ok: false, errors: [`invalid capability key "${key}": too long (max 256)`] };
+    const mode = (input as { mode?: unknown }).mode;
+    if (mode !== "all" && mode !== "selected" && mode !== "none") {
+      return { ok: false, errors: ['"mode" must be "all" | "selected" | "none"'] };
+    }
+    const rawWorkspaces = (input as { workspaces?: unknown }).workspaces;
+    if (rawWorkspaces === null || typeof rawWorkspaces !== "object" || Array.isArray(rawWorkspaces)) {
+      return { ok: false, errors: ['"workspaces" must be an object'] };
+    }
+    const workspaces: Record<string, { visible?: boolean; defaultEnabled?: boolean }> = {};
+    const errors: string[] = [];
+    for (const [rawWorkspace, rawEntry] of Object.entries(rawWorkspaces as Record<string, unknown>)) {
+      const workspace = rawWorkspace.trim();
+      if (workspace.length === 0) {
+        errors.push("workspace key must not be empty");
+        continue;
+      }
+      const entry = normalizeWorkspaceVisibility(rawEntry, errors, `workspaces[${workspace}]`);
+      if (entry === undefined) {
+        errors.push(`invalid workspaces[${workspace}]: must be an object`);
+        continue;
+      }
+      workspaces[workspace] = entry;
+    }
+    if (errors.length > 0) return { ok: false, errors };
+
+    const file = globalOverridesFile(deps.dshHome);
+    try {
+      return await withFileLock(file, async () => {
+        const current = await readGlobalOverrides(file);
+        const visibility: VisibilitySets = {
+          skills: { ...current.visibility.skills },
+          mcp: { ...current.visibility.mcp },
+          tools: { ...current.visibility.tools },
+        };
+        if (mode === "all" && Object.keys(workspaces).length === 0) delete visibility[domain][key];
+        else visibility[domain][key] = { mode, workspaces };
+        await writeGlobalOverrides(file, { ...current, visibility });
         return { ok: true };
       });
     } catch (error) {
@@ -336,14 +605,53 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
     return [...set].sort((a, b) => a.localeCompare(b));
   }
 
+  /** 项目层某域的禁用名单（按域取数组副本）。 */
+  function projectDisabledOf(set: OverridesSet, domain: CapabilityDomain): string[] {
+    return domain === "mcp" ? [...set.mcp] : domain === "skills" ? [...set.skills] : [...set.tools];
+  }
+
+  /** 项目层某域的重新打开名单（按域取数组副本）。 */
+  function projectEnabledOf(set: OverridesSet, domain: CapabilityDomain): string[] {
+    return domain === "mcp" ? [...set.enabledMcp] : domain === "skills" ? [...set.enabledSkills] : [...set.enabledTools];
+  }
+
+  /** 用新名单替换某域的禁用 / 重新打开两份名单（其它域原样保留）。 */
+  function withProjectLists(
+    set: OverridesSet,
+    domain: CapabilityDomain,
+    disabled: string[],
+    enabled: string[],
+  ): OverridesSet {
+    const draft: OverridesSet = {
+      mcp: [...set.mcp],
+      skills: [...set.skills],
+      tools: [...set.tools],
+      enabledSkills: [...set.enabledSkills],
+      enabledMcp: [...set.enabledMcp],
+      enabledTools: [...set.enabledTools],
+    };
+    if (domain === "mcp") {
+      draft.mcp = disabled;
+      draft.enabledMcp = enabled;
+    } else if (domain === "skills") {
+      draft.skills = disabled;
+      draft.enabledSkills = enabled;
+    } else {
+      draft.tools = disabled;
+      draft.enabledTools = enabled;
+    }
+    return normalizeOverridesSet(draft);
+  }
+
   /**
-   * 切换某个能力在本项目的默认关闭状态（B2 三态；v20.2 扩到 MCP）。
+   * 切换某个能力在本项目的默认关闭状态（B2 / v20.2 / v21 三域三态）。
    *
-   * - `skills` / `mcp` 域：
-   *   - 传 `enabled` 时显式设为启用 / 禁用（幂等，不翻转）；
-   *   - 不传时翻转**有效默认**（全局默认 < 项目显式 < 会话显式中的第二层）。
-   * - 启用时只有「全局默认关闭」才写重新打开名单（`enabledSkills` / `enabledMcp`），
-   *   否则清掉该项目态；禁用时加入项目禁用名单并清掉重新打开标记（禁用优先）。
+   * - 传 `enabled` 时显式设为启用 / 禁用（幂等，不翻转）；
+   * - 不传时翻转**工作区默认**：`项目覆盖 ?? 每工作区全局默认`（全局默认 <
+   *   工作区显式 < 会话显式中的第二层）。
+   * - 启用时只有「该工作区的全局默认 = 关」才写重新打开名单
+   *   （`enabledSkills` / `enabledMcp` / `enabledTools`），否则清掉该项目态；
+   *   禁用时加入项目禁用名单并清掉重新打开标记（禁用优先）。
    *
    * 读→改→写整段按统一存储文件串行化，避免并发写者互相覆盖。某个项目首次
    * 写入时：把项目内旧声明（`.agents` / `.dsh` / `.claude`）并入统一存储，
@@ -357,96 +665,67 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
     }
     const loc = locationFor(input.cwd);
     if (loc === undefined) return { ok: false, errors: ["project scope requires a workspace path"] };
-    // skills 域只接受 kebab-case 技能名（与宿主技能命名文法一致）。
     if (input.domain === "skills" && !isSkillName(key)) {
       return { ok: false, errors: [`invalid skill name "${key}" — must match kebab-case /^[a-z0-9]+(?:-[a-z0-9]+)*$/`] };
     }
-    // 全局默认关闭集：B2 / v20.2 计算需要它；全局文件损坏时降级为空
-    // （不阻塞项目编辑；与既有 skills 分支同策略）。
-    let globalSkills = new Set<string>();
-    let globalMcp = new Set<string>();
-    try {
-      const global = await readGlobalOverrides(loc.globalFile);
-      globalSkills = new Set(global.skills);
-      globalMcp = new Set(global.mcp);
-    } catch {
-      globalSkills = new Set<string>();
-      globalMcp = new Set<string>();
+    if (input.domain === "tools" && key.length > 200) {
+      return { ok: false, errors: [`invalid tools unit id "${key}": too long (max 200)`] };
     }
+    // 全局层快照（三名单 + 可见性）：计算「每工作区全局默认」需要它；文件损坏时
+    // 降级为空（不阻塞项目编辑；与既有 skills 分支同策略）。
+    let global: GlobalOverrides;
+    try {
+      global = await readGlobalOverrides(loc.globalFile);
+    } catch {
+      global = emptyGlobalOverrides();
+    }
+    const off = await globalOffListOf(input.domain, global);
+    const globalDefaultEnabled = perWorkspaceDefault(
+      global.visibility,
+      input.domain,
+      key,
+      workspaceTargetOf(loc.cwd),
+      off,
+    );
     try {
       return await withFileLock(loc.storeFile, async () => {
         const store = await readOverridesStore(loc.storeFile);
         const existing = store.projects[loc.projectRoot];
         // 统一存储里还没有该项目 ⇒ 首次写入，把旧声明并入（坏文件抛错，绝不静默丢弃）。
         const current = existing !== undefined ? setOf(existing) : await readOverrides(loc.legacy.readFile);
-        let next: OverridesSet;
-        if (input.domain === "mcp") {
-          const projectDisabledNow = current.mcp.includes(key);
-          const projectEnabledNow = current.enabledMcp.includes(key);
-          const effectiveDefaultEnabled = projectEnabledNow
-            ? true
-            : projectDisabledNow || globalMcp.has(key)
-              ? false
-              : true;
-          const desired = typeof input.enabled === "boolean" ? input.enabled : !effectiveDefaultEnabled;
-          if (desired) {
-            // 启用：移除项目禁用；只有全局默认关闭时才需要写 enabledMcp。
-            next = normalizeOverridesSet({
-              ...current,
-              mcp: current.mcp.filter((item) => item !== key),
-              enabledMcp: globalMcp.has(key) ? withAdded(current.enabledMcp, key) : current.enabledMcp.filter((item) => item !== key),
-            });
-          } else {
-            // 禁用：加入项目禁用并移除 enabledMcp（禁用优先）。
-            next = normalizeOverridesSet({
-              ...current,
-              mcp: withAdded(current.mcp, key),
-              enabledMcp: current.enabledMcp.filter((item) => item !== key),
-            });
-          }
-        } else {
-          const projectDisabled = current.skills.includes(key);
-          const projectEnabled = current.enabledSkills.includes(key);
-          const effectiveDefaultEnabled = projectEnabled
-            ? true
-            : projectDisabled || globalSkills.has(key)
-              ? false
-              : true;
-          const desired = typeof input.enabled === "boolean" ? input.enabled : !effectiveDefaultEnabled;
-          if (desired) {
-            // 启用：移除项目禁用；只有全局默认关闭时才需要写 enabledSkills。
-            next = normalizeOverridesSet({
-              ...current,
-              skills: current.skills.filter((item) => item !== key),
-              enabledSkills: globalSkills.has(key)
-                ? withAdded(current.enabledSkills, key)
-                : current.enabledSkills.filter((item) => item !== key),
-            });
-          } else {
-            // 禁用：加入项目禁用并移除 enabledSkills（禁用优先）。
-            next = normalizeOverridesSet({
-              ...current,
-              skills: flipped(current.skills, key),
-              enabledSkills: current.enabledSkills.filter((item) => item !== key),
-            });
-          }
-        }
+        const projectDisabledNow = projectDisabledOf(current, input.domain).includes(key);
+        const projectEnabledNow = projectEnabledOf(current, input.domain).includes(key);
+        const workspaceDefaultEnabled = projectEnabledNow ? true : projectDisabledNow ? false : globalDefaultEnabled;
+        const desired = typeof input.enabled === "boolean" ? input.enabled : !workspaceDefaultEnabled;
+        const next = desired
+          ? // 启用：移出项目禁用；只有「每工作区全局默认 = 关」才写重新打开名单。
+            withProjectLists(
+              current,
+              input.domain,
+              projectDisabledOf(current, input.domain).filter((item) => item !== key),
+              globalDefaultEnabled
+                ? projectEnabledOf(current, input.domain).filter((item) => item !== key)
+                : withAdded(projectEnabledOf(current, input.domain), key),
+            )
+          : // 禁用：加入项目禁用并移除重新打开标记（禁用优先）。
+            withProjectLists(
+              current,
+              input.domain,
+              withAdded(projectDisabledOf(current, input.domain), key),
+              projectEnabledOf(current, input.domain).filter((item) => item !== key),
+            );
         const entry: OverridesProjectEntry = { updatedAt: Date.now(), cwd: loc.cwd };
-        if (next.mcp.length > 0) entry.mcp = next.mcp;
-        if (next.skills.length > 0) entry.skills = next.skills;
-        if (next.enabledSkills.length > 0) entry.enabledSkills = next.enabledSkills;
-        if (next.enabledMcp.length > 0) entry.enabledMcp = next.enabledMcp;
-        // 四个名单都空 ⇒ 删除该项目条目（空条目不落盘）。
-        if (
-          entry.mcp === undefined &&
-          entry.skills === undefined &&
-          entry.enabledSkills === undefined &&
-          entry.enabledMcp === undefined
-        ) {
-          delete store.projects[loc.projectRoot];
-        } else {
-          store.projects[loc.projectRoot] = entry;
+        const fields = ["mcp", "skills", "tools", "enabledSkills", "enabledMcp", "enabledTools"] as const;
+        let any = false;
+        for (const field of fields) {
+          const values = next[field];
+          if (values.length === 0) continue;
+          entry[field] = values;
+          any = true;
         }
+        // 六个名单都空 ⇒ 删除该项目条目（空条目不落盘）。
+        if (!any) delete store.projects[loc.projectRoot];
+        else store.projects[loc.projectRoot] = entry;
         await writeOverridesStore(loc.storeFile, store);
         // 旧声明已并入统一存储：删除项目内旧文件（所有兼容位置）。
         await removeFiles([loc.legacy.readFile, ...loc.legacy.legacyFiles]);
@@ -457,7 +736,24 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
     }
   }
 
-  return { sets, projectSets, get, toggle, globalGet, globalToggle, defaultSets, effectiveDisabledSkills, mcpDefaultSets };
+  return {
+    sets,
+    projectSets,
+    get,
+    toggle,
+    globalGet,
+    globalToggle,
+    globalToggleMany,
+    setVisibility,
+    visibilitySets,
+    visibilityKeys,
+    invisibleKeys,
+    capabilityDefaults,
+    capabilityDefaultsMany,
+    defaultSets,
+    effectiveDisabledSkills,
+    mcpDefaultSets,
+  };
 }
 
 /** 管理服务的完整类型（构造函数的返回值）。 */

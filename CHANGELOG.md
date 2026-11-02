@@ -3,6 +3,50 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 新增（v21 能力可见性）
+
+- **能力可见性（按工作区）**：全局文件 `capability-global-overrides.json` 升 v2，新增
+  `visibility{skills,mcp,tools}`：每个能力对每个工作区可配 `mode`（all / selected / none）
+  与 `workspaces.<path>.{visible,defaultEnabled}`；v1 文件读取兼容（全部可见）。
+  - 全局是唯一可见性控制方：不可见 ⇒ 工作区列表/详情、对话首屏/能力 Tab 都不出现，
+    运行时强制不可用（MCP restrict + 指令段影子、Skills runtime shadow、Tools deny）；
+    会话开关不能打开不可见能力（RPC 业务失败）。
+  - **每工作区默认开/关**：全局为每个可见工作区单独配置默认；工作区可再覆盖
+    （沿用 `skills`/`enabledSkills`、`mcp`/`enabledMcp`，Tools 新增 `tools`/`enabledTools`）。
+  - **Tools 域纳入**：与 Skills/MCP 同模型（可见性 + 每工作区默认 + 工作区覆盖 + 会话开关）。
+  - **项目自己的条目不做可见性**：`.mcp.json` 原生条目、项目技能、项目引用仍由项目在
+    工作区内管理。
+- 面板：三域全局行增加可见性标签 + 「默认：N 开 / M 关」摘要；详情「可见范围」分段 +
+  工作区表格（可见 checkbox + 默认开/关）；可见范围弹层按工作区分别配置；工作区视图只列
+  可见条目并提示「另有 N 个能力未对此外工作区开放」；对话首屏/能力 Tab 复用现有 v18/v19
+  界面，仅做可见性过滤与可见口径计数。
+- 新宿主模块 `src/shared/visibility.ts`（`visibleIn` / `perWorkspaceDefault` /
+  `workspaceMatchKey` / 归一化与坏数据降级）；客户端共用 `src/client/visibility.tsx`。
+- RPC：新增 `overrides.setVisibility({domain,key,mode,workspaces})`（写盘后三域热应用）；
+  `overrides.globalGet` 返回 `tools` 与 `visibility`；`overrides.toggle` / `globalToggle`
+  扩到三域；`skills.list` / `skills.sessionList` value 改 `{skills,hiddenCount}`
+  （service 层数组形态保留，旧客户端 adapter 兼容）；`mcp.list` / `mcp.runtime` /
+  `tools.list` 增加 `hiddenCount` 与行可见性字段。
+- 设计稿：Figma `Capability Panel · 可见性与默认 v21 草案`（page `192:2`，5 帧），
+  预览 `docs/figma/preview/v21-01…05-*.png`。
+
+### 变更（v21）
+
+- 三域全局默认的兜底口径不变：`skills`/`mcp` 名单 + Tools 的 `tools-global.json`
+  （旧文件只读合并）；新写入统一进 `capability-global-overrides.json` 的 `tools`。
+- 可见性 `workspaces` 的 key 使用 **workspace path**（不归一化 projectRoot）；运行时按
+  `projectRoot 精确 → path 精确 → cwd 最长前缀` 匹配。
+- 不可见能力的旧项目/会话显式覆盖保留不删；恢复可见后重新生效。
+
+### 内部（v21）
+
+- 新增 `src/shared/visibility.ts`；`overrides.manager` 的 `capabilityDefaults` /
+  `capabilityDefaultsMany` 是列表投影与运行时 gate 的唯一默认计算入口；Tools 的
+  `effectiveEnabledFor` 可见性优先。
+- 回归：`notes/verify/v21-visibility.mjs` + `v21-visibility-ui.mjs`（本机 gitignore）。
+
 ## [1.9.1] - 2026-11-02
 
 ### 新增（v20.2 MCP 全局默认）

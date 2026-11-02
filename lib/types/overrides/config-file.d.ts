@@ -15,8 +15,10 @@
  *
  * v20.2：同一层扩到 MCP——项目条目新增 `enabledMcp`（本项目显式重新打开的
  * serverName，覆盖全局默认关闭），`mcp` / `enabledMcp` 同样**禁用优先**。
- * 全局层的 `capability-global-overrides.json` 在 `global-file.ts`，与本文件读写
- * 逻辑独立。
+ *
+ * v21：再扩到 Tools——项目条目新增 `tools` / `enabledTools`（Tools 单元 id 的
+ * 工作区默认关闭 / 重新打开），同样**禁用优先**。全局层的
+ * `capability-global-overrides.json` 在 `global-file.ts`，与本文件读写逻辑独立。
  *
  * 写入原子（临时文件 + rename）、父目录按需创建；读取对"文件缺失 / 文件为空"
  * 宽容（视为空声明），对"JSON 非法 / 形状不符合预期 / 版本不认识"抛出带文件名的
@@ -29,8 +31,7 @@ import type { CapabilityDomain, OverridesSet, OverridesStore } from "./types.js"
 /** 能力域在声明文件里的键名（与 CapabilityDomain 一一对应）。 */
 export declare const DOMAIN_KEYS: readonly CapabilityDomain[];
 /**
- * 构造一份空的规范化声明（每个域都是空数组；`enabledSkills` / `enabledMcp`
- * 也是空）。
+ * 构造一份空的规范化声明（三域禁用清单与三个重新打开名单都是空数组）。
  */
 export declare function emptyOverrides(): OverridesSet;
 /**

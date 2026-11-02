@@ -26,6 +26,10 @@ import type {
   ClientToolsInspect,
   ClientToolsList,
   ClientToolsUnit,
+  ClientVisibilityFields,
+  ClientVisibilitySets,
+  ClientWorkspaceVisibility,
+  ClientVisibilityMode,
   CreateSkillInput,
   DeriveGetResult,
   DeriveMode,
@@ -130,8 +134,19 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
         const cwd = deps.currentWorkspaceCwd();
         const result = await rpc("skills.list", { cwd });
         if (!result.ok) throw new Error(result.errors.join("; "));
-        const values = (result.value as unknown[]).filter((v) => v !== null && typeof v === "object") as Record<string, unknown>[];
-        return values.map(toSummary);
+        // v21：宿主 RPC value 改为 `{skills, hiddenCount}`；这里只回数组（旧契约）。
+        return toSkillList(result.value).skills;
+      },
+
+      /**
+       * v21：列表 + 工作区视图的 hiddenCount（RPC value 为
+       * `{skills, hiddenCount}`；兼容旧宿主的纯数组响应）。
+       */
+      async listView() {
+        const cwd = deps.currentWorkspaceCwd();
+        const result = await rpc("skills.list", { cwd });
+        if (!result.ok) throw new Error(result.errors.join("; "));
+        return toSkillList(result.value);
       },
 
       /**
@@ -144,8 +159,19 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
         const cwd = deps.currentWorkspaceCwd();
         const result = await rpc("skills.sessionList", { cwd, sessionId: deps.sessionId });
         if (!result.ok) throw new Error(result.errors.join("; "));
-        const values = (result.value as unknown[]).filter((v) => v !== null && typeof v === "object") as Record<string, unknown>[];
-        return values.map(toSummary);
+        return toSkillList(result.value).skills;
+      },
+
+      /**
+       * v21：会话视角列表 + hiddenCount（RPC value 为 `{skills, hiddenCount}`；
+       * 兼容旧宿主的纯数组响应）。首屏「不可见 N 项已隐藏」用它。
+       */
+      async sessionListView() {
+        if (deps.sessionId === undefined) throw new Error("skills.sessionList 只能在会话作用域的 api 上调用");
+        const cwd = deps.currentWorkspaceCwd();
+        const result = await rpc("skills.sessionList", { cwd, sessionId: deps.sessionId });
+        if (!result.ok) throw new Error(result.errors.join("; "));
+        return toSkillList(result.value);
       },
 
       /** 会话级关闭 / 恢复：宿主返回业务信封，失败抛错由 UI 回滚。 */
@@ -419,16 +445,19 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
           ...(deps.sessionId !== undefined ? { sessionId: deps.sessionId } : {}),
         });
         if (!result.ok) throw new Error(result.errors.join("; "));
-        const view = (result.value ?? { servers: [] }) as { servers?: unknown; attributionSettling?: unknown };
+        const view = (result.value ?? { servers: [] }) as { servers?: unknown; attributionSettling?: unknown; hiddenCount?: unknown };
         const servers = Array.isArray(view.servers) ? view.servers : [];
         return {
           ...(view.attributionSettling === true ? { attributionSettling: true } : {}),
+          // v21：工作区视图里被可见性隐藏的外部实例数（供「另有 N 个未开放」提示）。
+          ...(typeof view.hiddenCount === "number" && Number.isFinite(view.hiddenCount) ? { hiddenCount: view.hiddenCount } : {}),
           servers: servers
             .map((raw) => {
               const server = (raw ?? {}) as Record<string, unknown>;
               const tools = Array.isArray(server.tools) ? server.tools : [];
               return {
                 serverName: typeof server.serverName === "string" ? server.serverName : "",
+                ...toVisibilityFields(server),
                 ...(typeof server.source === "string" && server.source.length > 0 ? { source: server.source } : {}),
                 origin:
                   server.origin === "entry"
@@ -471,7 +500,12 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
        */
       async list(input): Promise<ClientToolsList> {
         const sessionId = input?.sessionId ?? deps.sessionId;
-        const result = await rpc("tools.list", { ...(sessionId !== undefined ? { sessionId } : {}) });
+        // v21：cwd 让宿主做工作区可见性/每工作区默认投影（全局视图 cwd 缺省）。
+        const cwd = input?.cwd ?? deps.currentWorkspaceCwd();
+        const result = await rpc("tools.list", {
+          ...(cwd !== undefined ? { cwd } : {}),
+          ...(sessionId !== undefined ? { sessionId } : {}),
+        });
         if (!result.ok) {
           return { units: [], totalGlobalTools: 0, excludedBuiltinCount: 0, errors: result.errors };
         }
@@ -591,6 +625,11 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
           skills: listOf(view.skills),
           // v20.1（B2）additive：本项目显式重新打开的名单；旧宿主缺失视为空。
           ...(Array.isArray(view.enabledSkills) ? { enabledSkills: listOf(view.enabledSkills) } : {}),
+          // v20.2 additive：MCP 的「本工作区重新打开」名单。
+          ...(Array.isArray(view.enabledMcp) ? { enabledMcp: listOf(view.enabledMcp) } : {}),
+          // v21 additive：Tools 域的项目覆盖（关闭 / 重新打开）；旧宿主缺失视为空。
+          ...(Array.isArray(view.tools) ? { tools: listOf(view.tools) } : {}),
+          ...(Array.isArray(view.enabledTools) ? { enabledTools: listOf(view.enabledTools) } : {}),
           ...(typeof view.filePath === "string" ? { filePath: view.filePath } : {}),
           ...(typeof view.projectRoot === "string" ? { projectRoot: view.projectRoot } : {}),
         } satisfies ClientOverrides;
@@ -627,7 +666,7 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
         ) as { ok: true } | { ok: false; errors: string[] };
       },
 
-      /** v20.1（B2）：读取全局默认关闭层（独立文件；损坏时返回空清单 + errors）。 */
+      /** v20.1（B2）/ v21：读取全局默认关闭层 + 三域可见性（损坏时降级空 + errors）。 */
       async globalGet() {
         const result = await rpc("overrides.globalGet", {});
         if (!result.ok) throw new Error(result.errors.join("; "));
@@ -641,6 +680,10 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
           skills: listOf(view.skills),
           // v20.2 additive：全局默认关闭的 MCP serverName；旧宿主缺失视为空清单。
           mcp: listOf(view.mcp),
+          // v21 additive：Tools 全局默认兜底名单；旧宿主缺失视为空清单。
+          tools: listOf(view.tools),
+          // v21 additive：三域可见性；旧宿主 / v1 文件缺省 ⇒ 三域空 map（全部可见）。
+          visibility: toVisibilitySets(view.visibility),
           ...(typeof view.filePath === "string" ? { filePath: view.filePath } : {}),
           ...(errors.length > 0 ? { errors } : {}),
         } satisfies ClientGlobalOverrides;
@@ -652,6 +695,14 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
        */
       async globalToggle(input) {
         return unwrap(await rpc("overrides.globalToggle", input)) as { ok: true } | { ok: false; errors: string[] };
+      },
+
+      /**
+       * v21：保存某个能力的可见性 + 每工作区默认开/关（写全局文件 v2）。
+       * `workspaces` 为完整映射原样透传；业务失败返回 `{ok:false,errors}`（不抛）。
+       */
+      async setVisibility(input) {
+        return unwrap(await rpc("overrides.setVisibility", input)) as { ok: true } | { ok: false; errors: string[] };
       },
     },
 
@@ -796,6 +847,7 @@ function toToolsList(value: unknown): ClientToolsList {
           : undefined;
       const projected: ClientToolsUnit = {
         unit: unit.unit,
+        ...toVisibilityFields(unit),
         name: typeof unit.name === "string" && unit.name.length > 0 ? unit.name : unit.unit,
         kind: unit.kind === "unattributed" ? "unattributed" : "plugin",
         tools,
@@ -825,6 +877,8 @@ function toToolsList(value: unknown): ClientToolsList {
     totalGlobalTools: typeof raw.totalGlobalTools === "number" ? raw.totalGlobalTools : 0,
     excludedBuiltinCount: typeof raw.excludedBuiltinCount === "number" ? raw.excludedBuiltinCount : 0,
     errors: Array.isArray(raw.errors) ? raw.errors.filter((item): item is string => typeof item === "string") : [],
+    // v21：工作区视图里被可见性隐藏的单元数。
+    ...(typeof raw.hiddenCount === "number" && Number.isFinite(raw.hiddenCount) ? { hiddenCount: raw.hiddenCount } : {}),
     ...(typeof raw.sessionId === "string" && raw.sessionId.length > 0 ? { sessionId: raw.sessionId } : {}),
     ...(raw.attributionSettling === true ? { attributionSettling: true } : {}),
   };
@@ -957,6 +1011,75 @@ function toAttribution(value: unknown): ClientAttributionInfo | undefined {
 }
 
 /**
+ * v21：可见性行字段的防御性投影（skills / mcp / tools 三域共用）。
+ * 旧宿主缺省 ⇒ 整组字段不出现（UI 按「全部可见」渲染）。
+ */
+function toVisibilityFields(value: Record<string, unknown>): ClientVisibilityFields {
+  const mode =
+    value.visibilityMode === "all" || value.visibilityMode === "selected" || value.visibilityMode === "none"
+      ? (value.visibilityMode as ClientVisibilityMode)
+      : undefined;
+  return {
+    ...(mode !== undefined ? { visibilityMode: mode } : {}),
+    ...(typeof value.visibleWorkspaceCount === "number" && Number.isFinite(value.visibleWorkspaceCount)
+      ? { visibleWorkspaceCount: value.visibleWorkspaceCount }
+      : {}),
+    ...(typeof value.visibleInWorkspace === "boolean" ? { visibleInWorkspace: value.visibleInWorkspace } : {}),
+    ...(value.disabledByVisibility === true ? { disabledByVisibility: true } : {}),
+  };
+}
+
+/** v21：`skills.list` / `skills.sessionList` 的 value 归一（`{skills, hiddenCount}` 或旧数组）。 */
+function toSkillList(value: unknown): { skills: ClientSkillSummary[]; hiddenCount?: number } {
+  const raw = Array.isArray(value)
+    ? { skills: value }
+    : value !== null && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  const values = (Array.isArray(raw.skills) ? raw.skills : []).filter(
+    (item): item is Record<string, unknown> => item !== null && typeof item === "object",
+  );
+  return {
+    skills: values.map(toSummary),
+    ...(typeof raw.hiddenCount === "number" && Number.isFinite(raw.hiddenCount) ? { hiddenCount: raw.hiddenCount } : {}),
+  };
+}
+
+/**
+ * v21：`overrides.globalGet.visibility` 的防御性投影。
+ * 三域恒为对象；条目 mode 非法按 all；workspaces 非对象按空、字段只收布尔。
+ */
+function toVisibilitySets(value: unknown): ClientVisibilitySets {
+  const source = value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const domainOf = (domain: "skills" | "mcp" | "tools"): Record<string, { mode: ClientVisibilityMode; workspaces: Record<string, ClientWorkspaceVisibility> }> => {
+    const raw = source[domain];
+    if (raw === null || typeof raw !== "object") return {};
+    const result: Record<string, { mode: ClientVisibilityMode; workspaces: Record<string, ClientWorkspaceVisibility> }> = {};
+    for (const [key, entry] of Object.entries(raw as Record<string, unknown>)) {
+      if (key.length === 0 || entry === null || typeof entry !== "object") continue;
+      const record = entry as Record<string, unknown>;
+      const mode: ClientVisibilityMode =
+        record.mode === "selected" || record.mode === "none" ? record.mode : "all";
+      const workspaces: Record<string, ClientWorkspaceVisibility> = {};
+      if (record.workspaces !== null && typeof record.workspaces === "object") {
+        for (const [path, rawVisibility] of Object.entries(record.workspaces as Record<string, unknown>)) {
+          if (path.length === 0 || rawVisibility === null || typeof rawVisibility !== "object") continue;
+          const visibility = rawVisibility as Record<string, unknown>;
+          const projected: ClientWorkspaceVisibility = {
+            ...(typeof visibility.visible === "boolean" ? { visible: visibility.visible } : {}),
+            ...(typeof visibility.defaultEnabled === "boolean" ? { defaultEnabled: visibility.defaultEnabled } : {}),
+          };
+          if (projected.visible !== undefined || projected.defaultEnabled !== undefined) workspaces[path] = projected;
+        }
+      }
+      result[key] = { mode, workspaces };
+    }
+    return result;
+  };
+  return { skills: domainOf("skills"), mcp: domainOf("mcp"), tools: domainOf("tools") };
+}
+
+/**
  * 把宿主返回的行对象投影成客户端摘要：
  * 调用策略是嵌套的 `invocation` 对象 → 拍平成两个布尔；
  * 其它字段做了宽松的字符串归一，防御宿主侧数据漂移。
@@ -973,6 +1096,7 @@ function toSummary(value: Record<string, unknown>): ClientSkillSummary {
       : undefined;
   const injected = value.injected === true;
   return {
+    ...toVisibilityFields(value),
     name: String(value.name),
     description: String(value.description ?? ""),
     ...(typeof value.whenToUse === "string" ? { whenToUse: value.whenToUse } : {}),

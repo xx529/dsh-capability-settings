@@ -83,8 +83,21 @@ export interface Config {
  * （多带 enabledInSession / canToggleInSession 两列）。
  */
 export type SkillsService = ReturnType<typeof createService> & {
+  /**
+   * v21：面板列表（磁盘 + 注入，工作区视图过滤不可见）+ `hiddenCount`
+   * （被可见性隐藏的技能数）。RPC `skills.list` 返回这个形态。
+   */
+  listView: (cwd?: string) => Promise<{ skills: SkillSummaryView[]; hiddenCount: number }>;
   /** 磁盘列表 + 本会话启用态（见 skills/session.ts）。 */
   sessionList: (cwd?: string, sessionId?: string) => Promise<SessionSkillView[]>;
+  /**
+   * v21：会话视图（只返回可见技能）+ `hiddenCount`。RPC `skills.sessionList`
+   * 返回这个形态；宿主内部（jev / session-bulk）继续用数组形态 `sessionList`。
+   */
+  sessionListView: (
+    cwd?: string,
+    sessionId?: string,
+  ) => Promise<{ skills: SessionSkillView[]; hiddenCount: number }>;
   /** 设置本会话开关（按会话落盘；重启/resume 后恢复）。 */
   setSessionEnabled: SkillSessionRegistry["setEnabled"];
   /**
@@ -152,12 +165,23 @@ export function apply(ctx: any, config: Config = {}) {
     logger: ctx.logger,
     enabled: config.enableAutoAttribution !== false,
   });
+  // Tools 域全局默认存储（v13；v21 起只读兼容 + 新写入统一到全局文件 `tools`）。
+  // 必须先于 overrides 建：overrides 计算「兜底全局默认」时要用它的 disabled
+  // （旧 `tools-global.json`）与新名单取并集。
+  const toolsGlobal = createToolsGlobalStore({ dshHome: config.dshHome, logger: ctx.logger });
   // overrides 原身只做声明文件的读/写；loader 与各域管理器共用它的 sets()
   // 快照。MCP 域的禁用切换落盘后需要热重挂（禁用即卸载、恢复即挂载），但
   // overrides 与 loader 互相依赖（loader 要 sets、切换要 reload），所以在
   // 组合根处包一层：loader 拿原身（只读），对外暴露的 service.overrides 是
   // 带 reload 侧效应的包装。
-  const overridesRaw = createOverridesManager({ dshHome: config.dshHome });
+  const overridesRaw = createOverridesManager({
+    dshHome: config.dshHome,
+    // v21：Tools 兜底全局默认 = 旧 `tools-global.json` ∪ 全局文件 `tools`。
+    toolsGlobalDisabled: async () => {
+      await toolsGlobal.ready();
+      return toolsGlobal.disabled();
+    },
+  });
   // 会话级开关的持久化存储：MCP loader 与 Skills 会话注册表**共用同一实例**
   // （见 session-state.ts）。两个域各自读-改-写同一文件会互相覆盖，所以必须
   // 在组合根建一次、注入下去；无 dshHome 的 headless 环境仍可工作（落盘到
@@ -184,12 +208,24 @@ export function apply(ctx: any, config: Config = {}) {
   // restrict 该插件全部可继承工具。与会话存储共用同一实例（`tools` 域）。
   // Tools 两层语义：全局默认（`tools-global.json`，能力面板开关） + 会话覆盖
   // （`session-capabilities.json` 的 `tools` 域，会话首屏开关）。
-  const toolsGlobal = createToolsGlobalStore({ dshHome: config.dshHome, logger: ctx.logger });
   const tools = createToolsManager(ctx, {
     state: sessionState,
     global: toolsGlobal,
     logger: ctx.logger,
     resolver: attribution,
+    // v21：可见性 + 每工作区默认 + 项目三态（与 skills/mcp 共用同一计算入口）。
+    capabilityDefaults: (units: readonly string[], cwd?: string) =>
+      overridesRaw.capabilityDefaultsMany("tools", units, cwd),
+    // 全局兜底关闭 = 旧 tools-global.json ∪ 全局文件 tools。
+    globalDefaults: async () => {
+      const legacy = new Set(toolsGlobal.disabled());
+      const global = (await overridesRaw.globalGet()).tools;
+      for (const unit of global) legacy.add(unit);
+      return legacy;
+    },
+    // v21：全局默认写入统一到 capability-global-overrides.json 的 tools。
+    writeGlobalDefaults: (units: readonly string[], enabled: boolean) =>
+      overridesRaw.globalToggleMany({ domain: "tools", keys: units, disabled: !enabled }),
   });
   // R1 批量端点：延迟构造（依赖最终 service），同 session 串行由模块内部保证。
   const sessionBulkRef: { current?: SessionBulk } = {};
@@ -220,6 +256,15 @@ export function apply(ctx: any, config: Config = {}) {
       if (input.domain === "mcp" && input.cwd !== undefined) {
         await loader.reload(findProjectRoot(input.cwd));
       }
+      // tools（v21）：工作区默认变更后重读兜底并扇出到 live agent 重算 restrict。
+      if (input.domain === "tools") {
+        try {
+          await tools.refreshFromVisibility();
+        } catch (error) {
+          ctx.logger?.warn?.(`capability-panel: 工作区 Tools 默认已写入，但运行时刷新失败：${String(error)}`);
+        }
+        return result;
+      }
       // skills：项目默认变更后热应用到同项目的 live 会话（无 live 会话时是 no-op，
       // 新会话在 agent/created 时按文件内容应用）。逐名独立、失败不回滚文件。
       if (input.domain === "skills" && input.cwd !== undefined && reconcileProjectRef.current !== undefined) {
@@ -228,8 +273,8 @@ export function apply(ctx: any, config: Config = {}) {
       return result;
     },
     /**
-     * 全局默认开关（B2 Skills / v20.2 MCP）：写 `capability-global-overrides.json`
-     * 后热应用到 live 会话。
+     * 全局默认开关（B2 Skills / v20.2 MCP / v21 Tools）：写
+     * `capability-global-overrides.json` 后热应用到 live 会话。
      *
      * - `domain === "skills"`：对**所有** live 会话 reconcile（全局层对所有项目
      *   生效）。逐名失败（preset 同层冲突）以 `{ok:false, errors}` 返回，绝不静默
@@ -252,12 +297,49 @@ export function apply(ctx: any, config: Config = {}) {
         }
         return result;
       }
+      if (domain === "tools") {
+        try {
+          await tools.refreshFromVisibility();
+        } catch (error) {
+          ctx.logger?.warn?.(`capability-panel: 全局 Tools 默认已写入，但运行时刷新失败：${String(error)}`);
+        }
+        return result;
+      }
       if (reconcileProjectRef.current === undefined) return result;
       const reconciled = await reconcileProjectRef.current(undefined);
       if (reconciled.ok) return reconciled;
       // 文件已写入但运行时投影未完全生效（preset 同层等硬边界）：逐名报错，
       // 并明确告知「文件已写入」，避免前端把失败误读成没落盘。
       return { ok: false, errors: ["全局默认已写入文件，但以下运行时投影失败：", ...reconciled.errors] };
+    },
+    /**
+     * 写能力可见性（v21 `overrides.setVisibility`）：写全局文件 v2 的
+     * `visibility`，成功后**三域热应用**（写盘已成功时运行时投影失败只 warn，
+     * 不把 RPC 判成失败）：
+     *
+     *   - skills → `reconcileProject(undefined)`（全局可见性对所有工作区生效）；
+     *   - mcp → `loader.refreshRestrictions()`（restrict + 指令段影子）；
+     *   - tools → `tools.refreshFromVisibility()`（重读兜底 + 扇出重算 restrict）。
+     */
+    setVisibility: async (input: Parameters<typeof overridesRaw.setVisibility>[0]) => {
+      const result = await overridesRaw.setVisibility(input);
+      if (!result.ok) return result;
+      const domain = (input as { domain?: unknown } | null | undefined)?.domain;
+      try {
+        if (domain === "skills" && reconcileProjectRef.current !== undefined) {
+          const reconciled = await reconcileProjectRef.current(undefined);
+          if (!reconciled.ok) {
+            return { ok: false, errors: ["可见性已写入文件，但以下运行时投影失败：", ...reconciled.errors] };
+          }
+        } else if (domain === "mcp") {
+          await loader.refreshRestrictions();
+        } else if (domain === "tools") {
+          await tools.refreshFromVisibility();
+        }
+      } catch (error) {
+        ctx.logger?.warn?.(`capability-panel: 可见性已写入，但运行时投影失败：${String(error)}`);
+      }
+      return result;
     },
   };
   // MCP 工具调用的内存使用记录（只读、不落盘）：通过 root 作用域的 tools.guard
@@ -299,6 +381,11 @@ export function apply(ctx: any, config: Config = {}) {
         return [];
       }
     },
+    // v21：可见性 + 每工作区默认（与 mcp/tools 共用同一计算入口）。
+    capabilityDefaults: (names: readonly string[], cwd?: string) =>
+      overridesRaw.capabilityDefaultsMany("skills", names, cwd),
+    // v21：可见性里出现过的技能名（运行时 gate 发现「不在默认名单但被隐藏」）。
+    visibilityNames: () => overridesRaw.visibilityKeys("skills"),
     // 旧注入点保留（兼容直接构造本服务的外部调用方）。
     projectDisabled: async (cwd?: string) => (await overridesRaw.sets(cwd)).skills,
   });
@@ -308,19 +395,61 @@ export function apply(ctx: any, config: Config = {}) {
   /**
    * 面板 `skills.list` 的组合视图：受管磁盘行 + 宿主 registry 注入行。
    *
-   * registry 任何异常都降级为「仅磁盘行」，不影响面板其它功能
+   * v21：同时返回 `hiddenCount`（工作区视图里被可见性隐藏的技能数），并给每行
+   * 附加可见性字段。registry 任何异常都降级为「仅磁盘行」，不影响面板其它功能
    * （架构契约 §5.7 失败降级矩阵）。
    */
-  async function mergePanelList(cwd?: string): Promise<SkillSummaryView[]> {
+  async function panelSkillRows(cwd?: string): Promise<{ skills: SkillSummaryView[]; hiddenCount: number }> {
     const diskRows = await diskList(cwd);
     // 默认值三层快照：行的 4 个默认态字段（契约 §2.2）按同一口径计算。
     const defaults = await overridesRaw.defaultSets(cwd);
+    let merged: SkillSummaryView[];
     try {
       const injected = await skillsRegistry.merge({ cwd, diskRows, projectDisabled: defaults.projectDisabled });
-      return annotateSkillDefaults([...diskRows, ...injected].sort((a, b) => a.name.localeCompare(b.name)), defaults);
+      merged = [...diskRows, ...injected].sort((a, b) => a.name.localeCompare(b.name));
     } catch {
-      return annotateSkillDefaults(diskRows, defaults);
+      merged = diskRows;
     }
+    const annotated = annotateSkillDefaults(merged, defaults);
+    // v21：可见性 + 每工作区默认（一次批量读取）。
+    const capabilities = await overridesRaw.capabilityDefaultsMany(
+      "skills",
+      annotated.map((row) => row.name),
+      cwd,
+    );
+    const workspaceView = cwd !== undefined;
+    let hiddenCount = 0;
+    const skills: SkillSummaryView[] = [];
+    for (const row of annotated) {
+      const capability = capabilities.get(row.name);
+      if (workspaceView && capability !== undefined && !capability.visible) {
+        hiddenCount += 1;
+        continue; // 工作区视图不展示不可见技能
+      }
+      skills.push({
+        ...row,
+        ...(capability !== undefined
+          ? {
+              // 覆盖旧 flags 的有效默认：工作区默认可能来自可见性 / 每工作区默认。
+              effectiveDefaultEnabled: capability.effectiveDefaultEnabled,
+              visibilityMode: capability.visibilityMode,
+              visibleWorkspaceCount: capability.visibleWorkspaceCount,
+              globalDefaultEnabled: capability.globalDefaultEnabled,
+              workspaceDefaultEnabled: capability.workspaceDefaultEnabled,
+              ...(capability.projectOverride !== undefined
+                ? { projectDefaultEnabledByOverride: capability.projectOverride }
+                : {}),
+              ...(workspaceView ? { visibleInWorkspace: capability.visible } : {}),
+            }
+          : {}),
+      });
+    }
+    return { skills, hiddenCount };
+  }
+
+  /** 兼容数组形态（宿主内部 / 旧调用方）：只丢 hiddenCount。 */
+  async function mergePanelList(cwd?: string): Promise<SkillSummaryView[]> {
+    return (await panelSkillRows(cwd)).skills;
   }
   // Jev 管理器：内部持有冷会话排队表与 agent/created|disposed 监听。service
   // 访问器延迟求值（jev 与 service 互相引用），disposer 随插件卸载清监听与
@@ -339,7 +468,11 @@ export function apply(ctx: any, config: Config = {}) {
       ...skillsBase,
       /** 面板列表 = 磁盘视图 + 宿主 registry 注入行（同名磁盘优先）。 */
       list: (cwd?: string): Promise<SkillSummaryView[]> => mergePanelList(cwd),
+      /** v21 RPC `skills.list` 的新形态：`{skills, hiddenCount}`。 */
+      listView: (cwd?: string) => panelSkillRows(cwd),
       sessionList: (cwd?: string, sessionId?: string) => skillSessions.list(diskList, cwd, sessionId),
+      /** v21 RPC `skills.sessionList` 的新形态：`{skills, hiddenCount}`。 */
+      sessionListView: (cwd?: string, sessionId?: string) => skillSessions.listView(diskList, cwd, sessionId),
       setSessionEnabled: skillSessions.setEnabled,
       setSessionEnabledBatch: skillSessions.setEnabledBatch,
     },
@@ -507,6 +640,7 @@ export {
   createToolsManager,
   applyForAgent,
   effectiveEnabled,
+  effectiveEnabledFor,
   TOOL_DESCRIPTION_LIMIT,
   TOOL_INSPECT_WARN_BYTES,
   LOCKED_RESTRICT_UNAVAILABLE,
@@ -618,7 +752,41 @@ export {
   DOMAIN_KEYS,
   OVERRIDES_STORE_VERSION,
 } from "./overrides/config-file.js";
-export { readGlobalOverrides, writeGlobalOverrides, emptyGlobalOverrides, GLOBAL_OVERRIDES_VERSION } from "./overrides/global-file.js";
+export {
+  readGlobalOverrides,
+  readGlobalOverridesDocument,
+  writeGlobalOverrides,
+  emptyGlobalOverrides,
+  GLOBAL_OVERRIDES_VERSION,
+  GLOBAL_OVERRIDES_LEGACY_VERSION,
+} from "./overrides/global-file.js";
+export type { GlobalOverridesReadResult } from "./overrides/global-file.js";
+export {
+  VISIBILITY_DOMAINS,
+  INVISIBLE_CAPABILITY_ERROR,
+  emptyVisibilitySets,
+  emptyCapabilityVisibility,
+  normalizeMode,
+  normalizeWorkspaceVisibility,
+  normalizeCapabilityVisibility,
+  normalizeVisibilitySets,
+  visibilityEntryOf,
+  visibilityModeOf,
+  visibleWorkspaceCount,
+  workspaceMatchKey,
+  visibleIn,
+  perWorkspaceDefault,
+  isGloballyDisabled,
+  invisibleKeysForWorkspace,
+} from "./shared/visibility.js";
+export type {
+  VisibilityDomain,
+  VisibilityMode,
+  VisibilitySets,
+  CapabilityVisibility,
+  WorkspaceVisibility,
+  WorkspaceTarget,
+} from "./shared/visibility.js";
 export {
   skillDefaultSets,
   effectiveDisabledSkills,
@@ -656,9 +824,11 @@ export type {
 } from "./skills/types.js";
 export type { McpScope, McpServerEntry, McpServerView, McpListResult, McpStatusView, McpMountState } from "./mcp/types.js";
 export type {
+  CapabilityDefaults,
   CapabilityDomain,
   CapabilityOverrides,
   GlobalOverrideToggleInput,
+  GlobalVisibilityInput,
   GlobalOverrides,
   GlobalOverridesFile,
   GlobalOverridesView,

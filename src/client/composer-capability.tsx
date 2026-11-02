@@ -158,6 +158,11 @@ export interface CapabilitySnapshot {
   attributionSettling: boolean;
   mounts: Record<string, MountInfo>;
   settling: boolean;
+  /**
+   * v21：因「能力可见性（按工作区）」被隐藏的条目数（sanitize 后仅统计本工作区）。
+   * 弹窗提示「能力可见性由全局控制 · 不可见 N 项已隐藏」用。
+   */
+  hiddenCounts: { skills: number; mcp: number; tools: number };
 }
 
 /** 卡片底部的来源标签配色（项目蓝 / 全局绿 / 内置琥珀 / 插件紫 / 预设灰 / 外部橙 / 未识别琥珀）。 */
@@ -242,6 +247,7 @@ const EMPTY_SNAPSHOT: CapabilitySnapshot = {
   attributionSettling: false,
   mounts: {},
   settling: false,
+  hiddenCounts: { skills: 0, mcp: 0, tools: 0 },
 };
 
 /** 项目来源判定（与 shared/skill-sources 的语义一致，客户端侧保持轻量）。 */
@@ -295,15 +301,24 @@ function externalEnabled(server: ClientMcpRuntimeServer): boolean {
 async function fetchSnapshot(api: CapabilityPanelApi, workspace: string): Promise<CapabilitySnapshot> {
   // sessionList 需要每会话 api；外壳没把 sessionId 传进来时（例如 conversation.view
   // 的 DOM 兜底也失败）退化为只读的全量列表，开关在 UI 上置灰而不是整块报错。
-  const skillsPromise = api.skills.sessionList().catch(async () => {
-    const rows = await api.skills.list();
-    return rows.map((row) => ({ ...row, enabledInSession: true, canToggleInSession: false }));
-  });
-  const [skills, mcp, statuses, runtime, toolsView] = await Promise.all([
+  // v21：优先 sessionListView 拿 hiddenCount（工作区可见性过滤掉的技能数）。
+  const skillsPromise = (async (): Promise<{ rows: ClientSkillSummary[]; hidden: number }> => {
+    try {
+      if (api.skills.sessionListView !== undefined) {
+        const view = await api.skills.sessionListView();
+        return { rows: view.skills, hidden: view.hiddenCount ?? 0 };
+      }
+      return { rows: await api.skills.sessionList(), hidden: 0 };
+    } catch {
+      const rows = await api.skills.list();
+      return { rows: rows.map((row) => ({ ...row, enabledInSession: true, canToggleInSession: false })), hidden: 0 };
+    }
+  })();
+  const [skillsView, mcp, statuses, runtime, toolsView] = await Promise.all([
     skillsPromise,
     api.mcp.list(),
     api.mcp.status().catch(() => []),
-    api.mcp.runtime({ cwd: workspace }).catch(() => ({ servers: [] as ClientMcpRuntimeServer[] })),
+    api.mcp.runtime({ cwd: workspace }).catch(() => ({ servers: [] as ClientMcpRuntimeServer[], hiddenCount: 0 })),
     // v13 Tools 域：宿主/tools 服务缺失时降级为空数组（不阻断另两域，UI 出空态）。
     api.tools.list().catch(() => ({
       units: [] as ClientToolsUnit[],
@@ -311,16 +326,25 @@ async function fetchSnapshot(api: CapabilityPanelApi, workspace: string): Promis
       excludedBuiltinCount: 0,
       errors: [],
       attributionSettling: false,
+      hiddenCount: 0,
     })),
   ]);
+  // 防御：旧宿主可能把不可见行也返回；显式 `visibleInWorkspace === false` 的整行剔除。
+  const visibleOnly = <T extends { visibleInWorkspace?: boolean }>(row: T): boolean =>
+    row.visibleInWorkspace !== false;
   return {
-    skills: skills.filter((skill) => skill.shadowStub !== true),
-    servers: mcp.servers,
-    externals: runtime.servers,
-    tools: toolsView.units,
+    skills: skillsView.rows.filter((skill) => skill.shadowStub !== true).filter(visibleOnly),
+    servers: mcp.servers.filter(visibleOnly),
+    externals: runtime.servers.filter(visibleOnly),
+    tools: toolsView.units.filter(visibleOnly),
     attributionSettling: toolsView.attributionSettling === true,
     mounts: aggregateMounts(statuses),
     settling: statuses.some((status) => status.settling === true),
+    hiddenCounts: {
+      skills: skillsView.hidden,
+      mcp: (mcp.hiddenCount ?? 0) + (runtime.hiddenCount ?? 0),
+      tools: toolsView.hiddenCount ?? 0,
+    },
   };
 }
 
@@ -362,8 +386,9 @@ function useDeriveMode(api: CapabilityPanelApi | undefined, enabled = true) {
       setLoading(false);
       return;
     }
-    // 旧宿主 / 测试 mock 可能没有 derive 域：按默认模式只读展示，不阻断能力面板。
-    if (api?.derive === undefined) {
+    // 旧宿主 / 测试 mock 可能没有 derive 域（或只有旧方法名）：按默认模式只读展示，
+    // 不阻断能力面板。
+    if (api?.derive === undefined || typeof api.derive.get !== "function") {
       setInfo({ mode: "session" });
       setLoading(false);
       return;
@@ -401,7 +426,7 @@ function useDeriveMode(api: CapabilityPanelApi | undefined, enabled = true) {
 
   const setMode = useCallback(
     async (mode: DeriveMode) => {
-      if (api?.derive === undefined) return;
+      if (api?.derive === undefined || typeof api.derive.set !== "function") return;
       setPending(true);
       setError(undefined);
       try {
@@ -2094,6 +2119,11 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
     onTabChange,
   } = props;
   const [tab, setTabState] = useState<TabId>(initialTab ?? "skills");
+  /** v21：三域因可见性被隐藏的条目总数（弹窗提示；全局视图的可见范围控制）。 */
+  const hiddenTotal =
+    (props.snapshot?.hiddenCounts?.skills ?? 0) +
+    (props.snapshot?.hiddenCounts?.mcp ?? 0) +
+    (props.snapshot?.hiddenCounts?.tools ?? 0);
   const setTab = (next: TabId) => {
     setTabState(next);
     onTabChange?.(next);
@@ -2334,6 +2364,12 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
       <div className="skp-dock-foot">
         <span className="skp-dock-foot-note">
           {totalOn} / {total} 项已启用{injectedOn > 0 ? ` · 其中 ${injectedOn} 项来自插件 / DSH 内置 / Agent 预设` : ""} · 开关只作用于当前对话
+          {hiddenTotal > 0 && (
+            <span className="skp-vis-summary" title="能力可见性由全局「可见范围」按工作区控制；不可见能力不出现在本会话，也不能在这里打开">
+              {" "}
+              · 能力可见性由全局控制 · 不可见 {hiddenTotal} 项已隐藏
+            </span>
+          )}
         </span>
         <button
           type="button"

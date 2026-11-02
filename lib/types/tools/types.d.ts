@@ -118,6 +118,24 @@ export interface ToolsUnitView {
         state: "applied" | "skipped" | "failed";
         error?: string;
     };
+    /**
+     * v21 可见性：可见范围模式（`all` / `selected` / `none`；缺省 all）。
+     *
+     * 可见性 key = 该行的 `unit`（Tools 单元 id）。
+     */
+    visibilityMode?: "all" | "selected" | "none";
+    /** v21：显式配置为可见的工作区数量（「指定 N」标签）。 */
+    visibleWorkspaceCount?: number;
+    /** v21：当前工作区（list 的 cwd）是否可见；仅工作区视图给出。 */
+    visibleInWorkspace?: boolean;
+    /** v21：为 true = 本工作区不可见 ⇒ 运行时强制关（工作区视图不展示该行）。 */
+    disabledByVisibility?: boolean;
+    /** v21：该工作区的「每工作区全局默认」（项目覆盖前；面板「跟随全局设置」展示）。 */
+    globalDefaultEnabled?: boolean;
+    /** v21：项目显式覆盖（true=显式开 / false=显式关 / 缺省=跟随全局）。 */
+    projectOverride?: boolean;
+    /** v21：项目覆盖后的工作区默认（行尾默认开关的 checked 依据）。 */
+    workspaceDefaultEnabled?: boolean;
 }
 /** `tools.list` 的返回。 */
 export interface ToolsListView {
@@ -136,6 +154,13 @@ export interface ToolsListView {
      * `true` 时列表已可用（不阻塞），前端可在首次见到后延迟静默刷新一次。
      */
     attributionSettling?: boolean;
+    /** v21：本次查询绑定的工作区（传了 cwd 时回填；可见性 / 每工作区默认按它计算）。 */
+    cwd?: string;
+    /**
+     * v21：工作区视图里被可见性隐藏的单元数（供「另有 N 个能力未对此外工作区
+     * 开放」提示）；全局视图为 0。
+     */
+    hiddenCount?: number;
 }
 /**
  * `tools.setSessionEnabled` 入参（**batch-first**：单条 = 长度 1 的数组）。

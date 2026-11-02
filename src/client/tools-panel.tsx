@@ -1,25 +1,21 @@
 /**
- * 能力面板 · Tools 域（v13 R3 / 帧 06）。
+ * 能力面板 · Tools 域（v13 R3 / 帧 06；v21 纳入可见性与工作区默认）。
  *
- * Tools 是**全局工具注册**，没有项目 / 工作区维度（UX v1.8 §2.4 / §2.5）：
- * 因此本视图没有左导航、没有工作区列表，只有**两栏**：
- *   - 左：插件单元列表（一个插件 = 一个开关单元，`N 个工具`）；
- *   - 右：插件详情 + **只读**工具清单（手风琴；schema 由 `tools.inspect` 懒加载，
- *     可展开看参数表与原始 JSON）。
+ * Tools 是**全局工具注册**：一个插件 = 一个开关单元，无单工具开关。两栏布局：
+ *   - 左：插件单元列表；
+ *   - 右：插件详情 + 只读工具清单（手风琴；schema 由 `tools.inspect` 懒加载）。
  *
- * 开关语义（**覆盖 v13 A5**）：能力面板 = **全局默认**（所有会话），
- * 会话首屏 /「能力」Tab = **本会话覆盖**（全局关闭时仍可在首屏单独开启）。
- * 因此本页：
- *   - 行 / 详情开关展示并写 `defaultEnabled`（`tools.setGlobalEnabled`），
- *     不需要 sessionId，也不显示任何具体会话状态；
- *   - 详情补一句「本会话可在对话首屏单独覆盖」，把两层关系说清。
+ * 三层开关（v21，与 Skills / MCP 同构）：
+ *   1. **可见性（全局唯一控制，按工作区）**：全局视图行内标签 + 「可见范围」编辑
+ *      （`overrides.globalGet().visibility.tools` / `overrides.setVisibility`）；
+ *   2. **每工作区默认开/关**：可见性弹层里按工作区配置；某工作区没有单独配置时
+ *      走兜底 `!全局默认关闭(unit)`（`capability-global-overrides.json` 的 `tools`
+ *      ∪ legacy `tools-global.json`，宿主已合并进行字段 `defaultEnabled`）；
+ *   3. **工作区覆盖**：工作区视图的行尾开关写项目三态
+ *      （`overrides.toggle("tools", unit, {enabled})` → `tools` / `enabledTools`）。
  *
- * 契约：docs/architecture/v13-implementation.md §5.1 / §9.4 / 附录 A +
- * task-20 两层语义（`defaultEnabled` / `enabled`、`tools.setGlobalEnabled`）。
- *
- * v20.1 能力中心：Tools 没有工作区维度，根部 header 的作用域分段控件在本
- * Tab 下置灰并写原因（「全局工具注册 · 不区分工作区」）；本视图只有两栏，
- * 列表标题栏固定「全局 Tools」+ 计数。
+ * 全局视图的行尾开关仍是**全局默认兜底**（`tools.setGlobalEnabled`，写统一全局文件）；
+ * 不可见行的默认开关禁用并标「不可见 · 不参与默认」。
  *
  * @module dsh-capability-settings/client/tools-panel
  */
@@ -28,11 +24,27 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import type {
   CapabilityPanelApi,
+  ClientCapabilityVisibility,
+  ClientGlobalOverrides,
+  ClientOverrides,
   ClientToolInspectTool,
   ClientToolsList,
   ClientToolsUnit,
 } from "./api.js";
 import { ToolParameterTable, toolParameters } from "./tool-schema.js";
+import {
+  EMPTY_VISIBILITY_SETS,
+  VisibilityDetailFields,
+  VisibilityRowMeta,
+  isRowInvisible,
+  safeGlobalGet,
+  safeOverridesGet,
+  visibilityEntryOf,
+  visibilityModeOf,
+  visibleWorkspaceCountOf,
+  workspaceDefaultOf,
+  workspaceOverrideOf,
+} from "./visibility.js";
 
 /** 详情标题右侧标签行的排版（与 mcp-panel 的 HEAD_TAGS_STYLE 同形）。 */
 const HEAD_TAGS_STYLE: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 6, flex: "none" };
@@ -59,6 +71,13 @@ function unitTagClass(unit: ClientToolsUnit): string {
  */
 function sortUnits(units: ClientToolsUnit[]): ClientToolsUnit[] {
   return [...units.filter((unit) => unit.kind !== "unattributed"), ...units.filter((unit) => unit.kind === "unattributed")];
+}
+
+/** 路径最后一段（工作区名）；空串/纯分隔符回退为原串。 */
+function baseName(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, "");
+  const at = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return at >= 0 ? trimmed.slice(at + 1) || trimmed : trimmed || path;
 }
 
 /** 归属依据的人话标签（task-32：运行时/包扫描/人工映射/名字推测/命名空间/未识别）。 */
@@ -130,13 +149,7 @@ function ToolAccordionItem({ tool, open, onToggle }: { tool: ClientToolInspectTo
   const description = tool.description?.trim() ?? "";
   return (
     <div className={open ? "skp-tool-item skp-tool-item-open" : "skp-tool-item"} role="listitem">
-      <button
-        type="button"
-        className="skp-tool-trigger"
-        aria-expanded={open}
-        title={tool.name}
-        onClick={onToggle}
-      >
+      <button type="button" className="skp-tool-trigger" aria-expanded={open} title={tool.name} onClick={onToggle}>
         <span className="skp-tool-chevron" aria-hidden="true">
           {open ? "▾" : "▸"}
         </span>
@@ -148,12 +161,7 @@ function ToolAccordionItem({ tool, open, onToggle }: { tool: ClientToolInspectTo
           {description.length > 0 && <p className="skp-tool-desc">{description}</p>}
           <ToolParameterTable parameters={parameters} />
           <div className="skp-tools-raw">
-            <button
-              type="button"
-              className="skp-link-btn"
-              aria-expanded={rawOpen}
-              onClick={() => setRawOpen((value) => !value)}
-            >
+            <button type="button" className="skp-link-btn" aria-expanded={rawOpen} onClick={() => setRawOpen((value) => !value)}>
               {rawOpen ? "收起原始 JSON" : "查看原始 JSON"}
             </button>
             {rawOpen && <pre className="skp-tools-raw-json">{JSON.stringify(tool.parameters ?? {}, null, 2)}</pre>}
@@ -171,22 +179,30 @@ type InspectState =
   | { status: "error"; message: string };
 
 /**
- * Tools 域视图：两栏（插件列表 + 详情/只读工具清单），无左导航。
+ * Tools 域视图：两栏（插件列表 + 详情/只读工具清单）。
  *
  * @param query 根组件头部搜索框的值（按插件名 / 工具名 / 工具说明本地过滤）。
- * @param workspace 当前工作区（只作为重新拉取的信号：工作区/会话切换时刷新列表）。
+ * @param workspace 当前工作区（undefined = 全局视图；v21 起有工作区维度）。
+ * @param projects 全部已知工作区（可见性标签 / 弹层 / 每工作区默认用）。
  */
 export function ToolsView({
   api,
+  workspace,
+  projects = [],
   query,
   onCount,
 }: {
   api: CapabilityPanelApi;
+  workspace?: string;
+  /** 全部已知工作区；旧调用方 / 测试夹具可缺省（按无工作区渲染）。 */
+  projects?: Array<{ path: string; title?: string }>;
   query: string;
-  /** 数据到达后上报单元总数（域 Tab 计数）。 */
+  /** 数据到达后上报单元总数（域 Tab 计数；全局口径）。 */
   onCount?: (count: number) => void;
 }) {
   const [data, setData] = useState<ClientToolsList | undefined>(undefined);
+  const [globalOverrides, setGlobalOverrides] = useState<ClientGlobalOverrides | undefined>(undefined);
+  const [projectOverrides, setProjectOverrides] = useState<ClientOverrides | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>(undefined);
   const [version, setVersion] = useState(0);
@@ -201,6 +217,17 @@ export function ToolsView({
   const mountedRef = useRef(true);
   const rowRefs = useRef(new Map<string, HTMLElement>());
 
+  const scope: "global" | "workspace" = workspace === undefined ? "global" : "workspace";
+  const projectName =
+    workspace === undefined ? undefined : (projects.find((project) => project.path === workspace)?.title ?? baseName(workspace));
+  const visibilitySets = globalOverrides?.visibility ?? EMPTY_VISIBILITY_SETS;
+  /** 某单元的可见性配置（skills/mcp/tools 同构；tools key = unit）。 */
+  const visibilityOf = (unit: ClientToolsUnit): ClientCapabilityVisibility | undefined =>
+    visibilityEntryOf(visibilitySets, "tools", unit.unit);
+  /** 兜底默认是否关闭：legacy `tools-global.json` 已并入行字段 defaultEnabled。 */
+  const globalOffOf = (unit: ClientToolsUnit): boolean =>
+    !defaultEnabledOf(unit) || globalOverrides?.tools.includes(unit.unit) === true;
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -212,12 +239,17 @@ export function ToolsView({
     let cancelled = false;
     setLoading(true);
     setError(undefined);
-    // 主面板只看/写全局默认：不传 sessionId（全局态与会话无关）。
-    void api.tools
-      .list()
-      .then((view) => {
+    // 主面板只看/写全局默认（不传 sessionId）；cwd 由面板 api 的当前作用域决定。
+    void Promise.all([
+      api.tools.list(),
+      safeGlobalGet(api),
+      scope === "workspace" ? safeOverridesGet(api) : Promise.resolve(undefined),
+    ])
+      .then(([view, visibility, overrides]) => {
         if (cancelled) return;
         setData(view);
+        setGlobalOverrides(visibility);
+        setProjectOverrides(overrides);
       })
       .catch((failure) => {
         if (cancelled) return;
@@ -229,39 +261,44 @@ export function ToolsView({
     return () => {
       cancelled = true;
     };
-  }, [api, version]);
+  }, [api, version, scope, workspace]);
 
   const units = useMemo(() => sortUnits(data?.units ?? []), [data]);
+  /** 工作区视图只渲染可见单元（宿主已过滤；这里防御旧宿主 / 脏数据）。 */
+  const visibleUnits = useMemo(
+    () => (scope === "global" ? units : units.filter((unit) => unit.visibleInWorkspace !== false)),
+    [units, scope],
+  );
+  /** 工作区视图被可见性隐藏的单元数（全局视图恒 0）。 */
+  const hiddenCount = scope === "workspace" ? (data?.hiddenCount ?? 0) : 0;
 
-  // 计数回填（搜索不影响计数）；加载中不覆盖。
+  // 计数回填（搜索不影响计数）；加载中不覆盖。v21：全局口径（Tab 计数不随作用域变）。
   useEffect(() => {
     if (!loading && error === undefined) onCount?.(units.length);
   }, [units.length, loading, error, onCount]);
 
   // 首次到达 / 当前选中消失时选中第一项（帧 06 默认展开详情）。
   useEffect(() => {
-    if (units.length === 0) {
+    if (visibleUnits.length === 0) {
       if (selectedUnit !== undefined) setSelectedUnit(undefined);
       return;
     }
-    if (selectedUnit !== undefined && units.some((unit) => unit.unit === selectedUnit)) return;
-    setSelectedUnit(units[0]?.unit);
-  }, [units, selectedUnit]);
+    if (selectedUnit !== undefined && visibleUnits.some((unit) => unit.unit === selectedUnit)) return;
+    setSelectedUnit(visibleUnits[0]?.unit);
+  }, [visibleUnits, selectedUnit]);
 
   const q = query.trim().toLowerCase();
   const visible = useMemo(
     () =>
-      units.filter((unit) => {
+      visibleUnits.filter((unit) => {
         if (q === "") return true;
         if (unit.name.toLowerCase().includes(q)) return true;
-        return unit.tools.some(
-          (tool) => tool.name.toLowerCase().includes(q) || (tool.description ?? "").toLowerCase().includes(q),
-        );
+        return unit.tools.some((tool) => tool.name.toLowerCase().includes(q) || (tool.description ?? "").toLowerCase().includes(q));
       }),
-    [units, q],
+    [visibleUnits, q],
   );
 
-  const selected = units.find((unit) => unit.unit === selectedUnit);
+  const selected = visibleUnits.find((unit) => unit.unit === selectedUnit);
   /** true = 宿主仍在解析归属：显示轻量提示，不阻塞开关。 */
   const attributionSettling = data?.attributionSettling === true;
 
@@ -302,17 +339,40 @@ export function ToolsView({
       ...(tool.description !== undefined ? { description: tool.description } : {}),
     }));
 
+  /** 当前行的开关勾选态与写路径（按作用域分派）。 */
+  const switchStateOf = (unit: ClientToolsUnit) => {
+    if (scope === "global") {
+      const invisible = isRowInvisible(unit, visibilityOf(unit), projects);
+      return { checked: defaultEnabledOf(unit), disabled: unit.lockedReason !== undefined || invisible, invisible };
+    }
+    const entry = visibilityOf(unit);
+    const override = workspaceOverrideOf(projectOverrides, "tools", unit.unit);
+    const fallback = workspace === undefined ? true : workspaceDefaultOf(entry, workspace, globalOffOf(unit));
+    const checked = override === "on" ? true : override === "off" ? false : fallback;
+    return { checked, disabled: unit.lockedReason !== undefined, invisible: false, override };
+  };
+
   /**
-   * 写**全局默认**开关（能力面板语义）：不需要 sessionId，也不碰任何会话覆盖。
-   * 全局关闭后，单个会话仍可在对话首屏单独开启。
+   * 写开关：
+   *   - 全局视图 → `tools.setGlobalEnabled`（全局兜底默认）；
+   *   - 工作区视图 → `overrides.toggle("tools", unit, {enabled})`（项目三态覆盖）。
    */
   const toggleDefault = useCallback(
     async (unit: ClientToolsUnit, next: boolean) => {
-      if (unit.lockedReason !== undefined || busyUnit !== undefined) return;
+      const state = switchStateOf(unit);
+      if (state.disabled || busyUnit !== undefined) return;
       setBusyUnit(unit.unit);
       setOpError(undefined);
       try {
-        await api.tools.setGlobalEnabled({ units: [unit.unit], enabled: next });
+        if (scope === "global") {
+          await api.tools.setGlobalEnabled({ units: [unit.unit], enabled: next });
+        } else {
+          const result = await api.overrides.toggle("tools", unit.unit, { enabled: next });
+          if (!result.ok) {
+            setOpError(result.errors.join("; "));
+            return;
+          }
+        }
       } catch (failure) {
         setOpError(String(failure instanceof Error ? failure.message : failure));
       } finally {
@@ -320,7 +380,9 @@ export function ToolsView({
         setVersion((value) => value + 1);
       }
     },
-    [api, busyUnit],
+    // switchStateOf 依赖 scope / overrides / projects；重建闭包由这些值驱动。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [api, busyUnit, scope, projectOverrides, globalOverrides, projects],
   );
 
   const copyName = async (name: string) => {
@@ -367,6 +429,103 @@ export function ToolsView({
 
   const listErrors = data?.errors ?? [];
 
+  const renderRow = (unit: ClientToolsUnit) => {
+    const state = switchStateOf(unit);
+    const active = unit.unit === selectedUnit;
+    const locked = unit.lockedReason !== undefined;
+    const entry = visibilityOf(unit);
+    const visibilityMeta =
+      scope === "global" ? (
+        <VisibilityRowMeta
+          entry={entry}
+          workspaces={projects}
+          globalOff={globalOffOf(unit)}
+          mode={unit.visibilityMode ?? visibilityModeOf(entry)}
+          count={unit.visibleWorkspaceCount ?? visibleWorkspaceCountOf(entry, projects)}
+          invisible={state.invisible}
+          summaryClassName="skp-vis-summary"
+        />
+      ) : (
+        state.override !== "inherit" && (
+          <span
+            className="skp-tag skp-tag-warn"
+            title={state.override === "on" ? "本工作区显式打开（覆盖全局的每工作区默认）" : "本工作区显式关闭（覆盖全局的每工作区默认）"}
+          >
+            已覆盖
+          </span>
+        )
+      );
+    const switchLabel = state.invisible
+      ? "不可见 · 不参与默认"
+      : scope === "global"
+        ? "全局默认"
+        : `${projectName ?? "工作区"} 默认 · ${state.override === "inherit" ? "跟随全局" : "已覆盖"}`;
+    const switchTitle = state.invisible
+      ? "该单元对所有工作区都不可见：不参与默认开关；先在「可见范围」里打开可见性"
+      : locked
+        ? (unit.lockedReason ?? "该插件无法开关")
+        : scope === "global"
+          ? defaultEnabledOf(unit)
+            ? "关闭：关闭后全局默认不可用；仍可在对话首屏为单个对话单独开启"
+            : "开启：全局默认可用（仍可在对话首屏为单个对话单独关闭）"
+          : state.checked
+            ? "关闭：仅此工作区默认不启用（写工作区覆盖，其它工作区不受影响）"
+            : "打开：仅此工作区默认启用（写工作区覆盖）";
+    return (
+      <li key={unit.unit} className={active ? "skp-row-wrap skp-row-wrap-active" : "skp-row-wrap"}>
+        <button
+          type="button"
+          role="option"
+          aria-selected={active}
+          tabIndex={active ? 0 : -1}
+          className={active ? "skp-row skp-row-active" : "skp-row"}
+          ref={(element) => {
+            if (element === null) rowRefs.current.delete(unit.unit);
+            else rowRefs.current.set(unit.unit, element);
+          }}
+          onClick={() => setSelectedUnit(unit.unit)}
+          onKeyDown={(event) => onRowKeyDown(event, unit.unit)}
+        >
+          <span className="skp-row-name">
+            <span className={state.checked ? "skp-dot skp-dot-enabled" : "skp-dot skp-dot-hollow"} aria-hidden="true" />
+            <span className="skp-sr-only">{state.checked ? "默认已启用" : "默认已关闭"}</span>
+            <span className="skp-row-title" title={unit.name}>
+              {unit.name}
+            </span>
+          </span>
+          <span className="skp-row-meta">
+            <span
+              className={unitTagClass(unit)}
+              title={unit.kind === "unattributed" ? "来源未识别：不是宿主内置工具" : "插件运行时注册（非 MCP）"}
+            >
+              {unit.kind === "unattributed" ? "未识别" : "插件"}
+            </span>
+            <span className="skp-tag skp-tag-flat">{unit.toolCount} 个工具</span>
+            {visibilityMeta}
+          </span>
+        </button>
+        <label className="skp-row-toggle" title={switchTitle}>
+          <span className="skp-row-default-label">{switchLabel}</span>
+          <span className="skp-switch">
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label={`默认启用 ${unit.name}`}
+              checked={state.checked}
+              disabled={state.disabled || busyUnit === unit.unit}
+              onChange={(event) => void toggleDefault(unit, event.target.checked)}
+            />
+            <span className="skp-switch-track" />
+          </span>
+        </label>
+      </li>
+    );
+  };
+
+  const listTitle = scope === "global" ? "全局 Tools" : `${projectName ?? "工作区"} · Tools`;
+  const listNote = scope === "global" ? "所有工作区" : "仅此工作区";
+  const defaultOnCount = visibleUnits.filter((unit) => defaultEnabledOf(unit)).length;
+
   return (
     <div className="skp-domain">
       {opError !== undefined && <div className="skp-error">{opError}</div>}
@@ -376,87 +535,49 @@ export function ToolsView({
 
       {data !== undefined && error === undefined && (
         <div className="skp-body skp-tools-body">
-          {/* 中间列：插件单元列表（无左导航 / 无工作区维度）。 */}
+          {/* 中间列：插件单元列表（v21 起随作用域切换可见集合）。 */}
           <div className="skp-workspace-pane skp-tools-pane">
             <div className="skp-list-head">
-              <span className="skp-list-title">全局 Tools</span>
-              <span className="skp-group-count">{units.length}</span>
-              <span className="skp-list-note">插件级开关 · 不区分工作区</span>
+              <span className="skp-list-title">{listTitle}</span>
+              <span className="skp-group-count" title="当前作用域可见单元数">
+                {visibleUnits.length}
+              </span>
+              <span className="skp-list-note">{listNote}</span>
               <span className="skp-detail-head-spacer" />
-              <span className="skp-pane-title-note">{units.filter((unit) => defaultEnabledOf(unit)).length} 默认启用</span>
+              <span className="skp-pane-title-note">
+                {scope === "global" ? `${defaultOnCount} 默认启用` : "开关写工作区覆盖"}
+              </span>
             </div>
+            {scope === "global" && (
+              <div className="skp-pane-note">全局默认写入统一全局文件 · 所有工作区生效；可见性按工作区控制</div>
+            )}
+            {scope === "workspace" && (
+              <div className="skp-pane-note">只列出本工作区可见的 Tools · 默认开关只作用于本工作区</div>
+            )}
             {attributionSettling && <div className="skp-pane-note">来源解析中…</div>}
-            {units.length === 0 ? (
-              <div className="skp-empty">
-                {listErrors.length > 0 ? "当前外壳未提供工具注册表，无法列出 Tools。" : "尚未发现 Tools。"}
-              </div>
+            {visibleUnits.length === 0 ? (
+              <>
+                <div className="skp-empty">
+                  {listErrors.length > 0
+                    ? "当前外壳未提供工具注册表，无法列出 Tools。"
+                    : scope === "workspace"
+                      ? "本工作区没有可见的 Tools（可在全局视图调整可见范围）。"
+                      : "尚未发现 Tools。"}
+                </div>
+                {hiddenCount > 0 && <div className="skp-pane-note">另有 {hiddenCount} 个能力未对此外工作区开放</div>}
+              </>
             ) : visible.length === 0 ? (
               <div className="skp-empty">没有匹配「{query.trim()}」的 Tools。</div>
             ) : (
               <div className="skp-group-scroll">
                 <ul className="skp-list" role="listbox" aria-label="Tools">
-                  {visible.map((unit) => {
-                    const active = unit.unit === selectedUnit;
-                    const locked = unit.lockedReason !== undefined;
-                    return (
-                      <li key={unit.unit} className={active ? "skp-row-wrap skp-row-wrap-active" : "skp-row-wrap"}>
-                        <button
-                          type="button"
-                          role="option"
-                          aria-selected={active}
-                          tabIndex={active ? 0 : -1}
-                          className={active ? "skp-row skp-row-active" : "skp-row"}
-                          ref={(element) => {
-                            if (element === null) rowRefs.current.delete(unit.unit);
-                            else rowRefs.current.set(unit.unit, element);
-                          }}
-                          onClick={() => setSelectedUnit(unit.unit)}
-                          onKeyDown={(event) => onRowKeyDown(event, unit.unit)}
-                        >
-                          <span className="skp-row-name">
-                            <span
-                              className={defaultEnabledOf(unit) ? "skp-dot skp-dot-enabled" : "skp-dot skp-dot-hollow"}
-                              aria-hidden="true"
-                            />
-                            <span className="skp-sr-only">{defaultEnabledOf(unit) ? "默认已启用" : "默认已关闭"}</span>
-                            <span className="skp-row-title" title={unit.name}>
-                              {unit.name}
-                            </span>
-                          </span>
-                          <span className="skp-row-meta">
-                            <span className={unitTagClass(unit)} title={unit.kind === "unattributed" ? "来源未识别：不是宿主内置工具" : "插件运行时注册（非 MCP）"}>
-                              {unit.kind === "unattributed" ? "未识别" : "插件"}
-                            </span>
-                            <span className="skp-tag skp-tag-flat">{unit.toolCount} 个工具</span>
-                          </span>
-                        </button>
-                        <label
-                          className="skp-row-toggle"
-                          title={
-                            locked
-                              ? (unit.lockedReason ?? "该插件无法开关")
-                              : defaultEnabledOf(unit)
-                                ? "关闭：关闭后全局默认不可用；仍可在对话首屏为单个对话单独开启"
-                                : "开启：全局默认可用（仍可在对话首屏为单个对话单独关闭）"
-                          }
-                        >
-                          <span className="skp-row-default-label">默认</span>
-                          <span className="skp-switch">
-                            <input
-                              type="checkbox"
-                              role="switch"
-                              aria-label={`默认启用 ${unit.name}`}
-                              checked={defaultEnabledOf(unit)}
-                              disabled={locked || busyUnit === unit.unit}
-                              onChange={(event) => void toggleDefault(unit, event.target.checked)}
-                            />
-                            <span className="skp-switch-track" />
-                          </span>
-                        </label>
-                      </li>
-                    );
-                  })}
+                  {visible.map(renderRow)}
                 </ul>
+                {hiddenCount > 0 && (
+                  <div className="skp-pane-note" title="这些单元在全局视图里未被开放给本工作区；请在全局视图的「可见范围」里开启">
+                    另有 {hiddenCount} 个能力未对此外工作区开放
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -482,8 +603,6 @@ export function ToolsView({
                     {copied ? "已复制" : "复制插件名"}
                   </button>
                 </div>
-
-                {/* 开关只在左侧列表行（详情不再重复操作行，也不出现「本会话」）。 */}
 
                 {/* 来源判定 / 注入方式（task-32：按依据显示 + 推测标识）。 */}
                 <div className="skp-detail-meta">
@@ -515,16 +634,30 @@ export function ToolsView({
                     插件运行时注册的非 MCP 工具（不落盘）
                   </span>
                 </div>
-                {attributionIsSpeculative(selected) && (
-                  <p className="skp-note skp-note-warn">来源为推测，请核对工具清单</p>
-                )}
+                {attributionIsSpeculative(selected) && <p className="skp-note skp-note-warn">来源为推测，请核对工具清单</p>}
                 {selected.description !== undefined && selected.description.trim().length > 0 && (
                   <p className="skp-note">{selected.description}</p>
                 )}
 
                 <div className="skp-note">
-                  工具数 {selected.toolCount} · 开关为插件级：关闭后该插件全部工具全局默认不可见（不改已有对话的显式覆盖）
+                  工具数 {selected.toolCount} · 开关为插件级：关闭后该插件全部工具默认不可用（不改已有对话的显式覆盖）
                 </div>
+
+                {/* v21：全局视图的可见性编辑（工作区视图不出现）。 */}
+                {scope === "global" && (
+                  <dl className="skp-detail-fields">
+                    <VisibilityDetailFields
+                      api={api}
+                      domain="tools"
+                      capabilityKey={selected.unit}
+                      name={selected.name}
+                      entry={visibilityOf(selected)}
+                      workspaces={projects}
+                      globalOff={globalOffOf(selected)}
+                      onSaved={() => setVersion((value) => value + 1)}
+                    />
+                  </dl>
+                )}
 
                 <div className="skp-detail-inspect">
                   <div className="skp-detail-inspect-head">
@@ -560,7 +693,6 @@ export function ToolsView({
           </div>
         </div>
       )}
-
     </div>
   );
 }

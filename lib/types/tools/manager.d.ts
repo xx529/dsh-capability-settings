@@ -21,6 +21,7 @@
  *
  * @module dsh-capability-settings/tools/manager
  */
+import type { CapabilityDefaults } from "../overrides/types.js";
 import type { SessionStateStore } from "../session-state.js";
 import { type RestrictOutcome, type ToolsRestrictionState } from "./restrict.js";
 import { type ToolsInspectResult, type ToolsListView, type ToolsSetGlobalResult, type ToolsSetSessionResult } from "./types.js";
@@ -61,6 +62,25 @@ export interface ToolsManagerDeps {
     /** 全局 tools 服务访问器（测试注入；缺省 `ctx.root.get("tools") ?? ctx.get("tools")`）。 */
     globalTools?: () => any;
     /**
+     * v21：可见性 + 每工作区默认 + 全局兜底的批量入口
+     * （`overrides.capabilityDefaultsMany("tools", units, cwd)`）。缺省 = 全部可见、用
+     * `globallyDisabled` 的旧语义。
+     */
+    capabilityDefaults?: (units: readonly string[], cwd?: string) => Promise<Map<string, CapabilityDefaults>>;
+    /**
+     * v21：全局兜底关闭集合（`tools-global.json` disabled ∪ 全局文件 `tools` 的并集）。
+     *
+     * 提供时优先用它（旧 store 继续保留只读兼容）；缺省回退 `deps.global`（旧装配）。
+     */
+    globalDefaults?: () => Promise<ReadonlySet<string>>;
+    /**
+     * v21：写全局兜底默认（写 `capability-global-overrides.json` 的 `tools`）。
+     *
+     * 提供时 `setGlobalEnabled` 用它（不再写 `tools-global.json`）；缺省回退
+     * `deps.global.setEnabled`（旧装配 / 测试）。
+     */
+    writeGlobalDefaults?: (units: readonly string[], enabled: boolean) => Promise<ToolsSetGlobalResult>;
+    /**
      * 自动归属 resolver（T0/T1/T2/T3 + 表兜底）。缺省 = 纯人工表（旧装配/测试）。
      */
     resolver?: AttributionResolver;
@@ -97,6 +117,11 @@ export interface ToolsManager {
     setGlobalEnabled(input: unknown): Promise<ToolsSetGlobalResult>;
     /** 本会话的显式开关快照（诊断；键带 `plugin:` 前缀）。 */
     sessionToggleState(sessionId?: string): Record<string, boolean>;
+    /**
+     * v21：可见性 / 每工作区默认变更后重新收敛（重读全局兜底 + 对所有 live agent
+     * 重新 apply；fire-and-forget 语义由调用方决定）。
+     */
+    refreshFromVisibility(): Promise<void>;
     /** 卸载：移除生命周期监听、解除已应用的 restrict、清空内存状态。 */
     dispose(): void;
 }
@@ -111,6 +136,19 @@ export interface ToolsManager {
  * @param globallyDisabled 全局默认关闭的 unit 集合（`tools-global.json`）
  */
 export declare function effectiveEnabled(unit: string, toggles: ReadonlyMap<string, boolean> | undefined, globallyDisabled: ReadonlySet<string>): boolean;
+/**
+ * v21：带可见性 / 每工作区默认的生效值。
+ *
+ * 优先级：**不可见 ⇒ 强制关（会话显式不能打开）** > 会话显式 > 工作区默认
+ * （可见性 + 每工作区全局默认 + 项目三态，来自 `overrides.capabilityDefaults`）。
+ * 缺省 / 无快照时回退 {@link effectiveEnabled}（旧语义）。
+ *
+ * @param unit 裸 unit id
+ * @param toggles 会话显式覆盖（`plugin:<unit>` → boolean）
+ * @param defaults 能力默认快照（可缺省）
+ * @param globallyDisabled 旧全局兜底（仅在无快照时使用）
+ */
+export declare function effectiveEnabledFor(unit: string, toggles: ReadonlyMap<string, boolean> | undefined, defaults: ReadonlyMap<string, CapabilityDefaults> | undefined, globallyDisabled?: ReadonlySet<string>): boolean;
 /** 对某个 agent 的一次性应用结果（R2 预留形态的返回值）。 */
 export interface ApplyForAgentResult {
     /** 本会话要关闭的单元（空 = 无需屏蔽）。 */
@@ -141,6 +179,8 @@ export declare function applyForAgent(agent: any, sessionId: string, toggles: Re
     globalTools?: () => any;
     logger?: ToolsLogger;
     globallyDisabled?: ReadonlySet<string>;
+    /** v21：可见性 + 每工作区默认快照（缺省 = 全部可见、按 globallyDisabled）。 */
+    capabilityDefaults?: ReadonlyMap<string, CapabilityDefaults>;
     resolveTool?: (toolName: string) => ToolAttribution;
 }): ApplyForAgentResult;
 /**

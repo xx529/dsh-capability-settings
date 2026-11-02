@@ -104,7 +104,7 @@ danger-full-access 审批重试同一条命令即可。手动兜底通道仍是 
 | `src/session-state.ts` | 会话级开关持久化（`<dshHome>/dsh-capability-settings/session-capabilities.json`：原子写 + 文件锁 + 懒加载 + 两阶段对账；Skills / MCP / Tools / 派生继承共用一个实例） |
 | `src/derive/manager.ts` | 派生继承（spawn-time snapshot）：`agent/created` 且 `source=startup` 时按父会话 `deriveMode` 把三域显式覆盖复制到 child 记录（或只写工作区快照）；早于三个域注册 |
 | `src/session-state-reconcile.ts` | 孤儿记录对账调度（启动后 / 每 24h 存在性校验；`session/disposed` 只标记不删；持久化服务缺失/抛错一律保留） |
-| `src/shared/` | 通用：原子写、文件锁、项目根探测、agents home、JSON 配置、skill 定位/来源 |
+| `src/shared/` | 通用：原子写、文件锁、项目根探测、agents home、JSON 配置、skill 定位/来源；`visibility.ts` = 能力可见性/每工作区默认纯计算（v21） |
 
 RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒为 `{ ok: true, value }`；
 业务失败必须包成 `value: { ok: false, errors: [...] }`，**不能**直接返回通道层失败信封，
@@ -124,10 +124,14 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
   的目录；用户主目录永不当作项目根；找不到则回退原 cwd。见 `src/shared/project-root.ts`。
 - **配置文件**：全局 `~/.agents/mcp.json`、项目 `<项目根>/.mcp.json`；skills 目录；
   `quick-messages.json`；项目级「全局能力引用」`capability-imports.json`（导入/引用）。
-- **Skills 全局默认（v20.1 B2）**：`<dshHome>/dsh-capability-settings/capability-global-overrides.json`
-  （`version:1, skills[]` = 全局默认关闭；原子写 + 0600 + 文件锁；不改技能文件）。
-  优先级：全局默认 < 工作区显式启用/禁用 < 会话显式开关；工作区用项目 overrides 的
-  `enabledSkills` 重新打开。
+- **能力全局默认 + 可见性（v20.1 B2 / v20.2 MCP / v21 三域）**：
+  `<dshHome>/dsh-capability-settings/capability-global-overrides.json`
+  （v2：`skills[]` / `mcp[]` / `tools[]` 兜底默认关闭 + `visibility{skills,mcp,tools}`：
+  `{mode: all|selected|none, workspaces: {<workspace path>: {visible?, defaultEnabled?}}}`；
+  原子写 + 0600 + 文件锁；不改技能文件 / 注入方配置）。读取兼容 v1（全部可见）。
+  优先级：**可见性 > 每工作区全局默认 > 工作区覆盖 > 会话显式**；工作区用
+  `enabledSkills` / `enabledMcp` / `enabledTools` 重新打开；项目自己的条目
+  （`.mcp.json` / 项目技能 / 项目引用）**不做可见性**。
 - **项目级「默认关闭」统一存储**：`<dshHome>/dsh-capability-settings/capability-overrides.json`
   （`src/overrides/*`；一个文件按**项目根**分 key：`projects.<项目根>.mcp` /
   `.skills`（禁用）/ `.enabledSkills`（重新打开），条目带 `updatedAt` / 最近 `cwd`；
@@ -253,7 +257,11 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
   - `Capability Panel · MCP 全局默认 v20.2`（page `190:2`）：3 块（全局视图 · 外部注入
     行尾开关可写 `190:7` / 工作区视图 · 继承·已覆盖全局默认 `190:79` / 优先级与落点
     规范 `190:153`）。对应实现：MCP 全局默认层（`capability-global-overrides.json` 的
-    `mcp` 名单 + 项目 `enabledMcp` 三态）；预览图待本地 Figma 伴生插件重连后导出。
+    `mcp` 名单 + 项目 `enabledMcp` 三态）。
+  - `Capability Panel · 可见性与默认 v21 草案`（page `192:2`）：5 块（全局可见性标签/每工作区
+    默认 `193:35` / 可见范围弹层 `193:152` / 工作区只列可见 `193:323` / 首屏复用既有弹窗
+    `194:645` / 规范 `193:550`）。对应实现：v21 能力可见性（`visibility` v2 + 三域
+    每工作区默认 + Tools 域）；预览图 `docs/figma/preview/v21-*`。
   - `Capability Dock · 首屏入口 v18（实现基线）`（page `155:13148`）：3 帧 `155:13149`（默认 ·
     入口在首屏行右端）/ `155:13275`（hover 计数项）/ `155:13396`（配置弹窗 · 沿用 v14）。
     对应代码：`src/client.ts` 的 `conversation.hero.options` 注册 + `src/client/styles.ts` 的

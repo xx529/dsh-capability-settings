@@ -60,6 +60,8 @@ import {
   skillDefaultSets,
 } from "../shared/skill-defaults.js";
 import type { SkillDefaultSets } from "../shared/skill-defaults.js";
+import type { CapabilityDefaults } from "../overrides/types.js";
+import { INVISIBLE_CAPABILITY_ERROR } from "../shared/visibility.js";
 import { SHADOW_DESCRIPTION, SHADOW_METADATA_KEY } from "./registry.js";
 import type { ClassifiedInjectedRow, SkillRegistryBridge } from "./registry.js";
 import type { SkillSummaryView } from "./types.js";
@@ -81,6 +83,19 @@ export interface SkillSessionDeps {
    * 做存在性判定，避免给不存在 / 已删除的名字注册 ghost shadow。
    */
   diskNames?: (cwd?: string) => Promise<readonly string[]>;
+  /**
+   * v21：可见性 + 每工作区默认的批量入口
+   * （`overrides.capabilityDefaultsMany("skills", names, cwd)`）。
+   * 缺省时按「全部可见 + 旧默认」处理（旧装配 / 回归脚本兼容）。
+   */
+  capabilityDefaults?: (names: readonly string[], cwd?: string) => Promise<Map<string, CapabilityDefaults>>;
+  /**
+   * v21：可见性里出现过的技能名（`overrides.visibilityKeys("skills")`）。
+   *
+   * 运行时 gate 用它发现「不在默认关闭名单、但被可见性 / 每工作区默认关掉」
+   * 的技能（mode/selected/每工作区 defaultEnabled=false 都可能是这种）。
+   */
+  visibilityNames?: (cwd?: string) => Promise<readonly string[]>;
   /** 宿主 registry 桥（读注入技能 + read-before/after-shadow 校验）；缺省退化为纯磁盘行为。 */
   registry?: SkillRegistryBridge;
   /**
@@ -145,6 +160,18 @@ export interface SkillSessionRegistry {
    */
   list(baseList: (cwd?: string) => Promise<SkillSummaryView[]>, cwd?: string, sessionId?: string): Promise<SessionSkillView[]>;
   /**
+   * v21：与 {@link list} 相同的行，外加工作区视图的 `hiddenCount`（被可见性隐藏
+   * 的技能数，供「另有 N 个未开放」提示）。
+   *
+   * RPC `skills.sessionList` 用这个（value 恒为 `{skills, hiddenCount}`）；宿主内部
+   * 调用方（jev / session-bulk）继续用数组形态的 `list`。
+   */
+  listView(
+    baseList: (cwd?: string) => Promise<SkillSummaryView[]>,
+    cwd?: string,
+    sessionId?: string,
+  ): Promise<{ skills: SessionSkillView[]; hiddenCount: number }>;
+  /**
    * 设置本会话开关（按会话落盘；无 `state` 依赖时仅内存）。
    *
    * `enabled=false` 注册 shadow；`true` 解除；`undefined` 清除显式覆盖、
@@ -199,6 +226,11 @@ interface SessionRecord {
   explicitHydrated: boolean;
   /** 本项目默认禁用名单（最近一次读取的快照；B2 起 = 有效默认 = 全局 ∪ 项目 − 项目启用）。 */
   projectDefaults: Set<string>;
+  /**
+   * v21 能力默认快照（可见性 + 每工作区默认 + 项目三态）：最近一次读取的
+   * 名字 → 默认态。`desiredEnabled` 与列表投影都从这里取。
+   */
+  capabilities: Map<string, CapabilityDefaults>;
   /** 已尝试但尚未生效的名字（registry 未就绪/时序问题；下次读取重试）。 */
   projectPending: Set<string>;
   /**
@@ -290,6 +322,7 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
       explicit: new Map(),
       explicitHydrated: false,
       projectDefaults: new Set(),
+      capabilities: new Map(),
       projectPending: new Set(),
       defaultBlocked: new Set(),
       projectAttempts: new Map(),
@@ -334,11 +367,47 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
     return record.shadows.has(name) || record.projectShadows.has(name);
   }
 
-  /** 意图状态：显式开关优先，否则跟随项目默认。 */
+  /**
+   * 意图状态：**不可见 ⇒ 强制关**（会话显式也不能打开）；否则显式开关优先，
+   * 再跟随工作区默认（可见性 + 每工作区默认 + 项目三态）。
+   */
   function desiredEnabled(record: SessionRecord, name: string): boolean {
+    const capability = record.capabilities.get(name);
+    if (capability !== undefined && !capability.visible) return false;
     const explicit = record.explicit.get(name);
     if (explicit !== undefined) return explicit;
     return !record.projectDefaults.has(name);
+  }
+
+  /**
+   * v21：批量读取能力默认快照（优先级 `overrides.capabilityDefaultsMany`；
+   * 缺省 / 失败返回空 map ⇒ 全部可见 + 旧默认语义）。
+   */
+  async function capabilityDefaultsOf(
+    names: readonly string[],
+    cwd: string | undefined,
+  ): Promise<Map<string, CapabilityDefaults>> {
+    if (deps.capabilityDefaults === undefined || names.length === 0) return new Map();
+    try {
+      return await deps.capabilityDefaults([...new Set(names)], cwd);
+    } catch {
+      return new Map();
+    }
+  }
+
+  /** v21：可见性里出现过的技能名（旧装配缺省为空）。 */
+  async function visibilityNamesOf(cwd: string | undefined): Promise<readonly string[]> {
+    if (deps.visibilityNames === undefined) return [];
+    try {
+      return await deps.visibilityNames(cwd);
+    } catch {
+      return [];
+    }
+  }
+
+  /** 该名字当前是否对本工作区不可见（capability 缺省 = 可见）。 */
+  function invisibleOf(record: SessionRecord, name: string): boolean {
+    return record.capabilities.get(name)?.visible === false;
   }
 
   /** 会话记录 → 落盘元数据（cwd 仅诊断、headerCreatedAt 防 id 复用）。 */
@@ -647,7 +716,20 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
     await hydrateExplicit(record);
     const registry = deps.registry;
     if (registry === undefined) return { ok: true };
-    const disabled = preloadedDisabled ?? (await effectiveDisabledOf(record.cwd));
+    // v21：禁用名单 = 旧有效默认关闭名单 ∪ 可见性 / 每工作区默认关掉的名字。
+    // 后者可能不在任何默认名单里（mode/selected、workspaces[ws].defaultEnabled=false），
+    // 所以先用 visibilityNames 发现，再批量取统一默认快照。
+    const legacyDisabled = preloadedDisabled ?? (await effectiveDisabledOf(record.cwd));
+    const visibilityNames = await visibilityNamesOf(record.cwd);
+    const namesToResolve = [...new Set([...legacyDisabled, ...visibilityNames])];
+    const capabilities = await capabilityDefaultsOf(namesToResolve, record.cwd);
+    record.capabilities = new Map(capabilities);
+    const disabled: string[] = [];
+    for (const name of namesToResolve) {
+      const capability = capabilities.get(name);
+      const isDisabled = capability !== undefined ? !capability.effectiveDefaultEnabled : legacyDisabled.includes(name);
+      if (isDisabled) disabled.push(name);
+    }
     record.projectDefaults = new Set(disabled);
     // 常见路径：没有任何默认关闭、也没有待处理项、也没有显式会话开关
     // ⇒ 不必读 registry（显式开关也要走下面的恢复逻辑，不能提前返回）。
@@ -851,6 +933,9 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
     await withQueue(record, async () => {
       const sessionId = typeof record.agent?.id === "string" ? record.agent.id : undefined;
       for (const [name, enabled] of [...record.explicit.entries()]) {
+        // v21：不可见能力的显式覆盖**保留但不生效**（契约 §2.3）；不投影 shadow，
+        // 也不当作"已删除"清掉，恢复可见后重新生效。
+        if (invisibleOf(record, name)) continue;
         if (!visibleNames.has(name)) {
           record.explicit.delete(name);
           if (sessionId !== undefined && deps.state !== undefined) {
@@ -936,7 +1021,14 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
   }
 
   const api: SkillSessionRegistry = {
+    /** 数组形态（宿主内部：jev / session-bulk 等）：丢掉 hiddenCount。 */
     async list(baseList, cwd, sessionId): Promise<SessionSkillView[]> {
+      const internal = registryApi;
+      if (internal === undefined) return [];
+      return (await internal.listView(baseList, cwd, sessionId)).skills;
+    },
+
+    async listView(baseList, cwd, sessionId) {
       const record = sessionId !== undefined ? find(sessionId) : undefined;
       // 默认值三层快照（全局默认 + 工作区覆盖）；行字段与运行时投影共用同一口径。
       const defaults = await defaultsOf(cwd);
@@ -996,11 +1088,34 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
           (row.invocation.modelInvocable || row.invocation.userInvocable),
       );
       // 恢复显式会话开关（磁盘 + 注入都覆盖；已删除技能顺便清理覆盖记录）。
-      if (record !== undefined) await restoreExplicit(record, new Set(toggleable.map((row) => row.name)));
-      return toggleable.map((row) => {
+      // 注意：不可见条目也要传给 restoreExplicit —— 它的显式覆盖要**保留**（契约
+      // §2.3：不可见能力的显式值保留但不生效），不能在这里被当作"已删除"清掉。
+      const allNames = toggleable.map((row) => row.name);
+      if (record !== undefined) await restoreExplicit(record, new Set(allNames));
+      // v21：批量取可见性 + 每工作区默认；工作区视图过滤不可见条目并计 hiddenCount。
+      const workspaceCwd = record?.cwd ?? cwd;
+      const capabilities = await capabilityDefaultsOf(allNames, workspaceCwd);
+      const workspaceView = workspaceCwd !== undefined;
+      let hiddenCount = 0;
+      const visibleRows = toggleable.filter((row) => {
+        const capability = capabilities.get(row.name);
+        if (workspaceView && capability !== undefined && !capability.visible) {
+          hiddenCount += 1;
+          return false;
+        }
+        return true;
+      });
+      const views = visibleRows.map((row) => {
         const explicit = record?.explicit.get(row.name);
-        // 实际注册状态（默认关闭投影 + 会话 shadow 共同决定）。
-        const registered = record !== undefined ? !shadowed(record, row.name) : !effectiveDisabled.has(row.name);
+        // 实际注册状态（默认关闭投影 + 会话 shadow 共同决定）。冷会话没有 shadow，
+        // 用 v21 统一默认快照（缺省回退旧的全局默认关闭名单）。
+        const coldCapability = capabilities.get(row.name);
+        const registered =
+          record !== undefined
+            ? !shadowed(record, row.name)
+            : coldCapability !== undefined
+              ? coldCapability.effectiveDefaultEnabled
+              : !effectiveDisabled.has(row.name);
         // 优先级：显式会话覆盖 > 项目级默认（stub 遮蔽）> 落盘快照（冷会话 /
         // 派生会话缺席名字按关闭）> 实际注册状态。
         const persistedValue = persisted[row.name];
@@ -1014,15 +1129,34 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
                 : derivedSessionSnapshot
                   ? false
                   : registered;
+        // v21：可见性 + 每工作区默认（覆盖旧 flags 的 effectiveDefaultEnabled，
+        // 否则工作区默认开关会显示成"跟随兜底全局默认"）。
+        const capability = capabilities.get(row.name);
+        const flags = skillDefaultFlags(defaults, row.name);
         return {
           ...row,
           // v20.1 B2：默认态四列（全局 / 项目 / 有效），前后端共用同一口径。
-          ...skillDefaultFlags(defaults, row.name),
+          ...flags,
+          ...(capability !== undefined
+            ? {
+                effectiveDefaultEnabled: capability.effectiveDefaultEnabled,
+                visibilityMode: capability.visibilityMode,
+                visibleWorkspaceCount: capability.visibleWorkspaceCount,
+                globalDefaultEnabled: capability.globalDefaultEnabled,
+                workspaceDefaultEnabled: capability.workspaceDefaultEnabled,
+                ...(capability.projectOverride !== undefined
+                  ? { projectDefaultEnabledByOverride: capability.projectOverride }
+                  : {}),
+                ...(workspaceView ? { visibleInWorkspace: capability.visible } : {}),
+                ...(!capability.visible ? { disabledByVisibility: true, enabledInSession: false } : {}),
+              }
+            : {}),
           enabledInSession,
           canToggleInSession: record !== undefined || deps.state !== undefined,
           ...(record === undefined && deps.state !== undefined ? { activationPending: true } : {}),
         };
       });
+      return { skills: views, hiddenCount };
     },
 
     async setEnabled(input): Promise<SessionSkillOpResult> {
@@ -1041,6 +1175,11 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
         await deps.state.setSkill(sessionId, name, input.enabled);
         return { ok: true };
       }
+      // v21：不可见能力拒绝会话开关（用户须先在全局开启可见）。
+      const gateCapability = (await capabilityDefaultsOf([name], record.cwd)).get(name);
+      if (gateCapability !== undefined && !gateCapability.visible) {
+        return { ok: false, errors: [INVISIBLE_CAPABILITY_ERROR] };
+      }
       const skills = skillsOf(record);
       if (typeof skills?.register !== "function") {
         return { ok: false, errors: [`skills service unavailable for session ${sessionId}`] };
@@ -1056,6 +1195,15 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
           } else {
             record.explicit.set(name, input.enabled === true);
           }
+          const capability = (await capabilityDefaultsOf([name], record.cwd)).get(name);
+          if (capability !== undefined && !capability.visible) {
+            return { ok: false as const, errors: [INVISIBLE_CAPABILITY_ERROR] };
+          }
+          if (capability !== undefined) {
+            record.capabilities.set(name, capability);
+            if (capability.effectiveDefaultEnabled) record.projectDefaults.delete(name);
+            else record.projectDefaults.add(name);
+          }
           const desired = desiredEnabled(record, name);
           const result = desired ? await releaseShadow(record, name) : await ensureShadow(record, name, record.explicit.get(name) !== false);
           if (result.ok) {
@@ -1069,10 +1217,20 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
 
       return withQueue(record, async () => {
         await hydrateExplicit(record);
-        // 刷新默认值快照（显式开关的 fallback 依赖它；B2 = 全局默认 ∪ 项目覆盖）。
+        // 刷新默认值快照（显式开关的 fallback 依赖它；v21 起含可见性 + 每工作区默认）。
+        const capability = (await capabilityDefaultsOf([name], record.cwd)).get(name);
+        if (capability !== undefined && !capability.visible) {
+          return { ok: false as const, errors: [INVISIBLE_CAPABILITY_ERROR] };
+        }
         const effectiveDisabled = await effectiveDisabledOf(record.cwd);
         record.projectDefaults = new Set(effectiveDisabled);
-        const desired = input.enabled === undefined ? !record.projectDefaults.has(name) : input.enabled === true;
+        if (capability !== undefined) {
+          record.capabilities.set(name, capability);
+          if (capability.effectiveDefaultEnabled) record.projectDefaults.delete(name);
+          else record.projectDefaults.add(name);
+        }
+        const defaultEnabled = capability !== undefined ? capability.effectiveDefaultEnabled : !record.projectDefaults.has(name);
+        const desired = input.enabled === undefined ? defaultEnabled : input.enabled === true;
         const explicitOff = input.enabled === false;
         const result = desired
           ? await releaseShadow(record, name)
@@ -1137,6 +1295,13 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
       return withQueue(record, async () => {
         await hydrateExplicit(record);
         record.projectDefaults = new Set(await effectiveDisabledOf(record.cwd));
+        // v21：可见性 + 每工作区默认（整批一次批量读取）。
+        const capabilityMap = await capabilityDefaultsOf([...wanted.keys()], record.cwd);
+        for (const [capabilityName, capability] of capabilityMap) {
+          record.capabilities.set(capabilityName, capability);
+          if (capability.effectiveDefaultEnabled) record.projectDefaults.delete(capabilityName);
+          else record.projectDefaults.add(capabilityName);
+        }
         const registry = deps.registry;
         const agent = record.agent;
         const names = new Set(wanted.keys());
@@ -1162,7 +1327,14 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
         const disabledNames: string[] = [];
 
         for (const [name, enabled] of wanted) {
-          const desired = enabled === undefined ? !record.projectDefaults.has(name) : enabled === true;
+          const capability = capabilityMap.get(name);
+          // v21：不可见能力不能写会话开关（整批不因此失败；逐项给出业务失败）。
+          if (capability !== undefined && !capability.visible) {
+            outcomes.set(name, { name, ok: false, errors: [INVISIBLE_CAPABILITY_ERROR] });
+            continue;
+          }
+          const defaultEnabled = capability !== undefined ? capability.effectiveDefaultEnabled : !record.projectDefaults.has(name);
+          const desired = enabled === undefined ? defaultEnabled : enabled === true;
           const prevExplicit = record.explicit.get(name);
           if (!desired) {
             // 关闭：`false` = 显式关闭；`undefined` = 项目默认禁用驱动的 shadow。

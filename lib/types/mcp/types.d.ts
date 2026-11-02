@@ -21,6 +21,7 @@
  *
  * @module dsh-capability-settings/mcp/types
  */
+import type { VisibilityMode } from "../shared/visibility.js";
 /** 一条 MCP server 条目所在的作用域。 */
 export type McpScope = "project" | "global";
 /**
@@ -108,11 +109,29 @@ export interface McpServerView {
      * 默认。composer 里的开关显示/更新这个值（内存内，不落盘）。
      */
     enabledInSession?: boolean;
+    /**
+     * v21 可见性：该能力的可见范围模式（`all` / `selected` / `none`；缺省 all）。
+     *
+     * 只对「全局配置条目」有意义；项目原生条目 / 项目引用**不做可见性**，这些行
+     * 不下发 visibility 字段。
+     */
+    visibilityMode?: VisibilityMode;
+    /** v21：显式配置为可见的工作区数量（「指定 N」标签；all 模式通常 0）。 */
+    visibleWorkspaceCount?: number;
+    /** v21：当前工作区（list 的 cwd）是否可见；仅在传了 cwd 的工作区视图给出。 */
+    visibleInWorkspace?: boolean;
+    /** v21：为 true = 本工作区不可见 ⇒ 运行时强制关（工作区视图不展示该行）。 */
+    disabledByVisibility?: boolean;
 }
 /** 合并列表操作的结果；单个文件解析失败不致命，收集到 errors 里。 */
 export interface McpListResult {
     servers: McpServerView[];
     errors: string[];
+    /**
+     * v21：工作区视图里被可见性隐藏的**全局配置条目**数（项目原生 / 引用不计）。
+     * 全局视图缺省 0。
+     */
+    hiddenCount?: number;
 }
 /** 一条 server 在一个 session 内的实时挂载状态。 */
 export type McpMountState = "mounted" | "failed" | "conflict";
@@ -237,10 +256,11 @@ export interface McpRuntimeServerView {
     /** 与配置条目同款的摘要（命令/URL）。 */
     summary?: string;
     /**
-     * 本工作区的**有效默认关闭**（v20.2 语义扩展）：`(global.mcp ∪ project.mcp)
-     * \ project.enabledMcp` 里包含该实例，即新会话默认不启用它（单个会话仍可手动
-     * 打开）。项目原生条目（`.mcp.json` / 引用）的既有语义不变：只看
-     * `projects.<根>.mcp`，不受全局默认层影响。
+     * 本工作区的**有效默认关闭**（v20.2 起；v21 扩为含可见性与每工作区默认）：
+     * `visible && (项目三态覆盖 ?? 每工作区全局默认)` 为 false 即为 true，即新会话
+     * 默认不启用它（单个会话仍可手动打开；**不可见时任何会话开关都不能打开**）。
+     * 项目原生条目（`.mcp.json` / 引用）的既有语义不变：只看 `projects.<根>.mcp`，
+     * 不受全局默认层 / 可见性影响。
      *
      * 仅当该实例工具在**全局**注册表里可见（restrictable）时才有意义。
      */
@@ -272,10 +292,20 @@ export interface McpRuntimeServerView {
     disabledGlobally?: boolean;
     /** 本会话的生效开关（传 sessionId 时才有；`restrictable` 才有意义）。 */
     enabledInSession?: boolean;
+    /** v21 可见性：可见范围模式（缺省 all）。外部注入实例也参与可见性。 */
+    visibilityMode?: VisibilityMode;
+    /** v21：显式配置为可见的工作区数量。 */
+    visibleWorkspaceCount?: number;
+    /** v21：当前工作区（runtime 的 cwd）是否可见；仅工作区视图给出。 */
+    visibleInWorkspace?: boolean;
+    /** v21：为 true = 本工作区不可见 ⇒ 运行时强制关（工作区视图不展示该行）。 */
+    disabledByVisibility?: boolean;
     /** 本次运行被调用过的次数（来自内存使用记录；0 = 没调用过或不可见）。 */
     calls: number;
 }
 /** `mcp.runtime` 的返回。 */
 export interface McpRuntimeView {
     servers: McpRuntimeServerView[];
+    /** v21：工作区视图里被可见性隐藏的外部注入实例数（全局视图为 0）。 */
+    hiddenCount?: number;
 }

@@ -1,12 +1,14 @@
 /**
  * 默认关闭管理服务（挂载为 `ctx.capabilityPanel.overrides`）。
  *
- * **三层存储**（B2，v20.1；v20.2 扩到 MCP）：
+ * **三层存储**（B2，v20.1；v20.2 扩到 MCP；v21 扩到 Tools + 可见性 + 全局文件 v2）：
  *
  *   1. **全局层**：`<dshHome>/dsh-capability-settings/capability-global-overrides.json`
  *      ——`{ version: 1, skills: string[], mcp: string[] }`，全局默认关闭名单；
  *      不改技能文件、不改 MCP 注入方配置、不卸载共享实例。
- *      面板全局视图的 Skills / 外部注入 MCP 开关写这里（见 {@link globalToggle}）。
+ *      面板全局视图的 Skills / 外部注入 MCP / Tools 兜底默认写这里
+ *      （见 {@link globalToggle} / {@link globalToggleMany}）；v21 起的 `visibility`
+ *      也在这里（{@link setVisibility}）。
  *   2. **项目层（统一存储）**：`<dshHome>/dsh-capability-settings/capability-overrides.json`
  *      ——一个文件按**项目根**（`findProjectRoot(cwd)`）分 key，记录每个项目默认
  *      关闭的 MCP server / Skill，以及（B2）本项目**显式重新打开**的 Skill /
@@ -19,7 +21,12 @@
  *   - Skills：`(global.skills ∪ project.skills) \ project.enabledSkills`；
  *     `defaultSets()` / {@link effectiveDisabledSkills} 是唯一计算入口；
  *   - MCP：`(global.mcp ∪ project.mcp) \ project.enabledMcp`；
- *     {@link mcpDefaultSets} 是唯一计算入口（实现见 `shared/mcp-defaults.ts`）。
+ *     {@link mcpDefaultSets} 是旧计算入口（实现见 `shared/mcp-defaults.ts`）。
+ *
+ * **v21 的统一计算入口**是 {@link capabilityDefaults} / {@link capabilityDefaultsMany}：
+ * `visible && (projectOverride ?? workspaces[ws].defaultEnabled ?? !兜底全局默认关闭)`
+ * ——可见性 + 每工作区默认 + 项目三态合并成一个快照，三域列表投影与运行时 gate
+ * 都从它取值（见 `shared/visibility.ts`）。
  *
  * **旧位置兼容**：`<项目根>/.agents/capability-overrides.json`（以及更早的
  * `.dsh` / `.claude`）仍会被读取；某个项目在统一存储里还没有记录时，`sets()`
@@ -39,10 +46,19 @@
  */
 import type { SkillDefaultSets } from "../shared/skill-defaults.js";
 import type { McpDefaultSets } from "../shared/mcp-defaults.js";
-import type { CapabilityDomain, GlobalOverrideToggleInput, GlobalOverridesView, OverridesSet, OverridesView } from "./types.js";
+import type { VisibilityDomain, VisibilitySets } from "../shared/visibility.js";
+import type { CapabilityDefaults, CapabilityDomain, GlobalOverrideToggleInput, GlobalOverridesView, GlobalVisibilityInput, OverridesSet, OverridesView } from "./types.js";
 /** 管理服务的构造依赖。 */
 export interface OverridesManagerDeps {
     dshHome?: string;
+    /**
+     * Tools 的**旧全局默认兜底**（`tools-global.json` 的 disabled 集合）。
+     *
+     * v21 起 Tools 的全局默认写入 `capability-global-overrides.json` 的 `tools`，
+     * 但旧文件继续按「并集」参与兜底（不删、不改写），保证已有用户语义不变。
+     * 缺省 = 无旧文件（只用新名单）。
+     */
+    toolsGlobalDisabled?: () => ReadonlySet<string> | Promise<ReadonlySet<string>>;
 }
 /** toggle 的入参（B2 起支持可选的 `enabled`）。 */
 export interface OverrideToggleInput {
@@ -80,6 +96,23 @@ export declare function createOverridesManager(deps?: OverridesManagerDeps): {
     toggle: (input: OverrideToggleInput) => Promise<OverrideOpResult>;
     globalGet: () => Promise<GlobalOverridesView>;
     globalToggle: (input: GlobalOverrideToggleInput | Record<string, unknown>) => Promise<OverrideOpResult>;
+    globalToggleMany: (input: {
+        domain?: unknown;
+        keys?: unknown;
+        disabled?: unknown;
+    }) => Promise<{
+        ok: true;
+        applied: number;
+    } | {
+        ok: false;
+        errors: string[];
+    }>;
+    setVisibility: (input: GlobalVisibilityInput | Record<string, unknown>) => Promise<OverrideOpResult>;
+    visibilitySets: () => Promise<VisibilitySets>;
+    visibilityKeys: (domain: VisibilityDomain) => Promise<string[]>;
+    invisibleKeys: (domain: VisibilityDomain, cwd?: string) => Promise<string[]>;
+    capabilityDefaults: (domain: VisibilityDomain, key: string, cwd?: string) => Promise<CapabilityDefaults>;
+    capabilityDefaultsMany: (domain: VisibilityDomain, keys: readonly string[], cwd?: string) => Promise<Map<string, CapabilityDefaults>>;
     defaultSets: (cwd?: string) => Promise<SkillDefaultSets>;
     effectiveDisabledSkills: (cwd?: string) => Promise<string[]>;
     mcpDefaultSets: (cwd?: string) => Promise<McpDefaultSets>;

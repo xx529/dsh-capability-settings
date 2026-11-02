@@ -23,6 +23,8 @@
  */
 
 import { errMessage } from "../shared/errors.js";
+import type { CapabilityDefaults } from "../overrides/types.js";
+import { INVISIBLE_CAPABILITY_ERROR } from "../shared/visibility.js";
 import { attributeTool, isHostBuiltinTool } from "../shared/plugin-attribution.js";
 import { parseMcpToolName } from "../mcp/usage.js";
 import type { SessionStateMeta, SessionStateStore } from "../session-state.js";
@@ -132,6 +134,25 @@ export interface ToolsManagerDeps {
   /** 全局 tools 服务访问器（测试注入；缺省 `ctx.root.get("tools") ?? ctx.get("tools")`）。 */
   globalTools?: () => any;
   /**
+   * v21：可见性 + 每工作区默认 + 全局兜底的批量入口
+   * （`overrides.capabilityDefaultsMany("tools", units, cwd)`）。缺省 = 全部可见、用
+   * `globallyDisabled` 的旧语义。
+   */
+  capabilityDefaults?: (units: readonly string[], cwd?: string) => Promise<Map<string, CapabilityDefaults>>;
+  /**
+   * v21：全局兜底关闭集合（`tools-global.json` disabled ∪ 全局文件 `tools` 的并集）。
+   *
+   * 提供时优先用它（旧 store 继续保留只读兼容）；缺省回退 `deps.global`（旧装配）。
+   */
+  globalDefaults?: () => Promise<ReadonlySet<string>>;
+  /**
+   * v21：写全局兜底默认（写 `capability-global-overrides.json` 的 `tools`）。
+   *
+   * 提供时 `setGlobalEnabled` 用它（不再写 `tools-global.json`）；缺省回退
+   * `deps.global.setEnabled`（旧装配 / 测试）。
+   */
+  writeGlobalDefaults?: (units: readonly string[], enabled: boolean) => Promise<ToolsSetGlobalResult>;
+  /**
    * 自动归属 resolver（T0/T1/T2/T3 + 表兜底）。缺省 = 纯人工表（旧装配/测试）。
    */
   resolver?: AttributionResolver;
@@ -167,6 +188,11 @@ export interface ToolsManager {
   setGlobalEnabled(input: unknown): Promise<ToolsSetGlobalResult>;
   /** 本会话的显式开关快照（诊断；键带 `plugin:` 前缀）。 */
   sessionToggleState(sessionId?: string): Record<string, boolean>;
+  /**
+   * v21：可见性 / 每工作区默认变更后重新收敛（重读全局兜底 + 对所有 live agent
+   * 重新 apply；fire-and-forget 语义由调用方决定）。
+   */
+  refreshFromVisibility(): Promise<void>;
   /** 卸载：移除生命周期监听、解除已应用的 restrict、清空内存状态。 */
   dispose(): void;
 }
@@ -346,20 +372,46 @@ export function effectiveEnabled(
 }
 
 /**
- * 从「会话覆盖 + 全局默认」算出本会话要关闭的单元 + 它们的工具清单（纯函数）。
+ * v21：带可见性 / 每工作区默认的生效值。
  *
- * 目标 = 所有 effective=false 的单元（不区分是会话关还是全局关）；插件已卸载 /
- * 改名后残留的会话键不会命中任何单元，自然被忽略（方案 §3.4）。
+ * 优先级：**不可见 ⇒ 强制关（会话显式不能打开）** > 会话显式 > 工作区默认
+ * （可见性 + 每工作区全局默认 + 项目三态，来自 `overrides.capabilityDefaults`）。
+ * 缺省 / 无快照时回退 {@link effectiveEnabled}（旧语义）。
+ *
+ * @param unit 裸 unit id
+ * @param toggles 会话显式覆盖（`plugin:<unit>` → boolean）
+ * @param defaults 能力默认快照（可缺省）
+ * @param globallyDisabled 旧全局兜底（仅在无快照时使用）
+ */
+export function effectiveEnabledFor(
+  unit: string,
+  toggles: ReadonlyMap<string, boolean> | undefined,
+  defaults: ReadonlyMap<string, CapabilityDefaults> | undefined,
+  globallyDisabled: ReadonlySet<string> = new Set<string>(),
+): boolean {
+  const capability = defaults?.get(unit);
+  if (capability !== undefined && !capability.visible) return false;
+  const explicit = toggles?.get(unitKeyOf(unit));
+  if (explicit !== undefined) return explicit;
+  if (capability !== undefined) return capability.effectiveDefaultEnabled;
+  return !globallyDisabled.has(unit);
+}
+
+/**
+ * 从「会话覆盖 + 可见性/工作区默认 + 全局兜底」算出本会话要关闭的单元 + 工具清单
+ * （纯函数）。目标 = 所有 effective=false 的单元；插件已卸载 / 改名后残留的会话键
+ * 不会命中任何单元，自然被忽略（方案 §3.4）。
  */
 function computeTargets(
   toggles: ReadonlyMap<string, boolean> | undefined,
   enumeration: ToolsEnumeration,
   globallyDisabled: ReadonlySet<string>,
+  defaults?: ReadonlyMap<string, CapabilityDefaults>,
 ): { targets: Array<{ unit: string; name: string }>; targetTools: HostToolBrief[][] } {
   const targets: Array<{ unit: string; name: string }> = [];
   const targetTools: HostToolBrief[][] = [];
   for (const unit of enumeration.units) {
-    if (effectiveEnabled(unit.unit, toggles, globallyDisabled)) continue;
+    if (effectiveEnabledFor(unit.unit, toggles, defaults, globallyDisabled)) continue;
     targets.push({ unit: unit.unit, name: unit.name });
     targetTools.push(unit.tools);
   }
@@ -408,6 +460,8 @@ export function applyForAgent(
     globalTools?: () => any;
     logger?: ToolsLogger;
     globallyDisabled?: ReadonlySet<string>;
+    /** v21：可见性 + 每工作区默认快照（缺省 = 全部可见、按 globallyDisabled）。 */
+    capabilityDefaults?: ReadonlyMap<string, CapabilityDefaults>;
     resolveTool?: (toolName: string) => ToolAttribution;
   } = {},
 ): ApplyForAgentResult {
@@ -416,7 +470,12 @@ export function applyForAgent(
     options.globalTools ?? (() => rootToolsOf(agent)),
     options.resolveTool ?? ((name) => tableToolAttribution(name) ?? { matchedBy: "unknown", confidence: "low" }),
   );
-  const { targets, targetTools } = computeTargets(toggles, enumeration, options.globallyDisabled ?? new Set<string>());
+  const { targets, targetTools } = computeTargets(
+    toggles,
+    enumeration,
+    options.globallyDisabled ?? new Set<string>(),
+    options.capabilityDefaults,
+  );
   if (targets.length === 0) return { targets: [], outcome: { state: "skipped", deny: [] } };
   const deny = computeDenyNames(targetTools, enumeration.names);
   const outcome = applyRestrict(agent?.ctx?.get?.("tools"), deny);
@@ -485,6 +544,17 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
 
   /** 从 `deps.global` 刷新全局默认镜像（失败退化为「全部启用」，不阻断）。 */
   async function refreshGlobal(): Promise<void> {
+    // v21：优先用组合根注入的并集口径（旧 tools-global.json ∪ 全局文件 tools）。
+    if (deps.globalDefaults !== undefined) {
+      try {
+        globalDisabled = new Set(await deps.globalDefaults());
+      } catch (error) {
+        logger?.warn?.(`capability-panel: 读取全局 Tools 兜底默认失败，按全部启用继续：${errMessage(error)}`);
+        globalDisabled = new Set<string>();
+      }
+      globalHydrated = true;
+      return;
+    }
     const store = deps.global;
     if (store === undefined) {
       globalDisabled = new Set<string>();
@@ -494,6 +564,24 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
     await store.ready();
     globalDisabled = new Set(store.disabled());
     globalHydrated = true;
+  }
+
+  /**
+   * v21：批量读取能力默认快照（可见性 + 每工作区默认 + 项目三态）。
+   *
+   * 缺省 / 失败返回空 map ⇒ 回退「全部可见 + 旧全局兜底」语义（旧装配 / 测试）。
+   */
+  async function capabilityDefaultsFor(
+    cwd: string | undefined,
+    units: readonly string[],
+  ): Promise<Map<string, CapabilityDefaults>> {
+    if (deps.capabilityDefaults === undefined || units.length === 0) return new Map();
+    try {
+      return await deps.capabilityDefaults([...new Set(units)], cwd);
+    } catch (error) {
+      logger?.warn?.(`capability-panel: 读取 Tools 可见性/默认失败（${errMessage(error)}），按全部可见处理`);
+      return new Map();
+    }
   }
 
   /** 首次使用前 hydrate（幂等；读盘失败按全部启用，绝不让 Tools 域整体失败）。 */
@@ -554,10 +642,14 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
    * 队列的异步挂载交错。幂等：名单与上一代完全一致时直接返回（`tools.restrict`
    * 自身也会触发 `tools/change`，这条短路是刷新路径不形成循环的关键）。
    */
-  function applyRecord(record: ToolsSessionRecord, enumeration: ToolsEnumeration): void {
+  function applyRecord(
+    record: ToolsSessionRecord,
+    enumeration: ToolsEnumeration,
+    defaults?: ReadonlyMap<string, CapabilityDefaults>,
+  ): void {
     const sessionId = typeof record.agent?.id === "string" ? record.agent.id : undefined;
     const toggles = sessionId !== undefined ? sessionToggles.get(sessionId) : undefined;
-    const { targets, targetTools } = computeTargets(toggles, enumeration, globalDisabled);
+    const { targets, targetTools } = computeTargets(toggles, enumeration, globalDisabled, defaults);
     record.targets = targets;
     if (targets.length === 0) {
       if (record.restrictDisposers.length > 0 || record.restrictions.length > 0) releaseRestrictions(record);
@@ -593,7 +685,15 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
       if (disposed) return;
       await hydrateGlobal();
       await hydrateToggles(typeof record.agent?.id === "string" ? record.agent.id : undefined, metaOf(record));
-      applyRecord(record, enumerateGlobalTools(globalTools, deps.resolver?.resolveTool ?? ((name) => tableToolAttribution(name) ?? { matchedBy: "unknown", confidence: "low" })));
+      const enumeration = enumerateGlobalTools(
+        globalTools,
+        deps.resolver?.resolveTool ?? ((name) => tableToolAttribution(name) ?? { matchedBy: "unknown", confidence: "low" }),
+      );
+      const defaults = await capabilityDefaultsFor(
+        record.cwd,
+        enumeration.units.map((unit) => unit.unit),
+      );
+      applyRecord(record, enumeration, defaults);
     });
     record.queue = run.catch(() => undefined);
     return run;
@@ -619,7 +719,12 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
         await hydrateGlobal();
         if (disposed) return;
         const enumeration = enumerateGlobalTools(globalTools, deps.resolver?.resolveTool ?? ((name) => tableToolAttribution(name) ?? { matchedBy: "unknown", confidence: "low" }));
-        for (const record of sessions.values()) applyRecord(record, enumeration);
+        const units = enumeration.units.map((unit) => unit.unit);
+        for (const record of sessions.values()) {
+          const defaults = await capabilityDefaultsFor(record.cwd, units);
+          if (disposed) return;
+          applyRecord(record, enumeration, defaults);
+        }
       })();
     });
   }
@@ -688,32 +793,63 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
     /* agents 服务不可用：按无存量会话处理 */
   }
 
-  /** `tools.list` 主体：枚举单元 + 本会话开关（只读，不触发重算）。 */
-  async function list(input?: { sessionId?: string }): Promise<ToolsListView> {
+  /**
+   * `tools.list` 主体：枚举单元 + 本会话开关 +（v21）可见性投影。
+   *
+   * 传入 `cwd` 时按工作区计算可见性 / 每工作区默认：**不可见的单元从工作区视图
+   * 隐藏**并计入 `hiddenCount`（全局视图仍返回全部单元，带「不可见」标签）。
+   */
+  async function list(input?: { cwd?: string; sessionId?: string }): Promise<ToolsListView> {
     const sessionId = typeof input?.sessionId === "string" && input.sessionId.length > 0 ? input.sessionId : undefined;
+    const cwd = typeof input?.cwd === "string" && input.cwd.length > 0 ? input.cwd : undefined;
     await hydrateGlobal();
     const enumeration = enumerateGlobalTools(globalTools, deps.resolver?.resolveTool ?? ((name) => tableToolAttribution(name) ?? { matchedBy: "unknown", confidence: "low" }));
     const record = findRecord(sessionId);
     if (sessionId !== undefined) await hydrateToggles(sessionId, metaOf(record));
     const toggles = sessionId !== undefined ? sessionToggles.get(sessionId) : undefined;
+    // v21：可见性 + 每工作区默认（一次批量读取；旧装配返回空 map ⇒ 旧语义）。
+    const defaults = await capabilityDefaultsFor(
+      cwd ?? record?.cwd,
+      enumeration.units.map((unit) => unit.unit),
+    );
     // 旧外壳（无 agent 级 restrict）→ 开关从一开始就置灰，不等用户点了才失败。
     let lockedReason: string | undefined;
     if (record !== undefined) {
       const agentTools = record.agent?.ctx?.get?.("tools");
       if (typeof agentTools?.restrict !== "function") lockedReason = LOCKED_RESTRICT_UNAVAILABLE;
     }
-    const units: ToolsUnitView[] = enumeration.units.map((unit) => {
+    const workspaceView = cwd !== undefined || record?.cwd !== undefined;
+    let hiddenCount = 0;
+    const units: ToolsUnitView[] = [];
+    for (const unit of enumeration.units) {
       const key = unitKeyOf(unit.unit);
       const explicit = toggles?.has(key) === true;
-      // 两层语义：`defaultEnabled` = 能力面板（全局默认）；`enabled` = 本会话生效
-      // （会话覆盖 ?? 全局默认）。`enabledInSession` 是恒等 legacy 别名。
-      const defaultEnabled = !globalDisabled.has(unit.unit);
-      const enabled = explicit ? toggles?.get(key) === true : defaultEnabled;
+      const capability = defaults.get(unit.unit);
+      const visible = capability?.visible ?? true;
+      if (workspaceView && !visible) {
+        hiddenCount += 1;
+        continue; // 工作区视图不展示不可见单元
+      }
+      // 两层语义：`defaultEnabled` = 当前视图口径的默认（工作区 = 每工作区默认 +
+      // 项目覆盖；全局视图 = 兜底全局默认）；`enabled` = 本会话生效
+      // （会话覆盖 ?? 默认）。`enabledInSession` 是恒等 legacy 别名。
+      const effectiveDefault =
+        capability !== undefined
+          ? capability.effectiveDefaultEnabled
+          : !globalDisabled.has(unit.unit);
+      const defaultEnabled = workspaceView
+        ? capability !== undefined
+          ? capability.workspaceDefaultEnabled
+          : effectiveDefault
+        : capability !== undefined
+          ? capability.globalDefaultEnabled
+          : effectiveDefault;
+      const enabled = explicit ? toggles?.get(key) === true : effectiveDefault;
       const restriction = record?.restrictions.find((entry) => entry.unit === unit.unit);
       // 插件用途描述（package.json description）：扫描未完成 / 包根读不到时缺省；
       // 不阻塞列表（Jev 侧有占位兜底）。
       const description = deps.resolver?.packageDescription?.(unit.unit);
-      return {
+      units.push({
         unit: unit.unit,
         name: unit.name,
         kind: unit.kind,
@@ -725,18 +861,31 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
         enabled,
         enabledInSession: enabled,
         explicit,
+        ...(capability !== undefined
+          ? {
+              visibilityMode: capability.visibilityMode,
+              visibleWorkspaceCount: capability.visibleWorkspaceCount,
+              ...(!workspaceView && capability.visibilityMode === "none" ? { disabledByVisibility: true } : {}),
+              globalDefaultEnabled: capability.globalDefaultEnabled,
+              workspaceDefaultEnabled: capability.workspaceDefaultEnabled,
+              ...(capability.projectOverride !== undefined ? { projectOverride: capability.projectOverride } : {}),
+              ...(workspaceView ? { visibleInWorkspace: capability.visible } : {}),
+            }
+          : {}),
         ...(lockedReason !== undefined ? { lockedReason } : {}),
         ...(restriction !== undefined
           ? { restriction: { state: restriction.state, ...(restriction.error !== undefined ? { error: restriction.error } : {}) } }
           : {}),
-      };
-    });
+      });
+    }
     return {
       units,
       totalGlobalTools: enumeration.totalGlobalTools,
       excludedBuiltinCount: enumeration.excludedBuiltinCount,
       errors: [...enumeration.errors],
       ...(sessionId !== undefined ? { sessionId } : {}),
+      ...(cwd !== undefined ? { cwd } : {}),
+      hiddenCount,
       ...(deps.resolver !== undefined ? { attributionSettling: deps.resolver.settling() } : {}),
     };
   }
@@ -800,6 +949,17 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
     await hydrateToggles(sessionId, metaOf(record));
     const enumeration = enumerateGlobalTools(globalTools, deps.resolver?.resolveTool ?? ((name) => tableToolAttribution(name) ?? { matchedBy: "unknown", confidence: "low" }));
     const known = new Map(enumeration.units.map((unit) => [unit.unit, unit]));
+    // v21：不可见单元不能写会话开关（混合请求时跳过不可见项；全不可见 ⇒ 业务失败）。
+    const requestedUnits = [
+      ...new Set(
+        payload.units.filter((unit): unit is string => typeof unit === "string" && unit.length > 0 && known.has(unit)),
+      ),
+    ];
+    const defaults = await capabilityDefaultsFor(record?.cwd, requestedUnits);
+    const visibleUnits = new Set(requestedUnits.filter((unit) => defaults.get(unit)?.visible !== false));
+    if (requestedUnits.length > 0 && visibleUnits.size === 0) {
+      return { ok: false, errors: [INVISIBLE_CAPABILITY_ERROR] };
+    }
     let toggles = sessionToggles.get(sessionId);
     if (toggles === undefined) {
       toggles = new Map<string, boolean>();
@@ -815,10 +975,17 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
       seen.add(rawUnit);
       // 只接受当前枚举出的单元 id：客户端注入的任意名字一律忽略（不改 deny）。
       if (!known.has(rawUnit)) continue;
+      // v21：不可见单元不写（混合请求跳过；composer 不会渲染它们）。
+      if (!visibleUnits.has(rawUnit)) continue;
       const key = unitKeyOf(rawUnit);
       const has = toggles.has(key);
-      // 当前生效值（无覆盖时跟随全局默认），而不是硬编码 true。
-      const current = has ? toggles.get(key) === true : !globalDisabled.has(rawUnit);
+      // 当前生效值（无覆盖时跟随可见性/每工作区默认，旧装配回退全局兜底）。
+      const capability = defaults.get(rawUnit);
+      const current = has
+        ? toggles.get(key) === true
+        : capability !== undefined
+          ? capability.effectiveDefaultEnabled
+          : !globalDisabled.has(rawUnit);
       if (enabled === undefined) {
         if (!has) continue; // 本来就是默认，无需清除
         toggles.delete(key);
@@ -857,7 +1024,9 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
     if (!Array.isArray(payload.units)) return { ok: false, errors: ["units must be an array"] };
     if (typeof payload.enabled !== "boolean") return { ok: false, errors: ["enabled must be a boolean"] };
     const store = deps.global;
-    if (store === undefined) return { ok: false, errors: ["tools global store unavailable"] };
+    if (store === undefined && deps.writeGlobalDefaults === undefined) {
+      return { ok: false, errors: ["tools global store unavailable"] };
+    }
     await hydrateGlobal();
     const enumeration = enumerateGlobalTools(globalTools, deps.resolver?.resolveTool ?? ((name) => tableToolAttribution(name) ?? { matchedBy: "unknown", confidence: "low" }));
     if (enumeration.errors.length > 0) return { ok: false, errors: [...enumeration.errors] };
@@ -872,12 +1041,35 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
       requested.push(unit);
     }
     if (requested.length === 0) return { ok: true, applied: 0 };
-    const result = await store.setEnabled(requested, payload.enabled);
+    // v21：全局兜底写入 `capability-global-overrides.json` 的 `tools`（旧
+    // tools-global.json 只读兼容）；旧装配回退旧 store。
+    const result =
+      deps.writeGlobalDefaults !== undefined
+        ? await deps.writeGlobalDefaults(requested, payload.enabled)
+        : await (store as ToolsGlobalStore).setEnabled(requested, payload.enabled);
     // 无论写盘成败都刷新内存镜像：store 在内存里已生效（本次运行内保持一致）。
     await refreshGlobal();
     // 全局默认变了 ⇒ 所有 live agent 的 effective 可能变化 ⇒ 扇出重算（异步）。
     scheduleGlobalFanout();
     return result.ok ? { ok: true, applied: result.applied } : result;
+  }
+
+  /**
+   * v21：可见性 / 每工作区默认变更后的重新收敛。
+   *
+   * 重读全局兜底（旧 ∪ 新名单）→ 扇出到所有 live agent 重算 restrict。
+   * fire-and-forget（微任务队列），不阻塞 `overrides.setVisibility` 的 RPC。
+   */
+  async function refreshFromVisibility(): Promise<void> {
+    if (disposed) return;
+    globalHydrated = false;
+    try {
+      await hydrateGlobal();
+    } catch (error) {
+      logger?.warn?.(`capability-panel: 刷新 Tools 默认失败，按全部启用继续：${errMessage(error)}`);
+    }
+    if (disposed) return;
+    scheduleGlobalFanout();
   }
 
   /** 本会话的显式开关快照（诊断；键带 `plugin:` 前缀）。 */
@@ -907,7 +1099,15 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
     hydratedSessions.clear();
   }
 
-  return { list, inspect, setSessionEnabled, setGlobalEnabled, sessionToggleState, dispose };
+  return {
+    list,
+    inspect,
+    setSessionEnabled,
+    setGlobalEnabled,
+    sessionToggleState,
+    refreshFromVisibility,
+    dispose,
+  };
 }
 
 export type { ToolsRestrictionState };

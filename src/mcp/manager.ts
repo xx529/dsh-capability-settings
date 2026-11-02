@@ -21,6 +21,8 @@ import { readMcpFile, sanitizeServerName, summarizeEntry, transportOf, validateE
 import { probeMcpServer, type McpProbeResult } from "./probe.js";
 import { GLOBAL_MCP_FILE_NAME, globalMcpDirs, projectMcpFile } from "./paths.js";
 import type { OverridesManager } from "../overrides/manager.js";
+import type { CapabilityDefaults } from "../overrides/types.js";
+import { INVISIBLE_CAPABILITY_ERROR } from "../shared/visibility.js";
 import type { ImportsManager } from "../imports/manager.js";
 import type { McpListResult, McpScope, McpServerEntry, McpServerView, McpStatusView } from "./types.js";
 import type { McpLoader } from "./loader.js";
@@ -155,8 +157,9 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
 
   /**
    * 合并列表：全局 + 项目原生 + 项目级引用（同名键项目遮蔽全局），按 key 排序。
-   * 传入 cwd 时应用该项目级"全局能力禁用"：被禁用的全局 server 标上
-   * disabledInProject（面板保留展示；loader 在挂载时跳过它们）。
+   * 传入 cwd 时应用该工作区的「有效默认」（可见性 + 每工作区默认 + 项目三态）：
+   * 不可见的**全局配置条目**从工作区视图隐藏并计入 `hiddenCount`（全局视图仍
+   * 展示，带「不可见」标签）；项目原生条目 / 项目引用不做可见性、恒列出。
    * 引用（`.agents/capability-imports.json`）不是物理副本：视图内容实时取自
    * 同名全局条目，仅启停来自引用上的项目级 `disabled` 标记；被引用的全局
    * 原版与项目原生遮蔽一样标 `shadowed`。
@@ -208,10 +211,41 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
     const sessionEnabledOf = (toggleKey: string, defaultEnabled: boolean): boolean | undefined =>
       Object.hasOwn(toggles, toggleKey) ? toggles[toggleKey] : defaultEnabled;
     const globalRows: McpServerView[] = [];
+    // v21 可见性：只有**全局配置条目**参与（项目原生 / 引用不受影响）。
+    const globalCapabilities = await capabilityDefaultsOf(
+      cwd,
+      Object.keys(globalServers).map((key) => sanitizeServerName(key)),
+    );
+    /** 工作区视图里被可见性隐藏的全局配置条目数（`hiddenCount`）。 */
+    let hiddenCount = 0;
     for (const [key, entry] of Object.entries(globalServers)) {
       const row = view(key, entry, "global", globalLocation.readFile, projectServers[key] !== undefined);
-      const defaultEnabled = !disabledMcp.has(key);
-      if (!defaultEnabled) row.disabledInProject = true;
+      const capability = globalCapabilities.get(row.serverName);
+      if (capability !== undefined) {
+        row.visibilityMode = capability.visibilityMode;
+        row.visibleWorkspaceCount = capability.visibleWorkspaceCount;
+      }
+      if (capability?.visibilityMode === "none") {
+        // 全局视图：mode=none 的能力对所有工作区都不可见 ⇒ 行开关禁用并标注。
+        row.disabledByVisibility = true;
+      }
+      if (cwd !== undefined) {
+        const visible = capability?.visible ?? true;
+        row.visibleInWorkspace = visible;
+        if (!visible) {
+          // 工作区视图不展示不可见条目（全局视图仍展示，带「不可见」标签）。
+          row.disabledByVisibility = true;
+          hiddenCount += 1;
+          continue;
+        }
+      }
+      // 全局视图没有「工作区默认」概念：沿用旧口径（项目禁用清单，全局视图为空 =
+      // 启用；配置级 disabled 另由 enabled 字段表达）。工作区视图用统一默认快照。
+      const defaultEnabled =
+        cwd !== undefined
+          ? (capability?.effectiveDefaultEnabled ?? !disabledMcp.has(key))
+          : !disabledMcp.has(key);
+      if (cwd !== undefined && !defaultEnabled) row.disabledInProject = true;
       const enabledInSession = sessionEnabledOf(`server:${row.serverName}`, defaultEnabled);
       if (enabledInSession !== undefined) row.enabledInSession = enabledInSession;
       globalRows.push(row);
@@ -220,6 +254,9 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
     if (projectFile !== undefined) {
       for (const [key, entry] of Object.entries(projectServers)) {
         const row = view(key, entry, "project", projectFile, false);
+        // 项目自己的条目（`.mcp.json`）不做可见性：工作区视图恒可见（显式 true，
+        // 与全局配置条目同形，便于前端统一判断）。
+        if (cwd !== undefined) row.visibleInWorkspace = true;
         // 项目条目也受「默认开关」管理（overrides 的 mcp 列表同样收项目 key）。
         const defaultEnabled = !disabledMcp.has(key);
         if (!defaultEnabled) row.disabledInProject = true;
@@ -239,6 +276,8 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
         const globalRow = globalRows.find((row) => row.key === key);
         if (globalRow !== undefined) globalRow.shadowed = true;
         const refRow = view(key, globalEntry, "project", globalLocation.readFile, false);
+        // 项目级引用同属「项目自己的选用」：不做可见性，工作区视图恒可见。
+        refRow.visibleInWorkspace = true;
         const refDefaultEnabled = !disabledMcp.has(key);
         if (!refDefaultEnabled) refRow.disabledInProject = true;
         const refEnabledInSession = sessionEnabledOf(`project:${key}`, refDefaultEnabled);
@@ -256,7 +295,7 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
     }
     const views = [...projectRows, ...globalRows];
     views.sort((a, b) => a.key.localeCompare(b.key));
-    return { servers: views, errors };
+    return { servers: views, errors, hiddenCount };
   }
 
   /** 新增或整体覆盖一条 server（校验失败不落盘），成功后重挂。 */
@@ -424,6 +463,25 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
   }
 
   /**
+   * 取某个工作区的 MCP 能力默认快照（可见性 + 每工作区默认 + 项目三态覆盖，v21）。
+   *
+   * 优先 `overrides.capabilityDefaultsMany`（唯一计算入口）；旧注入管理器没有该
+   * 方法时返回空 map，调用方回退 v20.2 的 `defaultSetsOf` 语义（全部可见）。
+   */
+  async function capabilityDefaultsOf(
+    cwd: string | undefined,
+    keys: readonly string[],
+  ): Promise<Map<string, CapabilityDefaults>> {
+    if (overrides === undefined || keys.length === 0) return new Map();
+    if (typeof overrides.capabilityDefaultsMany !== "function") return new Map();
+    try {
+      return await overrides.capabilityDefaultsMany("mcp", keys, cwd);
+    } catch {
+      return new Map();
+    }
+  }
+
+  /**
    * **运行时注入**的 MCP 实例（只读）：不是本插件配置文件里的条目，而是其它插件或
    * profile 在运行时挂载的 mcp-client。
    *
@@ -531,14 +589,33 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
       /* 使用记录不可用：忽略 */
     }
     const toggles = loader.sessionToggleState?.(input?.sessionId) ?? {};
+    // v21：可见性 + 每工作区默认（一次批量读取；旧管理器返回空 map ⇒ 回退 v20.2）。
+    const capabilities = await capabilityDefaultsOf(input?.cwd, [...groups.keys()]);
+    /** 工作区视图里被可见性隐藏的外部注入实例数。 */
+    let hiddenCount = 0;
+    const servers: McpRuntimeServerView[] = [];
     for (const view of groups.values()) {
       view.restrictable = view.tools.length > 0;
-      // 全局默认关闭 = **原始**全局名单成员（不含本工作区重新打开的判断；cwd 缺省
-      // 时同一口径）。工作区视图据此与 disabledInProject 组合出「已覆盖全局默认」
-      // （disabledGlobally && !disabledInProject），见 types.ts 的字段注释。
+      const capability = capabilities.get(view.serverName);
+      // 全局默认关闭 = **原始**全局名单成员；工作区视图与 disabledInProject 组合出
+      // 「已覆盖全局默认」（见 types.ts 字段注释）。
       if (globalDisabled.has(view.serverName)) view.disabledGlobally = true;
-      // 本工作区有效默认关闭：全局默认 ∪ 项目默认 \ 项目重新打开。
-      const defaultEnabled = !effectiveDisabled.has(view.serverName);
+      if (capability !== undefined) {
+        view.visibilityMode = capability.visibilityMode;
+        view.visibleWorkspaceCount = capability.visibleWorkspaceCount;
+        if (capability.visibilityMode === "none") view.disabledByVisibility = true;
+        if (input?.cwd !== undefined) {
+          view.visibleInWorkspace = capability.visible;
+          if (!capability.visible) {
+            view.disabledByVisibility = true;
+            hiddenCount += 1;
+            continue; // 工作区视图不展示不可见条目
+          }
+        }
+      }
+      // 本工作区有效默认关闭（可见性 + 每工作区默认 + 项目三态）；旧管理器回退 v20.2。
+      const defaultEnabled =
+        capability !== undefined ? capability.effectiveDefaultEnabled : !effectiveDisabled.has(view.serverName);
       if (!defaultEnabled) view.disabledInProject = true;
       // 显式会话开关最高，其次跟随有效默认。
       const enabledInSession = Object.hasOwn(toggles, `server:${view.serverName}`)
@@ -550,8 +627,9 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
       } catch {
         view.calls = 0;
       }
+      servers.push(view);
     }
-    return { servers: [...groups.values()].sort((a, b) => a.serverName.localeCompare(b.serverName)) };
+    return { servers: servers.sort((a, b) => a.serverName.localeCompare(b.serverName)), hiddenCount };
   }
 
   /**
@@ -570,6 +648,15 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
     }
     if (typeof input.target !== "string" || input.target.length === 0) {
       return { ok: false, errors: ["target is required"] };
+    }
+    // v21：不可见能力的会话开关一律拒绝（全局层实例 / 外部注入实例；项目条目
+    // 不受可见性影响，仍可开关）。
+    if (input.kind === "server" && overrides !== undefined) {
+      const names = [...new Set([input.target, sanitizeServerName(input.target)])];
+      const capabilities = await capabilityDefaultsOf(input.cwd, names);
+      if (names.some((name) => capabilities.get(name)?.visible === false)) {
+        return { ok: false, errors: [INVISIBLE_CAPABILITY_ERROR] };
+      }
     }
     await loader.setSessionEnabled(input);
     return { ok: true };
@@ -597,10 +684,26 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
       (entry) => entry !== null && typeof entry === "object" && typeof entry.target === "string" && entry.target.length > 0,
     );
     if (entries.length === 0) return { ok: true };
+    // v21：批量路径跳过不可见能力（单条路径返回业务失败；批量不因个别不可见整批失败）。
+    const serverTargets = entries.filter((entry) => (entry as { kind?: unknown }).kind === "server");
+    let visibleEntries = entries;
+    if (serverTargets.length > 0 && overrides !== undefined) {
+      const names = [
+        ...new Set(serverTargets.flatMap((entry) => [entry.target, sanitizeServerName(entry.target)])),
+      ];
+      const capabilities = await capabilityDefaultsOf(input.cwd, names);
+      visibleEntries = entries.filter(
+        (entry) =>
+          (entry as { kind?: unknown }).kind !== "server" ||
+          capabilities.get(entry.target)?.visible !== false ||
+          capabilities.get(sanitizeServerName(entry.target))?.visible !== false,
+      );
+      if (visibleEntries.length === 0) return { ok: true };
+    }
     await loader.setSessionEnabledMany({
       sessionId: input.sessionId,
       ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
-      entries,
+      entries: visibleEntries,
     });
     return { ok: true };
   }

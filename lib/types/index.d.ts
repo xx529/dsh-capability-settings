@@ -23,6 +23,7 @@
  */
 import { createService } from "./skills/manager.js";
 import type { SessionSkillView, SkillSessionRegistry } from "./skills/session.js";
+import type { SkillSummaryView } from "./skills/types.js";
 import { createMcpManager } from "./mcp/manager.js";
 import { createOverridesManager } from "./overrides/manager.js";
 import { createJevManager } from "./jev/manager.js";
@@ -55,8 +56,24 @@ export interface Config {
  * （多带 enabledInSession / canToggleInSession 两列）。
  */
 export type SkillsService = ReturnType<typeof createService> & {
+    /**
+     * v21：面板列表（磁盘 + 注入，工作区视图过滤不可见）+ `hiddenCount`
+     * （被可见性隐藏的技能数）。RPC `skills.list` 返回这个形态。
+     */
+    listView: (cwd?: string) => Promise<{
+        skills: SkillSummaryView[];
+        hiddenCount: number;
+    }>;
     /** 磁盘列表 + 本会话启用态（见 skills/session.ts）。 */
     sessionList: (cwd?: string, sessionId?: string) => Promise<SessionSkillView[]>;
+    /**
+     * v21：会话视图（只返回可见技能）+ `hiddenCount`。RPC `skills.sessionList`
+     * 返回这个形态；宿主内部（jev / session-bulk）继续用数组形态 `sessionList`。
+     */
+    sessionListView: (cwd?: string, sessionId?: string) => Promise<{
+        skills: SessionSkillView[];
+        hiddenCount: number;
+    }>;
     /** 设置本会话开关（按会话落盘；重启/resume 后恢复）。 */
     setSessionEnabled: SkillSessionRegistry["setEnabled"];
     /**
@@ -126,7 +143,7 @@ export { createMcpLoader } from "./mcp/loader.js";
 export { createMcpManager } from "./mcp/manager.js";
 export { scanInjectedMcpInstances, scanInjectedMcpEntries, scanInjectedMcpFibers, scanInjectedMcpNamespaces } from "./mcp/runtime.js";
 export type { InjectedMcpInstance } from "./mcp/runtime.js";
-export { createToolsManager, applyForAgent, effectiveEnabled, TOOL_DESCRIPTION_LIMIT, TOOL_INSPECT_WARN_BYTES, LOCKED_RESTRICT_UNAVAILABLE, } from "./tools/manager.js";
+export { createToolsManager, applyForAgent, effectiveEnabled, effectiveEnabledFor, TOOL_DESCRIPTION_LIMIT, TOOL_INSPECT_WARN_BYTES, LOCKED_RESTRICT_UNAVAILABLE, } from "./tools/manager.js";
 export type { ToolsManager, ToolsManagerDeps, ToolsLogger, ApplyForAgentResult } from "./tools/manager.js";
 export { computeDenyNames, applyRestrict, sameDenyNames, TOOLS_RESTRICT_UNAVAILABLE, TOOLS_RESTRICT_NO_TOOLS } from "./tools/restrict.js";
 export type { RestrictOutcome, ToolsRestrictionState } from "./tools/restrict.js";
@@ -155,7 +172,10 @@ export { findProjectRoot } from "./shared/project-root.js";
 export { globalSkillsDir, projectSkillsDir, userAgentsSkillsDir } from "./skills/roots.js";
 export { projectOverridesFile, OVERRIDES_FILE_NAME, overridesStoreFile, OVERRIDES_STORE_FILE_NAME, globalOverridesFile, GLOBAL_OVERRIDES_FILE_NAME, } from "./overrides/paths.js";
 export { readOverrides, writeOverrides, readOverridesStore, writeOverridesStore, normalizeOverridesSet, DOMAIN_KEYS, OVERRIDES_STORE_VERSION, } from "./overrides/config-file.js";
-export { readGlobalOverrides, writeGlobalOverrides, emptyGlobalOverrides, GLOBAL_OVERRIDES_VERSION } from "./overrides/global-file.js";
+export { readGlobalOverrides, readGlobalOverridesDocument, writeGlobalOverrides, emptyGlobalOverrides, GLOBAL_OVERRIDES_VERSION, GLOBAL_OVERRIDES_LEGACY_VERSION, } from "./overrides/global-file.js";
+export type { GlobalOverridesReadResult } from "./overrides/global-file.js";
+export { VISIBILITY_DOMAINS, INVISIBLE_CAPABILITY_ERROR, emptyVisibilitySets, emptyCapabilityVisibility, normalizeMode, normalizeWorkspaceVisibility, normalizeCapabilityVisibility, normalizeVisibilitySets, visibilityEntryOf, visibilityModeOf, visibleWorkspaceCount, workspaceMatchKey, visibleIn, perWorkspaceDefault, isGloballyDisabled, invisibleKeysForWorkspace, } from "./shared/visibility.js";
+export type { VisibilityDomain, VisibilityMode, VisibilitySets, CapabilityVisibility, WorkspaceVisibility, WorkspaceTarget, } from "./shared/visibility.js";
 export { skillDefaultSets, effectiveDisabledSkills, skillDefaultFlags, annotateSkillDefaults, EMPTY_SKILL_DEFAULT_SETS, } from "./shared/skill-defaults.js";
 export type { SkillDefaultSets, SkillDefaultFlags } from "./shared/skill-defaults.js";
 export { mcpDefaultSets, emptyMcpDefaultSets, mcpDefaultEnabled, } from "./shared/mcp-defaults.js";
@@ -172,7 +192,7 @@ export { globalMcpFile, projectMcpFile } from "./mcp/paths.js";
 export { readMcpFile, writeMcpFile, sanitizeServerName, toClientConfig, validateEntry } from "./mcp/config-file.js";
 export type { SkillSummaryView, SkillSpec, SkillFormat, WritableScope, InvocationPolicy, InjectedSkillFields, RegistryResourceBaseKind, SkillOrigin, SkillSource, } from "./skills/types.js";
 export type { McpScope, McpServerEntry, McpServerView, McpListResult, McpStatusView, McpMountState } from "./mcp/types.js";
-export type { CapabilityDomain, CapabilityOverrides, GlobalOverrideToggleInput, GlobalOverrides, GlobalOverridesFile, GlobalOverridesView, OverridesProjectEntry, OverridesSet, OverridesStore, OverridesView, } from "./overrides/types.js";
+export type { CapabilityDefaults, CapabilityDomain, CapabilityOverrides, GlobalOverrideToggleInput, GlobalVisibilityInput, GlobalOverrides, GlobalOverridesFile, GlobalOverridesView, OverridesProjectEntry, OverridesSet, OverridesStore, OverridesView, } from "./overrides/types.js";
 export type { OverridesManager } from "./overrides/manager.js";
 /**
  * Cordis 以 `module.default || module` 解析插件包。这里提供默认导出

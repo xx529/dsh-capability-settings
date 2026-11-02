@@ -31,6 +31,15 @@ export interface CapabilitySnapshot {
     attributionSettling: boolean;
     mounts: Record<string, MountInfo>;
     settling: boolean;
+    /**
+     * v21：因「能力可见性（按工作区）」被隐藏的条目数（sanitize 后仅统计本工作区）。
+     * 弹窗提示「能力可见性由全局控制 · 不可见 N 项已隐藏」用。
+     */
+    hiddenCounts: {
+        skills: number;
+        mcp: number;
+        tools: number;
+    };
 }
 /** 卡片底部的来源标签配色（项目蓝 / 全局绿 / 内置琥珀 / 插件紫 / 预设灰 / 外部橙 / 未识别琥珀）。 */
 type TagTone = "project" | "global" | "bundled" | "plugin" | "preset" | "external" | "unattributed";

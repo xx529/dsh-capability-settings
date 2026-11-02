@@ -54,10 +54,17 @@ export interface PanelRpcService {
   skills: {
     list(cwd?: string): Promise<unknown>;
     /**
+     * v21：`{ skills, hiddenCount }`（工作区视图过滤不可见 + 计数；全局视图
+     * hiddenCount 恒 0）。RPC `skills.list` 返回这个形态。
+     */
+    listView(cwd?: string): Promise<unknown>;
+    /**
      * 磁盘列表 + **本会话**启用态（按会话落盘的 runtime shadow）：`enabledInSession` /
      * `canToggleInSession` 两列，供面板/输入框下方开关消费。
      */
     sessionList(cwd?: string, sessionId?: string): Promise<unknown>;
+    /** v21：`{ skills, hiddenCount }`；会话视图只返回可见技能。 */
+    sessionListView(cwd?: string, sessionId?: string): Promise<unknown>;
     /**
      * 设置某个 session 的 skill 开关（**按会话落盘**，重启/resume 后恢复）：
      * 关闭 = 在 agent 作用域注册同名 runtime shadow（`invocation` 双向 false）；
@@ -126,12 +133,19 @@ export interface PanelRpcService {
      * 文件缺失 / 空 → 空名单；损坏 → 降级为空名单 + `errors`（可读原因）。
      */
     globalGet(): Promise<unknown>;
+    /** 全局视图（v21）：`{skills, mcp, tools, visibility, filePath, errors?}`。 */
     /**
-     * 全局默认开关：`{domain:"skills"|"mcp", key, disabled}` →
+     * 全局默认开关：`{domain:"skills"|"mcp"|"tools", key, disabled}` →
      * `{ok:true}` / `{ok:false, errors}`；写 `capability-global-overrides.json`。
-     * `mcp` 域成功后会热应用（重算 restrict / 指令段影子，不重挂 fiber）。
+     * `mcp` / `tools` 域成功后会热应用（重算 restrict / 指令段影子，不重挂 fiber）。
      */
     globalToggle(input: unknown): Promise<unknown>;
+    /**
+     * v21：写能力可见性。`{domain:"skills"|"mcp"|"tools", key, mode, workspaces}`
+     * （`workspaces` 为完整映射，整份替换）→ `{ok:true}` / `{ok:false, errors}`；
+     * 写全局文件 v2，成功后三域热应用。
+     */
+    setVisibility(input: unknown): Promise<unknown>;
   };
   /**
    * Tools 域（插件级会话开关，v13）：只读枚举 + 批量写会话开关。
@@ -140,7 +154,8 @@ export interface PanelRpcService {
    * （不是工具名），宿主自己重算 `tools.restrict` 的 deny 名单。
    */
   tools: {
-    list(input: { sessionId?: string }): Promise<unknown>;
+    /** v21：`{cwd?, sessionId?}`；传 cwd 时按工作区可见性过滤并给 hiddenCount。 */
+    list(input: { cwd?: string; sessionId?: string }): Promise<unknown>;
     setSessionEnabled(input: unknown): Promise<unknown>;
     /**
      * 懒加载单个单元的工具 schema（`tools.inspect`）：完整 description + 原始
@@ -191,10 +206,11 @@ export async function handleEndpoint(service: PanelRpcService, endpoint: string,
   try {
     switch (endpoint) {
       case "skills.list":
-        return { ok: true, value: await service.skills.list(cwd) };
+        // v21：value = { skills, hiddenCount }（service 层数组方法仍保留给宿主内部）。
+        return { ok: true, value: await service.skills.listView(cwd) };
       case "skills.sessionList":
-        // 会话级视图：磁盘列表 + enabledInSession / canToggleInSession。
-        return { ok: true, value: await service.skills.sessionList(cwd, sessionId) };
+        // v21：会话视图只返回可见技能；value = { skills, hiddenCount }。
+        return { ok: true, value: await service.skills.sessionListView(cwd, sessionId) };
       case "skills.setSessionEnabled":
         // 内存态开关；业务失败在 value.ok=false 里（信封仍恒 ok:true）。
         return { ok: true, value: await service.skills.setSessionEnabled(p) };
@@ -255,11 +271,20 @@ export async function handleEndpoint(service: PanelRpcService, endpoint: string,
         // 全局默认视图（B2）：读路径降级为空名单，错误收在 value.errors 里。
         return { ok: true, value: await service.overrides.globalGet() };
       case "overrides.globalToggle":
-        // 全局默认开关（B2）：业务失败在 value.ok=false（信封仍恒 ok:true）。
+        // 全局默认开关（B2 / v21）：业务失败在 value.ok=false（信封仍恒 ok:true）。
         return { ok: true, value: await service.overrides.globalToggle(p) };
+      case "overrides.setVisibility":
+        // v21 能力可见性：workspaces 为完整映射；成功后宿主三域热应用。
+        return { ok: true, value: await service.overrides.setVisibility(p) };
       case "tools.list":
-        // sessionId 缺省 = 主面板的只读视图（enabledInSession 恒为默认值）。
-        return { ok: true, value: await service.tools.list(sessionId !== undefined ? { sessionId } : {}) };
+        // sessionId 缺省 = 主面板的只读视图；cwd 传入时按工作区可见性过滤并给 hiddenCount。
+        return {
+          ok: true,
+          value: await service.tools.list({
+            ...(cwd !== undefined ? { cwd } : {}),
+            ...(sessionId !== undefined ? { sessionId } : {}),
+          }),
+        };
       case "tools.setSessionEnabled":
         // batch-first（单条 = 长度 1 的数组）；业务失败收在 value.ok=false。
         return { ok: true, value: await service.tools.setSessionEnabled(p) };

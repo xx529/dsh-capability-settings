@@ -14,12 +14,48 @@
 import type { SkillFormat, SkillSpec, WritableScope } from "../skills/types.js";
 import type { McpScope, McpServerEntry } from "../mcp/types.js";
 import type { CapabilityDomain } from "../overrides/types.js";
+/** 可见性模式：全部工作区（可单独隐藏某个）/ 仅勾选的工作区 / 不可见。 */
+export type ClientVisibilityMode = "all" | "selected" | "none";
+/** 一个工作区的可见性与默认开/关（缺省字段 = 继承：可见 / 走兜底默认）。 */
+export interface ClientWorkspaceVisibility {
+    /** false = 该工作区不可见（优先级高于 mode=all）。 */
+    visible?: boolean;
+    /** 该工作区的默认开/关；缺省 = 走兜底（`!全局默认关闭名单(name)`）。 */
+    defaultEnabled?: boolean;
+}
+/** 一个能力（skill / mcp server / tools 单元）的可见性配置。 */
+export interface ClientCapabilityVisibility {
+    mode: ClientVisibilityMode;
+    /** key = 项目根（与 capability-overrides.json 同源）。 */
+    workspaces: Record<string, ClientWorkspaceVisibility>;
+}
+/** 三域的可见性全量（`overrides.globalGet` 的 `visibility` 字段）。 */
+export type ClientVisibilitySets = Record<"skills" | "mcp" | "tools", Record<string, ClientCapabilityVisibility>>;
+/**
+ * v21：列表行的可见性投影（skills / mcp / tools 三域共用字段）。
+ *
+ * 宿主按「当前作用域」计算：全局视图给 `visibilityMode` / `visibleWorkspaceCount`；
+ * 工作区视图只返回可见行并额外给 `visibleInWorkspace`（行政防御用）。
+ * 旧宿主缺失全部字段 ⇒ 客户端按「全部可见」渲染。
+ */
+export interface ClientVisibilityFields {
+    /** 全局视图：该能力的可见性模式；缺省 = all。 */
+    visibilityMode?: ClientVisibilityMode;
+    /** 全局视图：可见的工作区数（指定模式下即勾选数）。 */
+    visibleWorkspaceCount?: number;
+    /** 工作区视图：该能力对当前工作区是否可见（缺省 true）。 */
+    visibleInWorkspace?: boolean;
+    /** 工作区视图：不可见导致运行时强制关闭（会话开关不能打开）。 */
+    disabledByVisibility?: boolean;
+}
+/** 客户端三域（v21：`CapabilityDomain` 扩到 tools；用联合兜底旧宿主类型定义）。 */
+export type ClientCapabilityDomain = CapabilityDomain | "tools";
 /** 宿主 registry 注入条目的来源类别（仅 `injected` 行携带）。 */
 export type ClientSkillOrigin = "bundled" | "plugin" | "preset";
 /** registry 资源基准类别（决定能否浏览资源文件）。 */
 export type ClientSkillResourceBaseKind = "directory" | "url" | "opaque";
 /** 面板列表里的一行 skill 摘要（调用策略已拍平为两个布尔）。 */
-export interface ClientSkillSummary {
+export interface ClientSkillSummary extends ClientVisibilityFields {
     name: string;
     description: string;
     whenToUse?: string;
@@ -201,15 +237,31 @@ export interface SkillRef {
     target?: ".dsh" | ".agents";
 }
 /** skills 域的面板 API。 */
+/** v21：`skills.listView` 的返回（行 + 因可见性被隐藏的条数）。 */
+export interface ClientSkillList {
+    skills: ClientSkillSummary[];
+    hiddenCount?: number;
+}
 export interface SkillsApi {
     /** 列出（合并）当前作用域下所有 skill 摘要。 */
     list(): Promise<ClientSkillSummary[]>;
+    /**
+     * v21（可选）：同 {@link list}，但额外返回工作区视图的 `hiddenCount`
+     * （因可见性被过滤掉的条目数，供「另有 N 个能力未对此外工作区开放」提示）。
+     * 旧宿主 / 测试夹具只有 `list()` 时面板回落 list()，hiddenCount 视为 0。
+     */
+    listView?(): Promise<ClientSkillList>;
     /**
      * 会话视角的 skill 列表：与 {@link list} 相同，但多返回
      * `enabledInSession` / `canToggleInSession`（需要 api 带 sessionId，仅
      * composer 的每会话 api 提供）。用于输入框下方的会话能力配置区。
      */
     sessionList(): Promise<ClientSkillSummary[]>;
+    /**
+     * v21（可选）：会话视角列表 + `hiddenCount`（工作区可见性过滤掉的技能数）。
+     * 旧宿主只有 {@link sessionList} 时首屏提示的「不可见 N 项」缺省为 0。
+     */
+    sessionListView?(): Promise<ClientSkillList>;
     /**
      * 关闭 / 恢复某个 skill 在**当前会话**的可见性（按会话落盘，重启/resume 后恢复）：
      * 关闭通过 agent 作用域注册同名 runtime shadow 实现（从模型目录、
@@ -304,7 +356,7 @@ export interface SkillsApi {
     }): Promise<OpResult>;
 }
 /** 面板视角的一条 MCP server（合并 + 投影后的视图，自带摘要）。 */
-export interface ClientMcpServer {
+export interface ClientMcpServer extends ClientVisibilityFields {
     key: string;
     serverName: string;
     transport: "stdio" | "http";
@@ -341,6 +393,11 @@ export interface ClientMcpServer {
 export interface ClientMcpList {
     servers: ClientMcpServer[];
     errors: string[];
+    /**
+     * v21：工作区视图里因可见性被过滤掉的条目数（全局视图缺省）。
+     * 面板据此提示「另有 N 个能力未对此外工作区开放」。
+     */
+    hiddenCount?: number;
 }
 /** 一条 server 在一个 session 内的挂载状态。 */
 export interface ClientMcpMount {
@@ -414,7 +471,7 @@ export interface ClientAttributionInfo {
  * 运行时注入的 MCP 实例（**只读**）：不是本插件配置文件里的条目，而是其它插件
  * 或 profile 直接挂载的 mcp-client。面板只展示，不提供编辑/卸载。
  */
-export interface ClientMcpRuntimeServer {
+export interface ClientMcpRuntimeServer extends ClientVisibilityFields {
     /** 实例的 serverName（工具名 `mcp__<serverName>__*` 里的那段）。 */
     serverName: string;
     /** 来源：注入它的插件显示名 / loader 条目 id；识别不到时缺省。 */
@@ -472,6 +529,8 @@ export interface ClientMcpRuntimeView {
     servers: ClientMcpRuntimeServer[];
     /** true = 宿主仍在解析归属（task-32 additive；UI 显示「来源解析中…」，不阻塞操作）。 */
     attributionSettling?: boolean;
+    /** v21：工作区视图里因可见性被隐藏的**外部注入实例**数。 */
+    hiddenCount?: number;
 }
 /** 新增/更新一条 server 的入参。 */
 export interface McpUpsertInput {
@@ -583,7 +642,7 @@ export interface ClientToolBrief {
     description?: string;
 }
 /** 一个 Tools 开关单元（一个插件 = 一个单元；来源未识别合并成一个单元）。 */
-export interface ClientToolsUnit {
+export interface ClientToolsUnit extends ClientVisibilityFields {
     /** 开关单元 id（持久化键 = `plugin:<unit>`；未识别 = `__unattributed__`）。 */
     unit: string;
     /** 展示名（卡片 / 列表 / 详情标题）。 */
@@ -636,6 +695,8 @@ export interface ClientToolsList {
     excludedBuiltinCount: number;
     /** 服务缺失/异常时的原因（不阻断其它域）。 */
     errors: string[];
+    /** v21：工作区视图里因可见性被过滤掉的单元数（全局视图缺省）。 */
+    hiddenCount?: number;
     /** 本次查询绑定的会话（没传 sessionId 时缺省）。 */
     sessionId?: string;
     /** true = 宿主仍在解析归属（task-32 additive；UI 显示「来源解析中…」，不阻塞开关）。 */
@@ -669,6 +730,7 @@ export interface ToolsApi {
      * 服务缺失 / `schemas()` 失败时返回 `{units:[],errors:[...]}`，不抛。
      */
     list(input?: {
+        cwd?: string;
         sessionId?: string;
     }): Promise<ClientToolsList>;
     /**
@@ -808,6 +870,18 @@ export interface ClientOverrides {
      * 旧宿主缺失 ⇒ 视作空清单。
      */
     enabledSkills?: string[];
+    /**
+     * v20.2：本项目**显式重新打开**的 MCP serverName（覆盖全局默认关闭）。
+     * 旧宿主缺失 ⇒ 视作空清单。
+     */
+    enabledMcp?: string[];
+    /**
+     * v21：本项目默认关闭的 Tools 单元 id 列表（工作区覆盖「每工作区全局默认」）。
+     * 旧宿主缺失 ⇒ 视作空清单。
+     */
+    tools?: string[];
+    /** v21：本项目显式重新打开的 Tools 单元 id 列表（工作区覆盖）。旧宿主缺失 ⇒ 空。 */
+    enabledTools?: string[];
     /** 统一存储文件绝对路径（`<dshHome>/dsh-capability-settings/capability-overrides.json`；无项目时缺省）。 */
     filePath?: string;
     /** 当前项目根（统一存储里该项目条目的 key；无项目时缺省）。 */
@@ -822,6 +896,16 @@ export interface ClientGlobalOverrides {
      * 旧宿主缺失该字段 ⇒ 适配器按空数组投影。
      */
     mcp: string[];
+    /**
+     * v21：全局默认关闭的 Tools 单元 id 列表（`tools-global.json` 的 disabled 在宿主侧
+     * 取并集；这里只反映统一全局文件）。旧宿主缺失 ⇒ 适配器按空数组投影。
+     */
+    tools: string[];
+    /**
+     * v21：三域可见性（全部 / 指定工作区 / 不可见 + 每工作区默认开/关）。
+     * 旧宿主 / v1 文件缺失 ⇒ 适配器投影为三域全空（全部可见、走兜底默认）。
+     */
+    visibility: ClientVisibilitySets;
     /** 文件绝对路径（UI 展示「开关只改这个文件」；旧宿主缺省）。 */
     filePath?: string;
     /**
@@ -847,8 +931,11 @@ export interface OverridesApi {
      * `enabledMcp`（重新打开全局默认关闭项）二选一，优先级
      * 全局默认 < 工作区显式 < 会话显式。面板显式传 `options.enabled`；不传时
      * 翻转的是「有效默认」而不是 `mcp` 成员（旧调用方须注意）。
+     *
+     * v21（`domain: "tools"`）：同构三态，写项目 `tools` / `enabledTools`；
+     * 工作区默认层覆盖「每工作区全局默认」（可见性弹层里配置的 defaultEnabled）。
      */
-    toggle(domain: CapabilityDomain, key: string, options?: {
+    toggle(domain: ClientCapabilityDomain, key: string, options?: {
         enabled?: boolean;
     }): Promise<OpResult>;
     /**
@@ -875,11 +962,29 @@ export interface OverridesApi {
      * - `domain: "mcp"`：写 `capability-global-overrides.json` 的 `mcp` 名单
      *   （外部注入实例；`key` = bridge serverName），宿主写盘后热应用
      *   `loader.refreshRestrictions()`（不卸载共享实例，只按 session 重新 restrict）。
+     * - v21 `domain: "tools"`：写 `tools` 名单（Tools 全局默认兜底；与
+     *   `tools-global.json` 在宿主侧取并集）。
      */
     globalToggle(input: {
-        domain: "skills" | "mcp";
+        domain: ClientCapabilityDomain;
         key: string;
         disabled: boolean;
+    }): Promise<OpResult>;
+    /**
+     * v21：保存某个能力的**可见性 + 每工作区默认开/关**（全局唯一控制层）。
+     *
+     * - `mode`：`"all" | "selected" | "none"`；
+     * - `workspaces`：**整份**工作区映射（key = 项目根；面板提交完整映射，避免增量
+     *   合并歧义；未配置的工作区缺省 = 可见 / 走兜底默认）。
+     *
+     * 写 `capability-global-overrides.json` v2 的 `visibility.<domain>.<key>`；成功后
+     * 宿主对 live 会话 reconcile（mcp → `refreshRestrictions`；tools → 重新 apply）。
+     */
+    setVisibility(input: {
+        domain: ClientCapabilityDomain;
+        key: string;
+        mode: ClientVisibilityMode;
+        workspaces: Record<string, ClientWorkspaceVisibility>;
     }): Promise<OpResult>;
 }
 /** 评分 / 测试 / 密钥解析失败的分类码（架构 §5.4）。 */

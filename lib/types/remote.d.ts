@@ -50,10 +50,17 @@ export interface PanelRpcService {
     skills: {
         list(cwd?: string): Promise<unknown>;
         /**
+         * v21：`{ skills, hiddenCount }`（工作区视图过滤不可见 + 计数；全局视图
+         * hiddenCount 恒 0）。RPC `skills.list` 返回这个形态。
+         */
+        listView(cwd?: string): Promise<unknown>;
+        /**
          * 磁盘列表 + **本会话**启用态（按会话落盘的 runtime shadow）：`enabledInSession` /
          * `canToggleInSession` 两列，供面板/输入框下方开关消费。
          */
         sessionList(cwd?: string, sessionId?: string): Promise<unknown>;
+        /** v21：`{ skills, hiddenCount }`；会话视图只返回可见技能。 */
+        sessionListView(cwd?: string, sessionId?: string): Promise<unknown>;
         /**
          * 设置某个 session 的 skill 开关（**按会话落盘**，重启/resume 后恢复）：
          * 关闭 = 在 agent 作用域注册同名 runtime shadow（`invocation` 双向 false）；
@@ -122,12 +129,19 @@ export interface PanelRpcService {
          * 文件缺失 / 空 → 空名单；损坏 → 降级为空名单 + `errors`（可读原因）。
          */
         globalGet(): Promise<unknown>;
+        /** 全局视图（v21）：`{skills, mcp, tools, visibility, filePath, errors?}`。 */
         /**
-         * 全局默认开关：`{domain:"skills"|"mcp", key, disabled}` →
+         * 全局默认开关：`{domain:"skills"|"mcp"|"tools", key, disabled}` →
          * `{ok:true}` / `{ok:false, errors}`；写 `capability-global-overrides.json`。
-         * `mcp` 域成功后会热应用（重算 restrict / 指令段影子，不重挂 fiber）。
+         * `mcp` / `tools` 域成功后会热应用（重算 restrict / 指令段影子，不重挂 fiber）。
          */
         globalToggle(input: unknown): Promise<unknown>;
+        /**
+         * v21：写能力可见性。`{domain:"skills"|"mcp"|"tools", key, mode, workspaces}`
+         * （`workspaces` 为完整映射，整份替换）→ `{ok:true}` / `{ok:false, errors}`；
+         * 写全局文件 v2，成功后三域热应用。
+         */
+        setVisibility(input: unknown): Promise<unknown>;
     };
     /**
      * Tools 域（插件级会话开关，v13）：只读枚举 + 批量写会话开关。
@@ -136,7 +150,9 @@ export interface PanelRpcService {
      * （不是工具名），宿主自己重算 `tools.restrict` 的 deny 名单。
      */
     tools: {
+        /** v21：`{cwd?, sessionId?}`；传 cwd 时按工作区可见性过滤并给 hiddenCount。 */
         list(input: {
+            cwd?: string;
             sessionId?: string;
         }): Promise<unknown>;
         setSessionEnabled(input: unknown): Promise<unknown>;

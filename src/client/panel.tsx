@@ -37,7 +37,15 @@
  */
 
 import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import type { CapabilityPanelApi, ClientGlobalOverrides, ClientSkillSummary, SkillFilePayload, SkillsApi } from "./api.js";
+import type {
+  CapabilityPanelApi,
+  ClientCapabilityVisibility,
+  ClientGlobalOverrides,
+  ClientOverrides,
+  ClientSkillSummary,
+  SkillFilePayload,
+  SkillsApi,
+} from "./api.js";
 import { McpView } from "./mcp-panel.js";
 import { ToolsView } from "./tools-panel.js";
 import { JevPanel } from "./jev-panel.js";
@@ -45,6 +53,18 @@ import { Modal } from "./modal.js";
 import { ScopeChain } from "./scope-chain.js";
 import { SkpSelect } from "./select.js";
 import { isProjectSource, useAsyncList } from "./panel-common.js";
+import {
+  EMPTY_VISIBILITY_SETS,
+  VisibilityDetailFields,
+  VisibilityRowMeta,
+  isRowInvisible,
+  safeGlobalGet,
+  safeOverridesGet,
+  visibilityEntryOf,
+  visibilityModeOf,
+  visibleWorkspaceCountOf,
+  workspaceOverrideOf,
+} from "./visibility.js";
 import { SkillContent, skillRefOf } from "./skill-content.js";
 import { isGlobalSkillSource } from "../shared/skill-sources.js";
 import { locateSkillRoot, rerootEntries, stripCommonTopFolder } from "../shared/skill-locate.js";
@@ -188,9 +208,9 @@ export function CapabilityPanel({ api }: { api: CapabilityPanelApi }) {
   };
 
   const jevActive = domain === "jev";
-  /** Tools 是全局工具注册：不区分工作区，作用域控件置灰并写原因。 */
-  const toolsActive = domain === "tools";
   /** 作用域：未选择工作区 = 全局（面板默认，与当前对话无关）。 */
+  // v21：Tools 也纳入可见性/工作区默认，三域共用同一作用域控件。
+
   const workspaceSelected = pinned !== undefined;
   const activeProject = pinned === undefined ? undefined : projects.find((project) => project.path === pinned);
   /** 工作区展示名：优先工作区 title，其次目录 basename（统一 HtDot 口径）。 */
@@ -208,12 +228,7 @@ export function CapabilityPanel({ api }: { api: CapabilityPanelApi }) {
           <div className="skp-title-main">
             <h2>能力中心</h2>
             {!jevActive &&
-              (toolsActive ? (
-                <>
-                  <span className="skp-scope-badge">全局工具注册</span>
-                  <span className="skp-workspace">不区分工作区</span>
-                </>
-              ) : workspaceSelected ? (
+              (workspaceSelected ? (
                 <>
                   <span className="skp-scope-badge">工作区视图</span>
                   <span className="skp-workspace" title={pinned}>
@@ -235,35 +250,29 @@ export function CapabilityPanel({ api }: { api: CapabilityPanelApi }) {
                   type="button"
                   className={workspaceSelected ? "skp-scope-seg-btn" : "skp-scope-seg-btn skp-scope-seg-btn-active"}
                   aria-pressed={!workspaceSelected}
-                  disabled={toolsActive}
-                  title={toolsActive ? "全局工具注册 · 不区分工作区" : "管理全局能力（所有工作区生效）"}
+                  title="管理全局能力（所有工作区生效）"
                   onClick={() => selectWorkspace(undefined)}
                 >
                   全局
                 </button>
                 <SkpSelect
                   className="skp-dd-scope skp-scope-seg-select"
-                  value={toolsActive ? "" : (pinned ?? "")}
-                  disabled={toolsActive}
-                  title={toolsActive ? "全局工具注册 · 不区分工作区" : workspaceSelected ? pinned : "从全部工作区中选择"}
+                  value={pinned ?? ""}
+                  title={workspaceSelected ? pinned : "从全部工作区中选择"}
                   ariaLabel="工作区作用域"
-                  options={
-                    toolsActive
-                      ? [{ value: "", label: "全局工具" }]
-                      : [
-                          // 未选工作区时显示占位项（点击无副作用），让分段读作「工作区 ▾」。
-                          ...(pinned === undefined ? [{ value: "", label: "工作区 ▾" }] : []),
-                          ...projects.map((project) => ({
-                            value: project.path,
-                            label: `工作区 · ${project.title ?? basenameOf(project.path)}`,
-                            ...(pinned === project.path ? { hint: "当前" } : {}),
-                          })),
-                          // 已选工作区不在已知列表里时也保留为选项，避免“消失”。
-                          ...(pinned !== undefined && !projects.some((project) => project.path === pinned)
-                            ? [{ value: pinned, label: `工作区 · ${basenameOf(pinned)}` }]
-                            : []),
-                        ]
-                  }
+                  options={[
+                    // 未选工作区时显示占位项（点击无副作用），让分段读作「工作区 ▾」。
+                    ...(pinned === undefined ? [{ value: "", label: "工作区 ▾" }] : []),
+                    ...projects.map((project) => ({
+                      value: project.path,
+                      label: `工作区 · ${project.title ?? basenameOf(project.path)}`,
+                      ...(pinned === project.path ? { hint: "当前" } : {}),
+                    })),
+                    // 已选工作区不在已知列表里时也保留为选项，避免“消失”。
+                    ...(pinned !== undefined && !projects.some((project) => project.path === pinned)
+                      ? [{ value: pinned, label: `工作区 · ${basenameOf(pinned)}` }]
+                      : []),
+                  ]}
                   onChange={(value) => selectWorkspace(value === "" ? undefined : value)}
                 />
               </div>
@@ -314,8 +323,8 @@ export function CapabilityPanel({ api }: { api: CapabilityPanelApi }) {
         </div>
       </header>
 
-      {jevActive ? null : toolsActive ? (
-        <ToolsView api={api} query={query} onCount={setToolsCount} />
+      {jevActive ? null : domain === "tools" ? (
+        <ToolsView api={api} workspace={pinned} projects={projects} query={query} onCount={setToolsCount} />
       ) : domain === "skills" ? (
         <SkillsView
           api={api}
@@ -591,6 +600,10 @@ function SkillsView({
   /** 全局默认层（独立文件）：文件路径 + 损坏警告；开关后重读。 */
   const [globalOverrides, setGlobalOverrides] = useState<ClientGlobalOverrides | undefined>(undefined);
   const [globalVersion, setGlobalVersion] = useState(0);
+  /** v21：工作区视图的项目 overrides（判断「跟随全局默认 / 已覆盖」）。 */
+  const [projectOverrides, setProjectOverrides] = useState<ClientOverrides | undefined>(undefined);
+  /** 写操作计数：工作区 overrides 变化后重读（「跟随 / 已覆盖」标签）。 */
+  const [writeVersion, setWriteVersion] = useState(0);
   const rowRefs = useRef(new Map<string, HTMLElement>());
 
   const scope: "global" | "workspace" = workspace === undefined ? "global" : "workspace";
@@ -598,35 +611,69 @@ function SkillsView({
   const projectName =
     workspace === undefined ? undefined : (projects.find((project) => project.path === workspace)?.title ?? basenameOf(workspace));
 
+  /** 当前全局可见性集合（旧宿主 / v1 文件 ⇒ 全空 = 全部可见）。 */
+  const visibilitySets = globalOverrides?.visibility ?? EMPTY_VISIBILITY_SETS;
+  /** 某 skill 的可见性配置（global 视图的行标签 / 详情用）。 */
+  const visibilityOf = (name: string): ClientCapabilityVisibility | undefined =>
+    visibilityEntryOf(visibilitySets, "skills", name);
+  /** 兜底默认：名字在全局默认关闭名单里。 */
+  const globalOffOf = (item: ClientSkillSummary): boolean =>
+    item.globalDefaultDisabled === true || globalOverrides?.skills.includes(item.name) === true;
+
   // 挂载时、作用域变化时（列表 cwd 变化）、写操作后重新拉取。
   // 全局作用域 cwd = undefined（宿主只返回全局 + 注入），工作区作用域 cwd = 该
   // 工作区（宿主返回项目 + 全局 + 注入，并投影 v20.1 的有效默认字段）。
-  const { data: allItems, loading, error, reload } = useAsyncList(() => skillsApi.list(), [skillsApi, workspace]);
-  const items = allItems ?? [];
+  // v21：行数据之外还要工作区视图的 `hiddenCount`（可见性过滤掉的条数）。
+  const { data, loading, error, reload } = useAsyncList(async () => {
+    const view =
+      skillsApi.listView !== undefined ? await skillsApi.listView() : { skills: await skillsApi.list(), hiddenCount: 0 };
+    return { items: view.skills, hiddenCount: view.hiddenCount ?? 0 };
+  }, [skillsApi, workspace]);
+  const items = data?.items ?? [];
+  const hiddenCount = data?.hiddenCount ?? 0;
   const projectItems = useMemo(() => items.filter((item) => isProjectSource(item.source)), [items]);
   const globalItems = useMemo(() => items.filter((item) => !isProjectSource(item.source)), [items]);
   const injectedItems = useMemo(() => globalItems.filter((item) => item.injected === true), [globalItems]);
   const diskGlobalItems = useMemo(() => globalItems.filter((item) => item.injected !== true), [globalItems]);
+  /** v21：工作区视图里因可见性被隐藏的**全局**条目（宿主已过滤，这里防御旧宿主）。 */
+  const workspaceGlobalItems = useMemo(
+    () => (scope === "workspace" ? globalItems.filter((item) => item.visibleInWorkspace !== false) : globalItems),
+    [globalItems, scope],
+  );
 
   // 全局默认层（开关的真实来源）：只在全局作用域需要文件路径/损坏警告，
   // 但重复读取很便宜，切换作用域后也重读一次，保证 warning 不陈旧。
   useEffect(() => {
     let alive = true;
-    void api.overrides
-      .globalGet()
-      .then((value) => {
-        if (alive) setGlobalOverrides(value);
-      })
-      .catch(() => {
-        if (alive) setGlobalOverrides(undefined);
-      });
+    void safeGlobalGet(api).then((value) => {
+      if (alive) setGlobalOverrides(value);
+    });
     return () => {
       alive = false;
     };
   }, [api, globalVersion]);
 
-  /** 当前作用域总数（Tab 与列表标题共用同一口径）。 */
-  const scopeTotal = scope === "global" ? globalItems.length : items.length;
+  // v21：工作区视图读项目 overrides（判断「跟随全局默认 / 已覆盖」）。写操作后随
+  // writeVersion 重读。
+  useEffect(() => {
+    if (scope !== "workspace") {
+      setProjectOverrides(undefined);
+      return;
+    }
+    let alive = true;
+    void safeOverridesGet(api).then((value) => {
+      if (alive) setProjectOverrides(value);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [api, scope, workspace, writeVersion]);
+
+  /**
+   * 当前作用域总数（Tab 与列表标题共用同一口径）：
+   * 全局视图 = 全部条目；工作区视图 = 可见条目（v21 计数可见口径）。
+   */
+  const scopeTotal = scope === "global" ? globalItems.length : projectItems.length + workspaceGlobalItems.length;
 
   // Tab 计数 = 当前作用域总数（不随搜索变化；列表标题显示同一数字）。
   useEffect(() => {
@@ -640,10 +687,18 @@ function SkillsView({
     item.description.toLowerCase().includes(q) ||
     // 注入行的渠道名（插件 / preset 名）也参与搜索。
     (item.channel !== undefined && item.channel.toLowerCase().includes(q));
+  /** 当前作用域参与渲染的全局条目（工作区视图已按可见性过滤）。 */
+  const globalItemsForScope = scope === "global" ? globalItems : workspaceGlobalItems;
   const visibleProject = useMemo(() => projectItems.filter(matchesSkill), [projectItems, q]);
-  const visibleGlobal = useMemo(() => globalItems.filter(matchesSkill), [globalItems, q]);
-  const visibleDiskGlobal = useMemo(() => diskGlobalItems.filter(matchesSkill), [diskGlobalItems, q]);
-  const visibleInjected = useMemo(() => injectedItems.filter(matchesSkill), [injectedItems, q]);
+  const visibleGlobal = useMemo(() => globalItemsForScope.filter(matchesSkill), [globalItemsForScope, q]);
+  const visibleDiskGlobal = useMemo(
+    () => diskGlobalItems.filter((item) => scope === "global" || item.visibleInWorkspace !== false).filter(matchesSkill),
+    [diskGlobalItems, scope, q],
+  );
+  const visibleInjected = useMemo(
+    () => injectedItems.filter((item) => scope === "global" || item.visibleInWorkspace !== false).filter(matchesSkill),
+    [injectedItems, scope, q],
+  );
   /** 当前作用域可见行（决定键盘导航与选中查找）。 */
   const visibleItems = useMemo(
     () => (scope === "global" ? visibleGlobal : [...visibleProject, ...visibleGlobal]),
@@ -731,6 +786,7 @@ function SkillsView({
       setOpError(String(failure));
     } finally {
       setBusyRow(undefined);
+      setWriteVersion((value) => value + 1);
       // 写后静默重拉：不整页 loading、不改选中与滚动位置。
       reload({ silent: true });
     }
@@ -775,6 +831,14 @@ function SkillsView({
     const isProject = isProjectSource(item.source);
     const isInjected = item.injected === true;
     const state = invocationState(item);
+    /** v21：只有「全局视图里的全局条目」编辑可见性；项目自己的条目不参与。 */
+    const visibilityEditable = scope === "global" && !isProject;
+    const entry = visibilityOf(item.name);
+    const mode = item.visibilityMode ?? visibilityModeOf(entry);
+    const visibleCount = item.visibleWorkspaceCount ?? visibleWorkspaceCountOf(entry, projects);
+    const invisible = visibilityEditable && isRowInvisible(item, entry, projects);
+    /** 工作区视图：全局条目是否已显式覆盖「每工作区默认」。 */
+    const overrideState = workspaceSelected && !isProject ? workspaceOverrideOf(projectOverrides, "skills", item.name) : "inherit";
     // 开关勾选态：全局视图 = 全局默认；工作区视图 = 有效默认；项目磁盘行 = 调用状态。
     const checked =
       scope === "global"
@@ -810,7 +874,15 @@ function SkillsView({
             : state === "partial"
               ? "部分禁用"
               : "已禁用";
-    const switchLabel = scope === "global" ? "全局默认" : `${projectName ?? "工作区"} 默认`;
+    // v21：全局视图不可见行 → 开关禁用并标「不可见 · 不参与默认」。
+    const switchLabel = invisible
+      ? "不可见 · 不参与默认"
+      : scope === "global"
+        ? "全局默认"
+        : `${projectName ?? "工作区"} 默认 · ${overrideState === "inherit" ? "跟随全局" : "已覆盖"}`;
+    const switchTitle = invisible
+      ? "该能力对所有工作区都不可见：不参与默认开关；先在「可见范围」里打开可见性"
+      : switcher.title;
     return (
       <div
         role="option"
@@ -843,11 +915,33 @@ function SkillsView({
                 {tag.label}
               </span>
             ))}
+            {visibilityEditable && (
+              <VisibilityRowMeta
+                entry={entry}
+                workspaces={projects}
+                globalOff={globalOffOf(item)}
+                mode={mode}
+                count={visibleCount}
+                invisible={invisible}
+              />
+            )}
+            {overrideState !== "inherit" && (
+              <span
+                className="skp-tag skp-tag-warn"
+                title={
+                  overrideState === "on"
+                    ? "本工作区显式打开该能力（覆盖全局的每工作区默认）；点行尾开关可关闭"
+                    : "本工作区显式关闭该能力（覆盖全局的每工作区默认）；点行尾开关可打开"
+                }
+              >
+                已覆盖
+              </span>
+            )}
           </div>
           {/* 行尾开关：标签写明作用域（全局默认 / HtDot 默认），点击不改变选中。 */}
           <label
             className="skp-row-toggle"
-            title={switcher.title}
+            title={switchTitle}
             onClick={(event) => event.stopPropagation()}
             onKeyDown={(event) => event.stopPropagation()}
           >
@@ -858,7 +952,7 @@ function SkillsView({
                 role="switch"
                 aria-label={`启用 ${item.name}`}
                 checked={checked}
-                disabled={switcher.disabled || busyRow === key}
+                disabled={switcher.disabled || invisible || busyRow === key}
                 onChange={(event) => void toggleRow(item, event.target.checked)}
               />
               <span className="skp-switch-track" />
@@ -907,7 +1001,7 @@ function SkillsView({
 
   /** 列表主体：全局 = 用户安装 + 插件注入；工作区 = 本项目 + 引用的全局能力。 */
   const renderListBody = () => {
-    if (loading && allItems === undefined) return <div className="skp-status">加载中…</div>;
+    if (loading && data === undefined) return <div className="skp-status">加载中…</div>;
     if (error !== undefined) return <div className="skp-error">读取失败：{error}</div>;
     if (scope === "global") {
       if (visibleDiskGlobal.length === 0 && visibleInjected.length === 0) return renderEmpty();
@@ -928,7 +1022,17 @@ function SkillsView({
         </div>
       );
     }
-    if (visibleProject.length === 0 && visibleGlobal.length === 0) return renderEmpty();
+    if (visibleProject.length === 0 && visibleGlobal.length === 0) {
+      if (hiddenCount > 0) {
+        return (
+          <div className="skp-group-scroll skp-group-scroll-plain">
+            <div className="skp-empty">本工作区没有可见的 Skills。</div>
+            <div className="skp-pane-note">另有 {hiddenCount} 个能力未对此外工作区开放</div>
+          </div>
+        );
+      }
+      return renderEmpty();
+    }
     return (
       <div className="skp-group-scroll skp-group-scroll-plain">
         {visibleProject.length > 0 && (
@@ -939,9 +1043,14 @@ function SkillsView({
         )}
         {visibleGlobal.length > 0 && (
           <>
-            {renderGroupHead("引用的全局能力", globalItems.length, `开关作用于 ${projectName ?? "此工作区"}`)}
+            {renderGroupHead("引用的全局能力", globalItemsForScope.length, `开关作用于 ${projectName ?? "此工作区"}`)}
             {renderRows(visibleGlobal, "引用的全局 Skills")}
           </>
+        )}
+        {hiddenCount > 0 && (
+          <div className="skp-pane-note" title="这些能力在全局视图里未被开放给本工作区；请在全局视图的「可见范围」里开启">
+            另有 {hiddenCount} 个能力未对此外工作区开放
+          </div>
         )}
       </div>
     );
@@ -1002,6 +1111,20 @@ function SkillsView({
               projectName={projectName}
               workspaces={projects}
               onSelectWorkspace={onSelectWorkspace}
+              visibility={
+                scope === "global" && !isProjectSource(selectedItem.source)
+                  ? {
+                      api,
+                      entry: visibilityOf(selectedItem.name),
+                      globalOff: globalOffOf(selectedItem),
+                      onSaved: () => {
+                        setGlobalVersion((value) => value + 1);
+                        setWriteVersion((value) => value + 1);
+                        reload({ silent: true });
+                      },
+                    }
+                  : undefined
+              }
               contentVersion={contentVersion}
               onChanged={() => {
                 setContentVersion((value) => value + 1);
@@ -1056,6 +1179,7 @@ function SkillDetail({
   projectName,
   workspaces,
   onSelectWorkspace,
+  visibility,
   contentVersion,
   onChanged,
   onRemoved,
@@ -1072,6 +1196,16 @@ function SkillDetail({
   workspaces: Array<{ path: string; title?: string }>;
   /** 选中工作区后切换面板作用域。 */
   onSelectWorkspace(path: string): void;
+  /**
+   * v21：全局视图的可见性编辑上下文（仅全局条目；项目自己的条目不参与）。
+   * 缺省 = 不渲染「可见范围」分段。
+   */
+  visibility?: {
+    api: CapabilityPanelApi;
+    entry?: ClientCapabilityVisibility;
+    globalOff: boolean;
+    onSaved: () => void;
+  };
   /** 父级写操作计数：变化时内容区清缓存重拉文件清单。 */
   contentVersion: number;
   /** 条目内容已变化（如启用/禁用/导入）：保留选中，重拉列表即可。 */
@@ -1330,6 +1464,21 @@ function SkillDetail({
         workspaces={workspaces}
         onSelectWorkspace={onSelectWorkspace}
       />
+
+      {visibility !== undefined && (
+        <dl className="skp-detail-fields">
+          <VisibilityDetailFields
+            api={visibility.api}
+            domain="skills"
+            capabilityKey={summary.name}
+            name={summary.name}
+            entry={visibility.entry}
+            workspaces={workspaces}
+            globalOff={visibility.globalOff}
+            onSaved={visibility.onSaved}
+          />
+        </dl>
+      )}
 
       {!summary.readOnly && !injected && (
         <div className="skp-detail-actions">

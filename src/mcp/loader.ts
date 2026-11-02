@@ -66,6 +66,7 @@ import type { McpDefaultSets } from "../shared/mcp-defaults.js";
 import { readMcpFile, sanitizeServerName, toClientConfig } from "./config-file.js";
 import { GLOBAL_MCP_FILE_NAME, globalMcpDirs, projectMcpFile } from "./paths.js";
 import type { OverridesManager } from "../overrides/manager.js";
+import type { CapabilityDefaults } from "../overrides/types.js";
 import type { ImportsManager } from "../imports/manager.js";
 import type { SessionStateStore } from "../session-state.js";
 import type { McpRestrictionView, McpServerEntry, McpStatusView } from "./types.js";
@@ -493,6 +494,74 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
   }
 
   /**
+   * 取本工作区的 MCP 能力默认快照（可见性 + 每工作区默认 + 项目覆盖，v21）。
+   *
+   * 优先用 `overrides.capabilityDefaultsMany("mcp", names, cwd)`（唯一计算入口）；
+   * 旧注入管理器没有该方法时返回空 map，调用方回退 v20.2 的 `mcpDefaultSets`
+   * 语义（全部可见、项目覆盖相对兜底全局默认）。
+   */
+  async function resolveCapabilityDefaults(
+    cwd: string | undefined,
+    names: readonly string[],
+  ): Promise<Map<string, CapabilityDefaults>> {
+    const overrides = deps.overrides;
+    if (overrides === undefined || names.length === 0) return new Map();
+    if (typeof overrides.capabilityDefaultsMany !== "function") return new Map();
+    try {
+      return await overrides.capabilityDefaultsMany("mcp", names, cwd);
+    } catch (error) {
+      logger.warn?.(`capability-panel: 读取 MCP 可见性/默认失败（${errMessage(error)}），按全部可见处理`);
+      return new Map();
+    }
+  }
+
+  /**
+   * 可见性里出现过的 MCP serverName（v21）。
+   *
+   * 外部注入实例可能**尚未注册任何工具**（还没连上 / 懒加载），此时无法靠工具
+   * 命名空间枚举到它；它仍可能被全局设为不可见或每工作区默认关。把 visibility 的
+   * key 也当屏蔽候选：首轮 `tools.restrict` 会因"暂无可屏蔽工具"降级 skipped，
+   * 等工具注册后的 `tools/change` 刷新用同一份 `restrictTargets` 收敛成 applied。
+   */
+  async function resolveVisibilityServerNames(): Promise<string[]> {
+    const overrides = deps.overrides;
+    if (overrides === undefined || typeof overrides.visibilityKeys !== "function") return [];
+    try {
+      return await overrides.visibilityKeys("mcp");
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * 从全局工具注册表反推**运行时注入 / 全局层**的 serverName（`mcp__<ns>__*`）。
+   *
+   * 可见性可能只对「在可见性弹层里配置过」的名字生效；这些外部实例不在本插件
+   * 的 MCP 配置文件里，必须靠工具命名空间枚举出来才能按可见性屏蔽。
+   * 按 agent 作用域注入的实例不在 root 视图里（本就无法 restrict，行为一致）。
+   */
+  function knownGlobalServerNames(): Set<string> {
+    const names = new Set<string>();
+    const tools = ctx.root?.get?.("tools") ?? ctx.get?.("tools");
+    if (typeof tools?.schemas !== "function") return names;
+    let schemas: unknown;
+    try {
+      schemas = tools.schemas();
+    } catch {
+      return names;
+    }
+    if (!Array.isArray(schemas)) return names;
+    for (const schema of schemas) {
+      const name = (schema as { name?: unknown } | undefined)?.name;
+      if (typeof name !== "string" || !name.startsWith("mcp__")) continue;
+      const rest = name.slice("mcp__".length);
+      const cut = rest.indexOf("__");
+      if (cut > 0) names.add(rest.slice(0, cut));
+    }
+    return names;
+  }
+
+  /**
    * 为某个 session 解析**项目层**要挂的条目 + 要屏蔽的全局 server：
    *
    *   - 项目原生条目（`disabled !== true`）→ 会话内挂载（与全局同名时靠
@@ -503,12 +572,13 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
    *     原生条目时原生优先（引用不参与）；禁用态引用 → 屏蔽全局同名条目；
    *     启用态引用 → 全局层已提供则不重复挂，只有全局条目自身
    *     `disabled === true`（全局层不挂）时在会话内补挂；
-   *   - **全局层实例 / 外部注入实例**：屏蔽候选来自「有效默认关闭」
-   *     `(global.mcp ∪ project.mcp) \ project.enabledMcp`（见
-   *     `shared/mcp-defaults.ts`）。全局默认**不作用于**上面两类项目条目
-   *     （项目原生条目 / 项目引用仍只受 `project.mcp` 控制）。
+   *   - **全局层实例 / 外部注入实例**：屏蔽候选由 v21 的 `capabilityDefaults`
+   *     统一计算——`visible=false` ⇒ **强制屏蔽**（会话显式 true 也不能打开）；
+   *     可见 ⇒ 按「每工作区全局默认 / 项目三态覆盖」的 `effectiveDefaultEnabled`
+   *     决定，显式会话开关最高。可见性**不作用于**上面两类项目条目（项目原生
+   *     条目 / 项目引用仍只受 `project.mcp` 控制）。
    *
-   * 三层优先级：显式会话开关 > 有效默认 > 配置里的 `disabled` 硬关闭。
+   * 优先级：可见性 > 显式会话开关 > 工作区默认 > 配置里的 `disabled` 硬关闭。
    * 单个文件读失败只记 warn，不中断另一个文件。
    */
   async function resolveSessionPlan(cwd: string | undefined, sessionId?: string): Promise<{
@@ -591,10 +661,11 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
       // 自身 `disabled: true`（全局层不会挂它）时才在会话内补挂。
       if (globalServers[key].disabled === true) session.push({ key, entry: globalServers[key] });
     }
-    // 全局配置条目 + 外部注入实例：候选 = **有效默认关闭**的键 ∪ 本会话显式
-    // 开关过的键。生效规则：显式会话开关 > 有效默认（全局默认 ∪ 项目默认 \
-    // 项目重开）；关掉即用 tools.restrict 屏蔽其全局工具（共享实例不卸载；
-    // 按 agent 作用域注入的实例 restrict 会失败→降级 skipped）。
+    // 全局配置条目 + 外部注入实例：候选 = 兜底全局默认关闭的键 ∪ 全部已存在的
+    // 全局层实例 ∪ 本会话显式开关过的键（v21 起还要按可见性强制屏蔽）。
+    // 生效规则：不可见 ⇒ 强制屏蔽；可见 ⇒ 显式会话开关 > 工作区默认；关掉即用
+    // tools.restrict 屏蔽其全局工具（共享实例不卸载；按 agent 作用域注入的实例
+    // restrict 会失败→降级 skipped）。
     const serverCandidates = new Map<string, string>(); // serverName → 展示用 key（config key 优先）
     for (const key of effectiveDisabled) {
       // 项目原生条目（且全局没有同名）由"是否在会话内挂载"控制，不是全局/外部实例，
@@ -602,21 +673,51 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
       if (Object.hasOwn(projectServers, key) && !globalEnabled(key) && !Object.hasOwn(refs, key)) continue;
       serverCandidates.set(sanitizeServerName(key), key);
     }
+    // 全局配置文件里**实际会挂载**的条目：即便不在任何默认关闭名单里，也可能
+    // 被可见性单独隐藏（mode=selected/none 或某工作区 visible:false）。
+    for (const [key, entry] of Object.entries(globalServers)) {
+      if (entry.disabled === true) continue;
+      const serverName = sanitizeServerName(key);
+      if (!serverCandidates.has(serverName)) serverCandidates.set(serverName, key);
+    }
+    // 运行时注入 / Host 根作用域的外部实例（不在本插件配置文件里）。
+    for (const serverName of knownGlobalServerNames()) {
+      if (!serverCandidates.has(serverName)) serverCandidates.set(serverName, serverName);
+    }
+    // 可见性里配置过、但当前还没注册工具的外部实例（连上后由 tools/change 收敛）。
+    for (const key of await resolveVisibilityServerNames()) {
+      const serverName = sanitizeServerName(key);
+      if (!serverCandidates.has(serverName)) serverCandidates.set(serverName, key);
+    }
     for (const [toggleKey] of sessionToggles.get(sessionId ?? "") ?? []) {
       if (!toggleKey.startsWith("server:")) continue;
       const serverName = toggleKey.slice("server:".length);
       if (!serverCandidates.has(serverName)) serverCandidates.set(serverName, serverName);
     }
+    // v21：可见性 + 每工作区默认（一次批量读取；旧管理器返回空 map ⇒ 回退 v20.2）。
+    const capabilityDefaults = await resolveCapabilityDefaults(cwd, [...serverCandidates.keys()]);
+    /** 兜底全局默认关闭（旧口径；新入口缺该名字时用它回退）。 */
+    const legacyDefaultDisabled = (serverName: string): boolean =>
+      effectiveDisabled.some((item) => sanitizeServerName(item) === serverName);
     for (const [serverName, key] of serverCandidates) {
+      const capability = capabilityDefaults.get(serverName);
+      // 项目级**启用态引用**是显式的项目级选用，不做可见性（确认点 3）：引用的
+      // 全局原版仍从全局层提供实例，若按可见性 restrict 会把引用一起藏掉。
+      const viaEnabledReference =
+        Object.hasOwn(refs, key) && !Object.hasOwn(projectServers, key) && refs[key].disabled !== true;
+      if (viaEnabledReference) continue;
+      // 不可见 ⇒ 全量强制关（会话显式 true 也不能打开，契约 §5.1）。
+      if (capability !== undefined && !capability.visible) {
+        restrict.set(key, { key, serverName });
+        continue;
+      }
       const explicit = sessionToggle(sessionId, serverToggleKey(serverName));
       if (explicit !== undefined) {
         if (!explicit) restrict.set(key, { key, serverName });
         continue;
       }
-      // 未显式设置 ⇒ 跟随有效默认：只有"有效默认关闭"才需要屏蔽
-      // （全局默认 ∪ 项目默认，已扣掉本工作区显式重新打开的名字）。
-      const defaultDisabled = effectiveDisabled.some((item) => sanitizeServerName(item) === serverName);
-      if (defaultDisabled) restrict.set(key, { key, serverName });
+      const defaultEnabled = capability !== undefined ? capability.effectiveDefaultEnabled : !legacyDefaultDisabled(serverName);
+      if (!defaultEnabled) restrict.set(key, { key, serverName });
     }
     return { session, restrict: [...restrict.values()] };
   }
@@ -1170,11 +1271,35 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
   }
 
   /**
+   * 本工作区**不可见**的 serverName 集合（v21；用于拒绝会话开关）。
+   *
+   * 会话开关只对可见能力渲染/可写；不可见能力的开关写入没有意义（运行时强制
+   * 关），这里在 loader 层再兜一次底（批量路径 / 旧的直接调用方也会经过这里）。
+   */
+  async function invisibleServerNames(cwd: string | undefined, targets: readonly string[]): Promise<Set<string>> {
+    const overrides = deps.overrides;
+    const hidden = new Set<string>();
+    if (overrides === undefined || targets.length === 0) return hidden;
+    if (typeof overrides.capabilityDefaultsMany !== "function") return hidden;
+    const names = [...new Set(targets.map((target) => sanitizeServerName(target)))];
+    let defaults: Map<string, { visible: boolean }>;
+    try {
+      defaults = await overrides.capabilityDefaultsMany("mcp", names, cwd);
+    } catch {
+      return hidden;
+    }
+    for (const target of targets) {
+      if (defaults.get(sanitizeServerName(target))?.visible === false) hidden.add(target);
+    }
+    return hidden;
+  }
+
+  /**
    * 设置某个 session 的手动开关（内存内，不落盘）。
    *
    * 只影响该 session：项目条目会按需挂载/卸载，全局/外部实例用 `tools.restrict`
    * 屏蔽或恢复其工具（不卸载共享实例）。`enabled` 传 `undefined` 可清掉显式覆盖、
-   * 重新跟随项目默认。
+   * 重新跟随项目默认。v21：不可见能力直接忽略（业务失败由 mcp/manager 返回）。
    */
   async function setSessionEnabled(input: {
     sessionId: string;
@@ -1183,6 +1308,11 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
     kind: "project" | "server";
     enabled: boolean | undefined;
   }): Promise<void> {
+    // v21：不可见能力的会话开关直接忽略（不落盘、不挂载）。
+    if (input.kind === "server") {
+      const hidden = await invisibleServerNames(input.cwd, [input.target]);
+      if (hidden.size > 0) return;
+    }
     // 找到这个 session 的记录（冷会话可能是 undefined：仍允许先落盘，等 agent 创建时恢复）。
     const record = [...sessions.values()].find((item) => item.agent?.id === input.sessionId);
     const meta = metaOf(record);
@@ -1246,8 +1376,15 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
   }): Promise<void> {
     const sessionId = typeof input?.sessionId === "string" ? input.sessionId : "";
     if (sessionId.length === 0) return;
-    const entries = Array.isArray(input?.entries) ? input.entries : [];
+    let entries = Array.isArray(input?.entries) ? input.entries : [];
     if (entries.length === 0) return;
+    // v21：批量路径跳过不可见能力（会话开关只对可见能力可写）。
+    const serverTargets = entries.filter((entry) => entry.kind === "server").map((entry) => entry.target);
+    if (serverTargets.length > 0) {
+      const hidden = await invisibleServerNames(input.cwd, serverTargets);
+      if (hidden.size > 0) entries = entries.filter((entry) => entry.kind !== "server" || !hidden.has(entry.target));
+      if (entries.length === 0) return;
+    }
     const record = findSessionRecord(sessionId);
     const meta = metaOf(record);
     if (input.cwd !== undefined && meta.cwd === undefined) meta.cwd = input.cwd;

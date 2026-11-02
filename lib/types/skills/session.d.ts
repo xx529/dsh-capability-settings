@@ -52,6 +52,7 @@
  */
 import type { SessionStateStore } from "../session-state.js";
 import type { SkillDefaultSets } from "../shared/skill-defaults.js";
+import type { CapabilityDefaults } from "../overrides/types.js";
 import type { SkillRegistryBridge } from "./registry.js";
 import type { SkillSummaryView } from "./types.js";
 /** 会话级 Skills 开关 / 默认值投影的依赖。 */
@@ -71,6 +72,19 @@ export interface SkillSessionDeps {
      * 做存在性判定，避免给不存在 / 已删除的名字注册 ghost shadow。
      */
     diskNames?: (cwd?: string) => Promise<readonly string[]>;
+    /**
+     * v21：可见性 + 每工作区默认的批量入口
+     * （`overrides.capabilityDefaultsMany("skills", names, cwd)`）。
+     * 缺省时按「全部可见 + 旧默认」处理（旧装配 / 回归脚本兼容）。
+     */
+    capabilityDefaults?: (names: readonly string[], cwd?: string) => Promise<Map<string, CapabilityDefaults>>;
+    /**
+     * v21：可见性里出现过的技能名（`overrides.visibilityKeys("skills")`）。
+     *
+     * 运行时 gate 用它发现「不在默认关闭名单、但被可见性 / 每工作区默认关掉」
+     * 的技能（mode/selected/每工作区 defaultEnabled=false 都可能是这种）。
+     */
+    visibilityNames?: (cwd?: string) => Promise<readonly string[]>;
     /** 宿主 registry 桥（读注入技能 + read-before/after-shadow 校验）；缺省退化为纯磁盘行为。 */
     registry?: SkillRegistryBridge;
     /**
@@ -135,6 +149,17 @@ export interface SkillSessionRegistry {
      * @param sessionId 会话 id；缺省时全部条目 `canToggleInSession:false`
      */
     list(baseList: (cwd?: string) => Promise<SkillSummaryView[]>, cwd?: string, sessionId?: string): Promise<SessionSkillView[]>;
+    /**
+     * v21：与 {@link list} 相同的行，外加工作区视图的 `hiddenCount`（被可见性隐藏
+     * 的技能数，供「另有 N 个未开放」提示）。
+     *
+     * RPC `skills.sessionList` 用这个（value 恒为 `{skills, hiddenCount}`）；宿主内部
+     * 调用方（jev / session-bulk）继续用数组形态的 `list`。
+     */
+    listView(baseList: (cwd?: string) => Promise<SkillSummaryView[]>, cwd?: string, sessionId?: string): Promise<{
+        skills: SessionSkillView[];
+        hiddenCount: number;
+    }>;
     /**
      * 设置本会话开关（按会话落盘；无 `state` 依赖时仅内存）。
      *

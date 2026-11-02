@@ -867,6 +867,25 @@ button.skp-dock-rail-fail:hover{filter:brightness(.9);}
 @container (max-width:1050px){.skp-list-pane{width:340px;}}
 @container (max-width:900px){.skp-list-pane{width:300px;}}
 
+/* v21 可见性（全局行标签 / 详情分段 / 可见范围弹层；优先复用既有 token） */
+.skp-vis-summary{flex:none;font-size:11px;color:var(--skp-text-3);white-space:nowrap;}
+.skp-vis-detail-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:2px 0 8px;}
+.skp-vis-ws-list{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:4px;}
+.skp-vis-ws-row{display:flex;align-items:center;gap:8px;min-width:0;font-size:12.5px;color:var(--skp-text-2);}
+.skp-vis-ws-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.skp-vis-ws-default{margin-left:auto;flex:none;font-size:11.5px;color:var(--skp-text-3);white-space:nowrap;}
+.skp-vis-modal{display:flex;flex-direction:column;gap:12px;min-width:0;}
+.skp-vis-mode-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+.skp-vis-modal-note{font-size:12.5px;line-height:1.6;color:var(--skp-text-3);}
+.skp-vis-table{display:flex;flex-direction:column;border:1px solid var(--skp-border);border-radius:var(--skp-radius-sm);overflow:hidden;}
+.skp-vis-table-head,.skp-vis-table-row{display:grid;grid-template-columns:minmax(0,1fr) 84px 116px;align-items:center;gap:8px;padding:8px 10px;}
+.skp-vis-table-head{background:var(--skp-fill);font-size:11.5px;color:var(--skp-text-3);}
+.skp-vis-table-row+.skp-vis-table-row{border-top:1px solid var(--skp-border);}
+.skp-vis-check{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--skp-text-2);cursor:pointer;}
+.skp-vis-check input{width:14px;height:14px;margin:0;accent-color:var(--dsw-alias-brand-primary,#4176e6);cursor:pointer;}
+.skp-vis-default-toggle{margin-left:0;}
+.skp-link-btn:disabled{opacity:.45;cursor:default;text-decoration:none;}
+
 `;
 
 /**

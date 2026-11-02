@@ -61,12 +61,12 @@ Skills / MCP / Tools（Tools 以插件为单元），一次请求批量打 0–1
 
 | 配置 | 写入目标 | 读取兼容（旧位置） |
 |---|---|---|
-| **Skills / MCP 全局默认**（v20.1 B2 Skills、v20.2 扩到 MCP：全局视图开关；全局关闭后工作区/会话可再打开） | `<dshHome>/dsh-capability-settings/capability-global-overrides.json`（`{"version":1,"skills":["<name>",…],"mcp":["<serverName>",…]}`；空名单不落对应字段；目录 `700` / 文件 `600`、原子写 + 文件锁；`mcp` 只存运行时注入实例的 `serverName`，不改注入方配置、不卸载实例） | — |
-| 项目级「默认关闭」声明（MCP 面板的「默认」开关 + Skills 工作区开关；B2 增 `enabledSkills`、v20.2 增 `enabledMcp` 显式启用） | `<dshHome>/dsh-capability-settings/capability-overrides.json`（一个文件按**项目根**分 key：`projects.<项目根>.mcp` / `.skills`（禁用）/ `.enabledSkills` / `.enabledMcp`（重新打开）） | 旧项目内 `.agents/capability-overrides.json`（兼容 `.dsh` → `.claude`）：只读兼容，首次写入时把内容并入统一存储并删除旧文件 |
+| **能力全局默认 / 可见性**（v20.1 B2 Skills、v20.2 MCP、v21 扩到 Tools 与按工作区可见性） | `<dshHome>/dsh-capability-settings/capability-global-overrides.json`（v2：`{"version":2,"skills":[…],"mcp":[…],"tools":[…],"visibility":{"skills|mcp|tools":{"<name>":{"mode":"all|selected|none","workspaces":{"<workspace path>":{"visible":true,"defaultEnabled":false}}}}}}`；空名单/空 visibility 不落字段；目录 `700` / 文件 `600`、原子写 + 文件锁；v1 文件读取兼容 = 全部可见；不改技能文件 / 不改注入方配置、不卸载实例） | — |
+| 项目级「默认关闭」声明（MCP 面板的「默认」开关 + Skills / Tools 工作区开关；B2 增 `enabledSkills`、v20.2 增 `enabledMcp`、v21 增 `tools`/`enabledTools`） | `<dshHome>/dsh-capability-settings/capability-overrides.json`（一个文件按**项目根**分 key：`projects.<项目根>.mcp` / `.skills` / `.tools`（禁用）/ `.enabledSkills` / `.enabledMcp` / `.enabledTools`（重新打开）） | 旧项目内 `.agents/capability-overrides.json`（兼容 `.dsh` → `.claude`）：只读兼容，首次写入时把内容并入统一存储并删除旧文件 |
 | 项目级「全局能力引用」声明（MCP 的「导入到本项目」） | `<项目根>/.agents/capability-imports.json` | — |
 | 会话级能力开关（Skills / MCP / Tools 三域 + 派生继承设置，按 sessionId） | `<dshHome>/dsh-capability-settings/session-capabilities.json`（`version: 1`，记录内 `skills` / `mcp` / `tools` / `deriveMode` / `derivedMode` / `derivedFrom` / `derivedAt`） | — |
 | Tools 归属扫描缓存（自动发现） | `<dshHome>/dsh-capability-settings/tool-attribution.json`（`version: 1`；包名+version+mtime+宿主版本失效；目录 `700` / 文件 `600`、原子写 + 锁；损坏自动重建） | — |
-| Tools **全局默认**（能力面板 Tools 页开关；所有会话 / 新会话） | `<dshHome>/dsh-capability-settings/tools-global.json`（`{"version":1,"disabled":["<unit>",…]}`；目录 `700` / 文件 `600`、原子写 + 文件锁；缺省 = 全部启用） | — |
+| Tools **全局默认**（能力面板 Tools 页开关；所有会话 / 新会话） | 新写入：`capability-global-overrides.json` 的 `tools` 名单（v21）；旧文件 `<dshHome>/dsh-capability-settings/tools-global.json`（`{"version":1,"disabled":["<unit>",…]}`）**只读合并**，缺省 = 全部启用 | — |
 | 全局 MCP 服务器 | `~/.agents/mcp.json` | `~/.dsh` → `~/.claude` |
 | Skills（项目/全局） | `.agents/skills`、`~/.agents/skills` | `.dsh/skills`（可写）、`.claude/skills`（只读展示） |
 | 项目 MCP 服务器 | `<项目根>/.mcp.json`（Claude Code 标准，位置不变） | — |
@@ -109,6 +109,27 @@ Skills / MCP / Tools（Tools 以插件为单元），一次请求批量打 0–1
 - 设计稿：Figma `Capability Panel · 能力中心整改 v20.1`，预览
   `docs/figma/preview/v20-01…07-*.png`；v20.2 设计稿 `Capability Panel · MCP 全局默认 v20.2`
   （page `190:2`：全局视图 `190:7` / 工作区视图 `190:79` / 规范 `190:153`）。
+
+### 🧭 v21 能力可见性（全局按工作区控制）
+
+- **可见性只在全局配**：每个能力 × 每个工作区 = 可见 / 不可见；工作区不能改可见性，
+  也看不到不可见条目（列表/详情/首屏/能力 Tab 都不出现，运行时不可用）。
+- **每工作区默认开/关**：全局在「可见范围」弹层里为每个勾选的工作区设置默认开/关；
+  「全部可见」模式下新工作区可见并走兜底默认，「指定工作区」模式下新工作区不可见，
+  需在全局手动勾选。
+- **工作区覆盖**：可见能力可在工作区把默认改成开/关（三域同构：Skills/MCP 用
+  `skills`/`enabledSkills`、`mcp`/`enabledMcp`，Tools 用 `tools`/`enabledTools`；
+  UI 标「跟随全局设置 / 已覆盖」）。
+- **会话**：首屏/「能力」Tab 复用现有 v18/v19 界面，只列可见能力、计数为可见口径；
+  不可见能力不出现也不能在会话里打开（宿主返回业务失败），开关仍写
+  `session-capabilities.json`。
+- **项目自己的条目不做可见性**：`.mcp.json` 原生条目、项目技能、项目引用归项目在
+  工作区内管理；全局可见性只约束「全局能力对工作区的暴露」。
+- 存储：全局文件升 v2（`tools` 名单 + `visibility{skills,mcp,tools}`：`mode` +
+  每工作区 `visible/defaultEnabled`），旧 v1 读取即「全部可见」；`tools-global.json`
+  继续作为 Tools 兜底默认只读合并，新写入统一进全局文件。
+- 设计稿：Figma `Capability Panel · 可见性与默认 v21 草案`（page `192:2`），预览
+  `docs/figma/preview/v21-01…05-*.png`。
 
 > 下面「🗂 一个面板…」起的 v7/v13 小节描述的是**历史 UI**（左导航 + 项目下钻）；
 > 能力语义、配置落点与实现细节仍可参考，但交互以 v20.1 为准。
@@ -585,6 +606,10 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 > 的全局关闭写 `capability-global-overrides.json` 的 `mcp` 名单，按会话用
 > `tools.restrict` 屏蔽工具、不影响注入方配置；配置条目的全局关闭仍写 `mcp.json`。
 > Skills 的"全局默认"写同一个文件的 `skills` 名单。
+>
+> **v21 起三域都有「可见性 + 每工作区默认」**：全局先按工作区决定能力是否可见，
+> 可见时全局为每个工作区配默认开/关；工作区只能覆盖默认（不能改可见性），会话只能
+> 操作可见能力。项目自己的条目（`.mcp.json` / 项目技能 / 项目引用）不做可见性。
 
 ### 🎛️ 会话能力配置：首屏入口 + 配置弹窗 + 顶部「能力」Tab
 

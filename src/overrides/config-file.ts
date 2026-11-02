@@ -15,8 +15,10 @@
  *
  * v20.2：同一层扩到 MCP——项目条目新增 `enabledMcp`（本项目显式重新打开的
  * serverName，覆盖全局默认关闭），`mcp` / `enabledMcp` 同样**禁用优先**。
- * 全局层的 `capability-global-overrides.json` 在 `global-file.ts`，与本文件读写
- * 逻辑独立。
+ *
+ * v21：再扩到 Tools——项目条目新增 `tools` / `enabledTools`（Tools 单元 id 的
+ * 工作区默认关闭 / 重新打开），同样**禁用优先**。全局层的
+ * `capability-global-overrides.json` 在 `global-file.ts`，与本文件读写逻辑独立。
  *
  * 写入原子（临时文件 + rename）、父目录按需创建；读取对"文件缺失 / 文件为空"
  * 宽容（视为空声明），对"JSON 非法 / 形状不符合预期 / 版本不认识"抛出带文件名的
@@ -38,25 +40,24 @@ import type {
 } from "./types.js";
 
 /** 能力域在声明文件里的键名（与 CapabilityDomain 一一对应）。 */
-export const DOMAIN_KEYS: readonly CapabilityDomain[] = ["mcp", "skills"] as const;
+export const DOMAIN_KEYS: readonly CapabilityDomain[] = ["mcp", "skills", "tools"] as const;
 
 /**
- * 项目层「重新打开」名单字段（不属于 {@link CapabilityDomain} 的两域禁用清单）。
+ * 项目层「重新打开」名单字段（不属于 {@link CapabilityDomain} 的禁用清单）。
  *
- * 与 `DOMAIN_KEYS` 分开：这两个字段只影响默认投影 / 挂载判定，不参与
+ * 与 `DOMAIN_KEYS` 分开：这些字段只影响默认投影 / 挂载判定，不参与
  * 「某域是否被禁用」的通用语义，面板按域取用。
  */
-const OVERRIDES_ENABLED_FIELDS = ["enabledSkills", "enabledMcp"] as const;
+const OVERRIDES_ENABLED_FIELDS = ["enabledSkills", "enabledMcp", "enabledTools"] as const;
 
-/** 项目条目上的四个名单字段（两域禁用清单 + 两个重新打开名单）。 */
+/** 项目条目上的六个名单字段（三域禁用清单 + 三个重新打开名单）。 */
 const entryFields = [...DOMAIN_KEYS, ...OVERRIDES_ENABLED_FIELDS] as const;
 
 /**
- * 构造一份空的规范化声明（每个域都是空数组；`enabledSkills` / `enabledMcp`
- * 也是空）。
+ * 构造一份空的规范化声明（三域禁用清单与三个重新打开名单都是空数组）。
  */
 export function emptyOverrides(): OverridesSet {
-  return { mcp: [], skills: [], enabledSkills: [], enabledMcp: [] };
+  return { mcp: [], skills: [], tools: [], enabledSkills: [], enabledMcp: [], enabledTools: [] };
 }
 
 /**
@@ -76,7 +77,10 @@ export function normalizeOverridesSet(input: Partial<OverridesSet> | undefined):
   const skills = normalizeList(input?.skills ?? []);
   const disabled = new Set(skills);
   const enabledSkills = normalizeList(input?.enabledSkills ?? []).filter((name) => !disabled.has(name));
-  return { mcp, skills, enabledSkills, enabledMcp };
+  const tools = normalizeList(input?.tools ?? []);
+  const toolsDisabled = new Set(tools);
+  const enabledTools = normalizeList(input?.enabledTools ?? []).filter((name) => !toolsDisabled.has(name));
+  return { mcp, skills, tools, enabledSkills, enabledMcp, enabledTools };
 }
 
 /**

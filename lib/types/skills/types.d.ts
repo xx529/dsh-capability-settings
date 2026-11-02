@@ -147,4 +147,21 @@ export interface SkillSummaryView extends InjectedSkillFields {
      * `skill` = 项目区已有同名真实条目（项目副本遮蔽全局）。
      */
     projectShadow?: "stub" | "skill";
+    /**
+     * v21 可见性：可见范围模式（`all` / `selected` / `none`；缺省 all）。
+     * 面板「可见性」标签与详情分段用。
+     */
+    visibilityMode?: "all" | "selected" | "none";
+    /** v21：显式配置为可见的工作区数量（「指定 N」标签）。 */
+    visibleWorkspaceCount?: number;
+    /** v21：当前工作区（list 的 cwd）是否可见；仅工作区视图给出。 */
+    visibleInWorkspace?: boolean;
+    /** v21：为 true = 本工作区不可见 ⇒ 运行时强制关（工作区 / 会话视图不展示）。 */
+    disabledByVisibility?: boolean;
+    /** v21：该工作区**每工作区全局默认**（工作区重开前）；面板「跟随全局设置」展示用。 */
+    globalDefaultEnabled?: boolean;
+    /** v21：项目显式覆盖（true=显式开 / false=显式关 / 缺省=跟随全局）。 */
+    projectDefaultEnabledByOverride?: boolean;
+    /** v21：项目覆盖后的工作区默认（行尾默认开关的 checked 依据）。 */
+    workspaceDefaultEnabled?: boolean;
 }
