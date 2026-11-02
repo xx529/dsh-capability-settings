@@ -3,7 +3,7 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [1.9.1] - 2026-11-02
 
 ### 新增（v20.2 MCP 全局默认）
 
@@ -25,6 +25,8 @@
   已覆盖全局默认 / 工作区默认关闭」，组头按作用域提示写入落点。
 - 新宿主模块 `src/shared/mcp-defaults.ts`（三层默认纯计算，面板与 loader 共用）；
   `src/mcp/config-file.ts` 导出 `isMcpServerName`（全局默认写的 key 校验）。
+- 设计稿同步：Figma `Capability Panel · MCP 全局默认 v20.2`（page `190:2`：全局视图
+  `190:7` / 工作区视图 `190:79` / 优先级与落点规范 `190:153`）。
 
 ### 变更（v20.2 MCP 全局默认）
 

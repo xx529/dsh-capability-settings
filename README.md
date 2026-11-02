@@ -107,7 +107,8 @@ Skills / MCP / Tools（Tools 以插件为单元），一次请求批量打 0–1
   按会话 `tools.restrict` 屏蔽工具 + 同名空文本系统提示词段遮蔽；配置与生命周期
   仍归注入方（面板只读）。
 - 设计稿：Figma `Capability Panel · 能力中心整改 v20.1`，预览
-  `docs/figma/preview/v20-01…07-*.png`。
+  `docs/figma/preview/v20-01…07-*.png`；v20.2 设计稿 `Capability Panel · MCP 全局默认 v20.2`
+  （page `190:2`：全局视图 `190:7` / 工作区视图 `190:79` / 规范 `190:153`）。
 
 > 下面「🗂 一个面板…」起的 v7/v13 小节描述的是**历史 UI**（左导航 + 项目下钻）；
 > 能力语义、配置落点与实现细节仍可参考，但交互以 v20.1 为准。

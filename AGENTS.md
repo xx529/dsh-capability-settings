@@ -250,6 +250,10 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
     设计规范 `171:1256` / 添加 MCP 表单 `177:1648` / JSON 粘贴 `177:1979`）+ 页内诊断；
     预览图 `docs/figma/preview/v20-*`。对应实现：面板默认全局 + 列表标题栏添加 +
     两段作用域链 + B2 全局默认；scene JSON 未导出。
+  - `Capability Panel · MCP 全局默认 v20.2`（page `190:2`）：3 块（全局视图 · 外部注入
+    行尾开关可写 `190:7` / 工作区视图 · 继承·已覆盖全局默认 `190:79` / 优先级与落点
+    规范 `190:153`）。对应实现：MCP 全局默认层（`capability-global-overrides.json` 的
+    `mcp` 名单 + 项目 `enabledMcp` 三态）；预览图待本地 Figma 伴生插件重连后导出。
   - `Capability Dock · 首屏入口 v18（实现基线）`（page `155:13148`）：3 帧 `155:13149`（默认 ·
     入口在首屏行右端）/ `155:13275`（hover 计数项）/ `155:13396`（配置弹窗 · 沿用 v14）。
     对应代码：`src/client.ts` 的 `conversation.hero.options` 注册 + `src/client/styles.ts` 的
