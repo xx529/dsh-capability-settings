@@ -192,7 +192,7 @@ export { globalMcpFile, projectMcpFile } from "./mcp/paths.js";
 export { readMcpFile, writeMcpFile, sanitizeServerName, toClientConfig, validateEntry } from "./mcp/config-file.js";
 export type { SkillSummaryView, SkillSpec, SkillFormat, WritableScope, InvocationPolicy, InjectedSkillFields, RegistryResourceBaseKind, SkillOrigin, SkillSource, } from "./skills/types.js";
 export type { McpScope, McpServerEntry, McpServerView, McpListResult, McpStatusView, McpMountState } from "./mcp/types.js";
-export type { CapabilityDefaults, CapabilityDomain, CapabilityOverrides, GlobalOverrideToggleInput, GlobalVisibilityInput, GlobalOverrides, GlobalOverridesFile, GlobalOverridesView, OverridesProjectEntry, OverridesSet, OverridesStore, OverridesView, } from "./overrides/types.js";
+export type { CapabilityDefaults, CapabilityDomain, CapabilityOverrides, GlobalOverrideToggleInput, GlobalVisibilityInput, GlobalOverrides, GlobalOverridesFile, GlobalOverridesView, OverridesProjectEntry, OverridesSet, OverridesStore, OverridesView, VisibilityConflict, VisibilitySetResult, } from "./overrides/types.js";
 export type { OverridesManager } from "./overrides/manager.js";
 /**
  * Cordis 以 `module.default || module` 解析插件包。这里提供默认导出

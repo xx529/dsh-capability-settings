@@ -109,8 +109,14 @@ export declare function VisibilityDetailFields({ api, domain, capabilityKey, nam
     onSaved: () => void;
 }): ReactNode;
 /**
- * 可见范围编辑弹层：顶部模式分段 + 工作区表格（可见 checkbox + 默认开/关）。
- * 保存提交**整份** workspaces 映射（`overrides.setVisibility`）。
+ * 可见范围编辑弹层（v21.1）：
+ * - **没有模式分段**：模式在保存时由行状态推导（全可见 ⇒ all；全不可见 ⇒ none；
+ *   其余 ⇒ selected）；新工作区语义在说明文案里说清。
+ * - 工作区表格：每行 [可见 checkbox] + [默认开/关]；表头的「全选/全不选」「全部
+ *   默认开/关」是批量切换按钮（默认列只作用于可见行）。
+ * - 固定 footer + dirty 态（无改动时保存置灰且不发 RPC）。
+ * - 冲突决策：保存返回 `code:"visibility-conflicts"` 时弹二级确认框
+ *   （取消 / 保留工作区配置 keep / 清除工作区的开启配置 clear 后重试）。
  */
 export declare function VisibilityModal({ api, domain, capabilityKey, name, entry, workspaces, globalOff, onClose, onSaved, }: {
     api: CapabilityPanelApi;

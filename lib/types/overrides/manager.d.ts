@@ -47,7 +47,7 @@
 import type { SkillDefaultSets } from "../shared/skill-defaults.js";
 import type { McpDefaultSets } from "../shared/mcp-defaults.js";
 import type { VisibilityDomain, VisibilitySets } from "../shared/visibility.js";
-import type { CapabilityDefaults, CapabilityDomain, GlobalOverrideToggleInput, GlobalOverridesView, GlobalVisibilityInput, OverridesSet, OverridesView } from "./types.js";
+import type { CapabilityDefaults, CapabilityDomain, GlobalOverrideToggleInput, GlobalOverridesView, GlobalVisibilityInput, OverridesSet, OverridesView, VisibilityConflict, VisibilitySetResult } from "./types.js";
 /** 管理服务的构造依赖。 */
 export interface OverridesManagerDeps {
     dshHome?: string;
@@ -107,7 +107,14 @@ export declare function createOverridesManager(deps?: OverridesManagerDeps): {
         ok: false;
         errors: string[];
     }>;
-    setVisibility: (input: GlobalVisibilityInput | Record<string, unknown>) => Promise<OverrideOpResult>;
+    setVisibility: (input: GlobalVisibilityInput | Record<string, unknown>) => Promise<VisibilitySetResult>;
+    visibilityConflicts: (input: GlobalVisibilityInput | Record<string, unknown>) => Promise<{
+        ok: true;
+        conflicts: VisibilityConflict[];
+    } | {
+        ok: false;
+        errors: string[];
+    }>;
     visibilitySets: () => Promise<VisibilitySets>;
     visibilityKeys: (domain: VisibilityDomain) => Promise<string[]>;
     invisibleKeys: (domain: VisibilityDomain, cwd?: string) => Promise<string[]>;

@@ -20,6 +20,7 @@ import type {
   ClientMcpUsageEntry,
   ClientGlobalOverrides,
   ClientOverrides,
+  ClientSetVisibilityResult,
   ClientSkillDetail,
   ClientSkillSummary,
   ClientToolInspectTool,
@@ -702,7 +703,9 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
        * `workspaces` 为完整映射原样透传；业务失败返回 `{ok:false,errors}`（不抛）。
        */
       async setVisibility(input) {
-        return unwrap(await rpc("overrides.setVisibility", input)) as { ok: true } | { ok: false; errors: string[] };
+        // 业务失败可能带 code / conflicts（v21.1 冲突决策）：rpc 展平业务信封时
+        // 会透传其余字段，这里原样返回给弹层做二级确认。
+        return unwrap(await rpc("overrides.setVisibility", input)) as ClientSetVisibilityResult;
       },
     },
 

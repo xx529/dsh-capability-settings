@@ -3,6 +3,36 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.10.2] - 2026-11-02
+
+### 变更
+
+- **可见范围弹层交互重做**：删除「全部 / 指定 / 不可见」模式分段与「全部工作区可见」
+  链接；改为工作区表格逐行「可见」勾选 + 「默认开/关」，并在表头「可见」「默认」两列
+  各加批量按钮（全选/全不选、全部默认开/关，默认批量只作用于可见行）。保存时按行状态
+  推导 `mode`（全可见 all / 全不可见 none / 混合 selected），提交完整 workspaces 映射；
+  footer 常驻与保存 dirty 态保持。
+
+### 新增
+
+- **可见性一致性检测与决策**：把能力设为不可见时，若某些工作区用项目覆盖显式开启了它
+  （`enabledSkills` / `enabledMcp` / `enabledTools`），`overrides.setVisibility` 会返回
+  `{ok:false, code:"visibility-conflicts", conflicts:[{workspace,projectRoot}]}` 且**不写盘**；
+  面板弹二级确认框，用户可选：取消 / `keep`（写盘、保留工作区配置，恢复可见后生效）/
+  `clear`（写盘，并从这些工作区的项目覆盖移除该能力的显式开启，其它默认不变）。
+  新增只读预查询 RPC `overrides.visibilityConflicts`；`setVisibility` 入参新增
+  `resolveConflicts?: "keep"|"clear"`，成功返回 `cleared` / `retained` 工作区列表。
+  项目默认关闭名单不算冲突；项目原生条目/引用不做可见性、不参与检测。
+
+### 验证
+
+- 后端夹具 9/9（拒绝写盘 / keep / clear 只清 enabled* / MCP 与 Tools / 单工作区
+  visible:false / 默认关闭不算冲突 / 坏存储静默 / 非法参数 / RPC 路由）。
+- 前端 jsdom 真实 click 15/15（批量全选/全不选、默认全开/全关、mode 推导、冲突二级框
+  三选择与重试）＋ footer/结构 5/5；Chrome 无头 30 工作区/30 冲突：列表可滚到底、
+  footer 固定不位移、批量按钮不越列。
+- v21 host 36/36、v20.2 UI 9/9 无回归。
+
 ## [1.10.1] - 2026-11-02
 
 ### 修复

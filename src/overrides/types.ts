@@ -229,7 +229,46 @@ export interface GlobalVisibilityInput {
   mode: VisibilityMode;
   /** 工作区 path → 该工作区配置（完整映射）。 */
   workspaces: Record<string, WorkspaceVisibility>;
+  /**
+   * 冲突处理策略（v21.1）：
+   *
+   *   - 缺省：若本次会把某工作区变为不可见、而该工作区项目覆盖里**显式开启**了该
+   *     能力（`enabledSkills` / `enabledMcp` / `enabledTools`），**不写盘**，返回
+   *     `{ok:false, code:"visibility-conflicts", conflicts}`；
+   *   - `"keep"`：照常写盘，保留这些工作区的显式开启（返回 `retained`）；
+   *   - `"clear"`：写盘同时从这些工作区的项目覆盖里移除对应的显式开启项
+   *     （项目默认关闭名单不动；返回 `cleared`）。
+   */
+  resolveConflicts?: "keep" | "clear";
 }
+
+/**
+ * 可见性冲突（v21.1）：某工作区的项目覆盖里**显式开启**了某能力，但本次可见性
+ * 变更会让该能力在它那里变为**不可见**（全关与显式开语义冲突，需用户决策）。
+ */
+export interface VisibilityConflict {
+  /** 工作区展示名：统一存储里记录的最近 cwd，缺省回落 projectRoot。 */
+  workspace: string;
+  /** 统一存储的 key（项目根）。 */
+  projectRoot: string;
+}
+
+/**
+ * `overrides.setVisibility` 的业务结果（v21.1 起扩展）：
+ *
+ *   - `{ok:true, cleared?}`：`resolveConflicts:"clear"` 时实际清除的工作区；
+ *   - `{ok:true, retained?}`：`resolveConflicts:"keep"` 时保留的工作区；
+ *   - `{ok:false, code:"visibility-conflicts", conflicts}`：未传策略且存在冲突
+ *     （**未写盘**）。
+ */
+export type VisibilitySetResult =
+  | { ok: true; cleared?: string[]; retained?: string[] }
+  | {
+      ok: false;
+      errors: string[];
+      code?: "visibility-conflicts";
+      conflicts?: VisibilityConflict[];
+    };
 
 /**
  * 一个能力在某个工作区的默认态快照（`overrides.capabilityDefaults` 的返回）。

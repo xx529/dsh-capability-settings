@@ -32,6 +32,28 @@ export interface ClientCapabilityVisibility {
 /** 三域的可见性全量（`overrides.globalGet` 的 `visibility` 字段）。 */
 export type ClientVisibilitySets = Record<"skills" | "mcp" | "tools", Record<string, ClientCapabilityVisibility>>;
 /**
+ * v21.1：保存可见性时的**冲突工作区**——该工作区显式开启了此能力，但本次保存
+ * 会把它设为不可见。宿主返回 `code: "visibility-conflicts"` + 此列表，由面板
+ * 弹二级确认（保留 / 清除工作区显式开启）后带 `resolveConflicts` 重试。
+ */
+export interface ClientVisibilityConflict {
+    /** 工作区展示路径（宿主给的工作区 key / path）。 */
+    workspace: string;
+    /** 该工作区解析出的项目根（与 visibility.workspaces 的 key 同源）。 */
+    projectRoot: string;
+}
+/** 冲突解决方式：保留工作区的显式开启配置 / 清除它们（其它默认不变）。 */
+export type ClientVisibilityConflictResolution = "keep" | "clear";
+/** `overrides.setVisibility` 的返回：成功 or 业务失败（可能带冲突明细）。 */
+export type ClientSetVisibilityResult = {
+    ok: true;
+} | {
+    ok: false;
+    errors: string[];
+    code?: string;
+    conflicts?: ClientVisibilityConflict[];
+};
+/**
  * v21：列表行的可见性投影（skills / mcp / tools 三域共用字段）。
  *
  * 宿主按「当前作用域」计算：全局视图给 `visibilityMode` / `visibleWorkspaceCount`；
@@ -985,7 +1007,13 @@ export interface OverridesApi {
         key: string;
         mode: ClientVisibilityMode;
         workspaces: Record<string, ClientWorkspaceVisibility>;
-    }): Promise<OpResult>;
+        /**
+         * v21.1：冲突解决方式（仅当宿主返回 `code:"visibility-conflicts"` 后重试时传）。
+         * - `keep`：保留冲突工作区现有的显式开启配置；
+         * - `clear`：清除这些工作区的显式开启配置（其它默认不变）。
+         */
+        resolveConflicts?: ClientVisibilityConflictResolution;
+    }): Promise<ClientSetVisibilityResult>;
 }
 /** 评分 / 测试 / 密钥解析失败的分类码（架构 §5.4）。 */
 export type JevErrorCode = "no-config" | "auth" | "rate-limit" | "overloaded" | "timeout" | "context-too-long" | "network" | "bad-request" | "empty-capabilities";

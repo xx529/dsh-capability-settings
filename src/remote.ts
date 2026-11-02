@@ -128,12 +128,10 @@ export interface PanelRpcService {
      */
     toggle(input: unknown): Promise<unknown>;
     /**
-     * 全局默认（B2 Skills / v20.2 MCP）：`{}` →
-     * `{ skills: string[], mcp: string[], filePath: string, errors? }`。
-     * 文件缺失 / 空 → 空名单；损坏 → 降级为空名单 + `errors`（可读原因）。
+     * 全局视图（v21）：`{skills, mcp, tools, visibility, filePath, errors?}`。
+     * 文件缺失 / 空 → 空名单 / 全可见；损坏 → 降级 + `errors`（可读原因）。
      */
     globalGet(): Promise<unknown>;
-    /** 全局视图（v21）：`{skills, mcp, tools, visibility, filePath, errors?}`。 */
     /**
      * 全局默认开关：`{domain:"skills"|"mcp"|"tools", key, disabled}` →
      * `{ok:true}` / `{ok:false, errors}`；写 `capability-global-overrides.json`。
@@ -141,11 +139,25 @@ export interface PanelRpcService {
      */
     globalToggle(input: unknown): Promise<unknown>;
     /**
-     * v21：写能力可见性。`{domain:"skills"|"mcp"|"tools", key, mode, workspaces}`
-     * （`workspaces` 为完整映射，整份替换）→ `{ok:true}` / `{ok:false, errors}`；
-     * 写全局文件 v2，成功后三域热应用。
+     * v21：写能力可见性（v21.1 加冲突检测/决策）。
+     *
+     * 入参 `{domain:"skills"|"mcp"|"tools", key, mode, workspaces, resolveConflicts?}`：
+     * `workspaces` 为完整映射（整份替换）；`resolveConflicts: "keep" | "clear"`
+     * 处理「本次变为不可见、但工作区显式开启」的冲突。
+     *
+     * 返回业务结果（传输层信封仍恒 `{ok:true,value}`）：
+     *   - `{ok:true}` / `{ok:true, retained:[工作区]}` / `{ok:true, cleared:[工作区]}`；
+     *   - `{ok:false, code:"visibility-conflicts", conflicts:[{workspace,projectRoot}], errors}`
+     *     —— 未传 `resolveConflicts` 且存在冲突时**不写盘**。
      */
     setVisibility(input: unknown): Promise<unknown>;
+    /**
+     * v21.1：查询某次可见性变更的冲突（确认框打开前预查询；只读、不写盘）。
+     *
+     * 入参 `{domain, key, mode?, workspaces}`（`mode` 缺省按 `all`）→
+     * `{ok:true, conflicts:[{workspace,projectRoot}]}` / `{ok:false, errors}`。
+     */
+    visibilityConflicts(input: unknown): Promise<unknown>;
   };
   /**
    * Tools 域（插件级会话开关，v13）：只读枚举 + 批量写会话开关。
@@ -274,8 +286,12 @@ export async function handleEndpoint(service: PanelRpcService, endpoint: string,
         // 全局默认开关（B2 / v21）：业务失败在 value.ok=false（信封仍恒 ok:true）。
         return { ok: true, value: await service.overrides.globalToggle(p) };
       case "overrides.setVisibility":
-        // v21 能力可见性：workspaces 为完整映射；成功后宿主三域热应用。
+        // v21/v21.1 能力可见性：workspaces 为完整映射；冲突未决时不写盘，
+        // 业务失败（code=visibility-conflicts）收在 value 里。
         return { ok: true, value: await service.overrides.setVisibility(p) };
+      case "overrides.visibilityConflicts":
+        // v21.1 冲突预查询（只读）：确认框打开前调用。
+        return { ok: true, value: await service.overrides.visibilityConflicts(p) };
       case "tools.list":
         // sessionId 缺省 = 主面板的只读视图；cwd 传入时按工作区可见性过滤并给 hiddenCount。
         return {

@@ -23,6 +23,8 @@ import type {
   ClientCapabilityVisibility,
   ClientGlobalOverrides,
   ClientOverrides,
+  ClientSetVisibilityResult,
+  ClientVisibilityConflict,
   ClientVisibilityMode,
   ClientVisibilitySets,
   ClientWorkspaceVisibility,
@@ -356,8 +358,14 @@ function initEditState(
 }
 
 /**
- * 可见范围编辑弹层：顶部模式分段 + 工作区表格（可见 checkbox + 默认开/关）。
- * 保存提交**整份** workspaces 映射（`overrides.setVisibility`）。
+ * 可见范围编辑弹层（v21.1）：
+ * - **没有模式分段**：模式在保存时由行状态推导（全可见 ⇒ all；全不可见 ⇒ none；
+ *   其余 ⇒ selected）；新工作区语义在说明文案里说清。
+ * - 工作区表格：每行 [可见 checkbox] + [默认开/关]；表头的「全选/全不选」「全部
+ *   默认开/关」是批量切换按钮（默认列只作用于可见行）。
+ * - 固定 footer + dirty 态（无改动时保存置灰且不发 RPC）。
+ * - 冲突决策：保存返回 `code:"visibility-conflicts"` 时弹二级确认框
+ *   （取消 / 保留工作区配置 keep / 清除工作区的开启配置 clear 后重试）。
  */
 export function VisibilityModal({
   api,
@@ -380,41 +388,67 @@ export function VisibilityModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [mode, setMode] = useState<ClientVisibilityMode>(visibilityModeOf(entry));
   const [edit, setEdit] = useState<Record<string, WorkspaceEditState>>(() => initEditState(entry, workspaces));
   /** 打开时的初始快照（用于 dirty 判定；弹层生命周期内不变）。 */
-  const [initial] = useState(() => ({ mode: visibilityModeOf(entry), edit: initEditState(entry, workspaces) }));
+  const [initial] = useState(() => initEditState(entry, workspaces));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  /** 冲突二级确认框的数据（非空 = 打开）；`conflictError` 是二级框内的错误位。 */
+  const [conflict, setConflict] = useState<ClientVisibilityConflict[] | undefined>(undefined);
+  const [conflictError, setConflictError] = useState<string | undefined>(undefined);
+
+  const visibleOf = (path: string): boolean => edit[path]?.visible === true;
+  const defaultOnOf = (path: string): boolean => edit[path]?.defaultEnabled ?? !globalOff;
+  const visibleWorkspaces = workspaces.filter((workspace) => visibleOf(workspace.path));
+  const allRowsVisible = workspaces.length > 0 && visibleWorkspaces.length === workspaces.length;
+  const noRowsVisible = visibleWorkspaces.length === 0;
 
   /**
-   * 状态规范化 key：与工作区顺序无关（按 workspaces 顺序遍历），等价映射即相等。
-   * mode=none 时可见性恒 false（与 buildWorkspaces 口径一致）。
+   * 保存时推导 mode（用户要求，v21.1）：所有行可见 ⇒ all；全部不可见 ⇒ none；
+   * 其余 ⇒ selected。空工作区列表按 all（等价于删除条目）。
    */
-  const stateKey = (targetMode: ClientVisibilityMode, state: Record<string, WorkspaceEditState>): string =>
-    [
-      targetMode,
-      ...workspaces.map((workspace) => {
+  const derivedMode: ClientVisibilityMode =
+    workspaces.length === 0 ? "all" : allRowsVisible ? "all" : noRowsVisible ? "none" : "selected";
+
+  /** 所有可见行的默认是否都为开（决定默认列批量按钮的方向与文案）。 */
+  const allVisibleDefaultsOn =
+    visibleWorkspaces.length > 0 && visibleWorkspaces.every((workspace) => defaultOnOf(workspace.path));
+
+  /** 状态规范化 key：按 workspaces 顺序遍历，顺序无关、等价映射即不 dirty。 */
+  const stateKey = (state: Record<string, WorkspaceEditState>): string =>
+    workspaces
+      .map((workspace) => {
         const item = state[workspace.path];
-        const visible = targetMode === "none" ? false : item?.visible === true;
+        const visible = item?.visible === true;
         const fallback = item?.defaultEnabled === undefined ? "-" : item.defaultEnabled ? "1" : "0";
         return `${workspace.path}:${visible ? 1 : 0}:${fallback}`;
-      }),
-    ].join("|");
+      })
+      .join("|");
 
   /** 有改动才允许保存（取消始终可用）。 */
-  const dirty = stateKey(mode, edit) !== stateKey(initial.mode, initial.edit);
+  const dirty = stateKey(edit) !== stateKey(initial);
 
-  const setModeAndDefaults = (next: ClientVisibilityMode) => {
-    setMode(next);
-    // 模式切换的默认可见态：全部 ⇒ 全勾选；不可见 ⇒ 全不勾；指定 ⇒ 保留当前勾选。
-    if (next === "none" || next === "all") {
-      setEdit((current) => {
-        const copy = { ...current };
-        for (const path of Object.keys(copy)) copy[path] = { ...copy[path], visible: next === "all" };
-        return copy;
-      });
-    }
+  /** 批量：可见列——按当前状态反转（半选时先全选）。 */
+  const toggleVisibleAll = () => {
+    const next = !allRowsVisible;
+    setEdit((current) => {
+      const copy = { ...current };
+      for (const workspace of workspaces) copy[workspace.path] = { ...(copy[workspace.path] ?? { visible: next }), visible: next };
+      return copy;
+    });
+  };
+
+  /** 批量：默认列——所有可见行按当前状态反转（有任一关闭则全开，全开则全关）。 */
+  const toggleDefaultAll = () => {
+    if (visibleWorkspaces.length === 0) return;
+    const next = !allVisibleDefaultsOn;
+    setEdit((current) => {
+      const copy = { ...current };
+      for (const workspace of visibleWorkspaces) {
+        copy[workspace.path] = { ...(copy[workspace.path] ?? { visible: true }), defaultEnabled: next };
+      }
+      return copy;
+    });
   };
 
   const setWorkspaceVisible = (path: string, visible: boolean) => {
@@ -426,17 +460,19 @@ export function VisibilityModal({
   };
 
   /**
-   * 提交载荷：契约 §4 的**完整映射**（每个已知工作区都显式一行）：
-   * - `visible` 恒写；
-   * - `defaultEnabled` 只在「可见且用户显式设置过」时写（不可见 / 跟随兜底不落）；
-   * - 不可见模式（none）各工作区 `{visible:false}`。
+   * 提交载荷：**完整映射**（每个已知工作区都显式一行）：
+   * - `visible` 恒写；不可见行 `visible:false`（不带 defaultEnabled）；
+   * - `defaultEnabled` 只在「可见且用户显式设置过」时写。
    */
   const buildWorkspaces = (): Record<string, ClientWorkspaceVisibility> => {
     const payload: Record<string, ClientWorkspaceVisibility> = {};
     for (const workspace of workspaces) {
       const item = edit[workspace.path];
-      if (item === undefined) continue;
-      const visible = mode === "none" ? false : item.visible;
+      if (item === undefined) {
+        payload[workspace.path] = { visible: false };
+        continue;
+      }
+      const visible = item.visible;
       const explicitDefault =
         visible && typeof item.defaultEnabled === "boolean" ? { defaultEnabled: item.defaultEnabled } : {};
       payload[workspace.path] = { visible, ...explicitDefault };
@@ -444,148 +480,209 @@ export function VisibilityModal({
     return payload;
   };
 
-  const save = async () => {
-    // 无改动时禁用按钮兜底：即使被程序触发也不发 RPC。
-    if (saving || !dirty) return;
+  /** 一次保存请求；`resolveConflicts` 用于冲突确认后的重试。 */
+  const requestSave = async (resolveConflicts?: "keep" | "clear") => {
+    if (saving || (!dirty && resolveConflicts === undefined)) return;
     setSaving(true);
-    setError(undefined);
+    const isRetry = resolveConflicts !== undefined;
+    if (isRetry) setConflictError(undefined);
+    else setError(undefined);
+    const showError = (message: string) => {
+      if (isRetry) setConflictError(message);
+      else setError(message);
+    };
     try {
-      const result = await api.overrides.setVisibility({
+      const result: ClientSetVisibilityResult = await api.overrides.setVisibility({
         domain,
         key: capabilityKey,
-        mode,
+        mode: derivedMode,
         workspaces: buildWorkspaces(),
+        ...(resolveConflicts !== undefined ? { resolveConflicts } : {}),
       });
       if (!result.ok) {
-        setError(result.errors.join("; "));
+        const conflicts = result.conflicts ?? [];
+        if (!isRetry && result.code === "visibility-conflicts" && conflicts.length > 0) {
+          // 首次保存遇到冲突：不关弹窗，弹二级确认。
+          setConflict(conflicts);
+          setConflictError(undefined);
+          return;
+        }
+        showError(result.errors.join("; "));
         return;
       }
+      setConflict(undefined);
       onSaved();
     } catch (failure) {
-      setError(String(failure instanceof Error ? failure.message : failure));
+      showError(String(failure instanceof Error ? failure.message : failure));
     } finally {
       setSaving(false);
     }
   };
 
-  const allVisible = () => {
-    setMode("all");
-    setEdit((current) => {
-      const copy = { ...current };
-      for (const path of Object.keys(copy)) copy[path] = { ...copy[path], visible: true };
-      return copy;
-    });
+  /** 关闭冲突确认框（回到主弹层继续编辑）。 */
+  const dismissConflict = () => {
+    if (saving) return;
+    setConflict(undefined);
+    setConflictError(undefined);
   };
 
+  const headerNote =
+    derivedMode === "all"
+      ? "全部工作区可见；新工作区默认可见、走兜底默认。可用表头批量按钮全选 / 全部默认开/关。"
+      : derivedMode === "selected"
+        ? "仅勾选的工作区可见；新工作区默认不可见，需手动勾选。"
+        : "不可见：工作区列表 / 对话首屏都不出现，运行时强制关闭（会话开关不能打开）；旧覆盖保留不删。";
+
   return (
-    <Modal
-      title={`可见范围 · ${name}`}
-      onClose={onClose}
-      header={
-        <>
-          <div className="skp-vis-mode-row">
-            <div className="skp-scope-seg" role="group" aria-label="可见范围">
-              {(
-                [
-                  { value: "all", label: "全部" },
-                  { value: "selected", label: "指定" },
-                  { value: "none", label: "不可见" },
-                ] as Array<{ value: ClientVisibilityMode; label: string }>
-              ).map((segment) => (
-                <button
-                  key={segment.value}
-                  type="button"
-                  className={mode === segment.value ? "skp-scope-seg-btn skp-scope-seg-btn-active" : "skp-scope-seg-btn"}
-                  aria-pressed={mode === segment.value}
-                  onClick={() => setModeAndDefaults(segment.value)}
-                >
-                  {segment.label}
-                </button>
-              ))}
-            </div>
-            <button type="button" className="skp-link-btn" onClick={allVisible}>
-              全部工作区可见
+    <>
+      <Modal
+        title={`可见范围 · ${name}`}
+        onClose={onClose}
+        header={
+          <>
+            <div className="skp-vis-modal-note">{headerNote}</div>
+            {error !== undefined && <div className="skp-error">{error}</div>}
+          </>
+        }
+        footer={
+          <>
+            <button type="button" className="skp-btn" onClick={onClose}>
+              取消
             </button>
-          </div>
-          <div className="skp-vis-modal-note">
-            {mode === "all"
-              ? "全部工作区可见；可单独隐藏某个工作区、或为每个工作区设默认开/关。新工作区默认可见、走兜底默认。"
-              : mode === "selected"
-                ? "仅勾选的工作区可见；新工作区默认不可见，需手动勾选。"
-                : "不可见：工作区列表 / 对话首屏都不出现，运行时强制关闭（会话开关不能打开）；旧覆盖保留不删。"}
-          </div>
-          {error !== undefined && <div className="skp-error">{error}</div>}
-        </>
-      }
-      footer={
-        <>
-          <button type="button" className="skp-btn" onClick={onClose}>
-            取消
-          </button>
-          <button
-            type="button"
-            className={dirty && !saving ? "skp-btn skp-btn-primary" : "skp-btn"}
-            disabled={saving || !dirty}
-            title={dirty ? "保存可见范围与每工作区默认" : "没有改动"}
-            onClick={() => void save()}
-          >
-            {saving ? "保存中…" : "保存"}
-          </button>
-        </>
-      }
-    >
-      {workspaces.length === 0 ? (
-        <div className="skp-note">还没有已知工作区；新建工作区后再来配置。</div>
-      ) : (
-        <div className="skp-vis-table" role="table" aria-label="各工作区可见性与默认">
-          <div className="skp-vis-table-head" role="row">
-            <span role="columnheader">工作区</span>
-            <span role="columnheader">可见</span>
-            <span role="columnheader">默认</span>
-          </div>
-          {workspaces.map((workspace) => {
-            const item = edit[workspace.path] ?? { visible: false };
-            const visible = mode === "none" ? false : item.visible;
-            const defaultOn = item.defaultEnabled ?? !globalOff;
-            return (
-              <div key={workspace.path} className="skp-vis-table-row" role="row" title={workspace.path}>
-                <span className="skp-vis-ws-name" role="cell">
-                  {visibilityWorkspaceTitle(workspace)}
-                </span>
-                <span role="cell">
-                  <label className="skp-vis-check">
-                    <input
-                      type="checkbox"
-                      checked={visible}
-                      disabled={mode === "none"}
-                      aria-label={`${visibilityWorkspaceTitle(workspace)} 可见`}
-                      onChange={(event) => setWorkspaceVisible(workspace.path, event.target.checked)}
-                    />
-                    <span>可见</span>
-                  </label>
-                </span>
-                <span role="cell">
-                  <label className="skp-row-toggle skp-vis-default-toggle" title="该工作区的默认开/关（工作区仍可覆盖）">
-                    <span className="skp-row-default-label">{defaultOn ? "默认开" : "默认关"}</span>
-                    <span className="skp-switch">
+            <button
+              type="button"
+              className={dirty && !saving ? "skp-btn skp-btn-primary" : "skp-btn"}
+              disabled={saving || !dirty}
+              title={dirty ? "保存可见范围与每工作区默认" : "没有改动"}
+              onClick={() => void requestSave()}
+            >
+              {saving ? "保存中…" : "保存"}
+            </button>
+          </>
+        }
+      >
+        {workspaces.length === 0 ? (
+          <div className="skp-note">还没有已知工作区；新建工作区后再来配置。</div>
+        ) : (
+          <div className="skp-vis-table" role="table" aria-label="各工作区可见性与默认">
+            <div className="skp-vis-table-head" role="row">
+              <span role="columnheader">工作区</span>
+              <span role="columnheader" className="skp-vis-col-head">
+                <span>可见</span>
+                <button
+                  type="button"
+                  className="skp-vis-batch"
+                  disabled={saving}
+                  title={allRowsVisible ? "全部不勾选（当前已全选）" : "全部勾选（半选时先全选）"}
+                  onClick={toggleVisibleAll}
+                >
+                  {allRowsVisible ? "全不选" : "全选"}
+                </button>
+              </span>
+              <span role="columnheader" className="skp-vis-col-head">
+                <span>默认</span>
+                <button
+                  type="button"
+                  className="skp-vis-batch"
+                  disabled={saving || visibleWorkspaces.length === 0}
+                  title={
+                    visibleWorkspaces.length === 0
+                      ? "没有可见工作区"
+                      : allVisibleDefaultsOn
+                        ? "所有可见工作区默认关"
+                        : "所有可见工作区默认开"
+                  }
+                  onClick={toggleDefaultAll}
+                >
+                  {allVisibleDefaultsOn ? "全部默认关" : "全部默认开"}
+                </button>
+              </span>
+            </div>
+            {workspaces.map((workspace) => {
+              const visible = visibleOf(workspace.path);
+              const defaultOn = defaultOnOf(workspace.path);
+              return (
+                <div key={workspace.path} className="skp-vis-table-row" role="row" title={workspace.path}>
+                  <span className="skp-vis-ws-name" role="cell">
+                    {visibilityWorkspaceTitle(workspace)}
+                  </span>
+                  <span role="cell">
+                    <label className="skp-vis-check">
                       <input
                         type="checkbox"
-                        role="switch"
-                        aria-label={`${visibilityWorkspaceTitle(workspace)} 默认开启`}
-                        checked={defaultOn}
-                        disabled={mode === "none" || !visible || saving}
-                        onChange={(event) => setWorkspaceDefault(workspace.path, event.target.checked)}
+                        checked={visible}
+                        disabled={saving}
+                        aria-label={`${visibilityWorkspaceTitle(workspace)} 可见`}
+                        onChange={(event) => setWorkspaceVisible(workspace.path, event.target.checked)}
                       />
-                      <span className="skp-switch-track" />
-                    </span>
-                  </label>
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </Modal>
-  );
+                      <span>可见</span>
+                    </label>
+                  </span>
+                  <span role="cell">
+                    <label className="skp-row-toggle skp-vis-default-toggle" title="该工作区的默认开/关（工作区仍可覆盖）">
+                      <span className="skp-row-default-label">{defaultOn ? "默认开" : "默认关"}</span>
+                      <span className="skp-switch">
+                        <input
+                          type="checkbox"
+                          role="switch"
+                          aria-label={`${visibilityWorkspaceTitle(workspace)} 默认开启`}
+                          checked={defaultOn}
+                          disabled={saving || !visible}
+                          onChange={(event) => setWorkspaceDefault(workspace.path, event.target.checked)}
+                        />
+                        <span className="skp-switch-track" />
+                      </span>
+                    </label>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Modal>
 
+      {/* 冲突二级确认框（独立 Modal：固定头/底、列表可滚；关闭只回主弹层） */}
+      {conflict !== undefined && (
+        <Modal
+          title="可见性冲突"
+          onClose={dismissConflict}
+          header={
+            <div className="skp-note">以下工作区显式开启了该能力，但本次将设为不可见：</div>
+          }
+          footer={
+            <>
+              <button type="button" className="skp-btn" disabled={saving} onClick={dismissConflict}>
+                取消
+              </button>
+              <button type="button" className="skp-btn" disabled={saving} onClick={() => void requestSave("keep")}>
+                {saving ? "处理中…" : "保留工作区配置"}
+              </button>
+              <button
+                type="button"
+                className="skp-btn skp-btn-danger-ghost"
+                disabled={saving}
+                title="移除这些工作区的显式开启配置；其它默认不变"
+                onClick={() => void requestSave("clear")}
+              >
+                清除工作区的开启配置
+              </button>
+            </>
+          }
+        >
+          <ul className="skp-vis-conflict-list" aria-label="冲突工作区">
+            {conflict.map((item) => (
+              <li key={`${item.workspace}|${item.projectRoot}`} className="skp-vis-conflict-row" title={item.projectRoot}>
+                <span className="skp-vis-ws-name">{visibilityWorkspaceTitle({ path: item.workspace })}</span>
+                {item.projectRoot !== item.workspace && <span className="skp-vis-conflict-root">{item.projectRoot}</span>}
+              </li>
+            ))}
+          </ul>
+          <div className="skp-note">
+            「保留工作区配置」保留这些工作区现有的显式开启；「清除工作区的开启配置」会移除它们的显式开启，其它默认不变。
+          </div>
+          {conflictError !== undefined && <div className="skp-error">{conflictError}</div>}
+        </Modal>
+      )}
+    </>
+  );
 }

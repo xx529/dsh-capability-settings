@@ -844,6 +844,8 @@ export type {
   OverridesSet,
   OverridesStore,
   OverridesView,
+  VisibilityConflict,
+  VisibilitySetResult,
 } from "./overrides/types.js";
 export type { OverridesManager } from "./overrides/manager.js";
 

@@ -69,7 +69,13 @@ import {
   visibleIn,
   visibleWorkspaceCount,
 } from "../shared/visibility.js";
-import type { VisibilityDomain, VisibilitySets, WorkspaceTarget } from "../shared/visibility.js";
+import type {
+  CapabilityVisibility,
+  VisibilityDomain,
+  VisibilitySets,
+  WorkspaceTarget,
+  WorkspaceVisibility,
+} from "../shared/visibility.js";
 import {
   DOMAIN_KEYS,
   domainSetOf,
@@ -96,6 +102,8 @@ import type {
   OverridesProjectEntry,
   OverridesSet,
   OverridesView,
+  VisibilityConflict,
+  VisibilitySetResult,
 } from "./types.js";
 
 /** 管理服务的构造依赖。 */
@@ -531,33 +539,20 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
   }
 
   /**
-   * 写某个能力的**可见性**（v21 `overrides.setVisibility`）。
+   * 解析可见性 `workspaces` 映射（`setVisibility` / `visibilityConflicts` 共用）。
    *
-   * `workspaces` 是完整映射（整份替换）：key = 工作区 path（**原样，不做
-   * projectRoot 归一化**；运行时按「projectRoot 精确 → path 精确 → cwd 最长前缀」
-   * 匹配）。`mode=all` 且 workspaces 为空 ⇒ 删除该条目（等价缺省全可见）。
-   * 读→改→写按全局文件串行化；坏 visibility 显式报错（严格读，不静默丢配置）。
+   * @returns 合法映射；非法时 `workspaces` 缺省、`errors` 给出可读原因
    */
-  async function setVisibility(input: GlobalVisibilityInput | Record<string, unknown>): Promise<OverrideOpResult> {
-    const domain = (input as { domain?: unknown }).domain;
-    if (domain !== "skills" && domain !== "mcp" && domain !== "tools") {
-      return { ok: false, errors: [`visibility only supports the "skills" / "mcp" / "tools" domains (got "${String(domain)}")`] };
+  function parseVisibilityWorkspaces(raw: unknown): {
+    workspaces?: Record<string, WorkspaceVisibility>;
+    errors: string[];
+  } {
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+      return { errors: ['"workspaces" must be an object'] };
     }
-    const rawKey = (input as { key?: unknown }).key;
-    const key = typeof rawKey === "string" ? rawKey.trim() : "";
-    if (key.length === 0) return { ok: false, errors: ["key must not be empty"] };
-    if (key.length > 256) return { ok: false, errors: [`invalid capability key "${key}": too long (max 256)`] };
-    const mode = (input as { mode?: unknown }).mode;
-    if (mode !== "all" && mode !== "selected" && mode !== "none") {
-      return { ok: false, errors: ['"mode" must be "all" | "selected" | "none"'] };
-    }
-    const rawWorkspaces = (input as { workspaces?: unknown }).workspaces;
-    if (rawWorkspaces === null || typeof rawWorkspaces !== "object" || Array.isArray(rawWorkspaces)) {
-      return { ok: false, errors: ['"workspaces" must be an object'] };
-    }
-    const workspaces: Record<string, { visible?: boolean; defaultEnabled?: boolean }> = {};
+    const workspaces: Record<string, WorkspaceVisibility> = {};
     const errors: string[] = [];
-    for (const [rawWorkspace, rawEntry] of Object.entries(rawWorkspaces as Record<string, unknown>)) {
+    for (const [rawWorkspace, rawEntry] of Object.entries(raw as Record<string, unknown>)) {
       const workspace = rawWorkspace.trim();
       if (workspace.length === 0) {
         errors.push("workspace key must not be empty");
@@ -570,25 +565,221 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
       }
       workspaces[workspace] = entry;
     }
-    if (errors.length > 0) return { ok: false, errors };
+    return errors.length > 0 ? { errors } : { workspaces, errors };
+  }
+
+  /** 归一后的可见性条目；`mode=all` + 空 workspaces ⇒ undefined（等价缺省全可见）。 */
+  function targetVisibilityOf(
+    mode: "all" | "selected" | "none",
+    workspaces: Record<string, WorkspaceVisibility>,
+  ): CapabilityVisibility | undefined {
+    return mode === "all" && Object.keys(workspaces).length === 0 ? undefined : { mode, workspaces };
+  }
+
+  /**
+   * 找出「本次可见性变更会把某工作区变为不可见、而该工作区的项目覆盖里**显式
+   * 开启**了该能力」的冲突（v21.1）。
+   *
+   * - 只检测**显式开启**（`enabledSkills` / `enabledMcp` / `enabledTools` 含该 key）；
+   *   工作区默认关闭（`skills` / `mcp` / `tools` 禁用名单）不算冲突；
+   * - `mode=none`（或 selected 未列 / `visible:false`）时按 `visibleIn` 的同一口径
+   *   逐工作区判定，天然覆盖「全部工作区」与「单工作区隐藏」；
+   * - 项目存储缺失 / 损坏静默跳过（不阻塞可见性写入，也不误报）。
+   */
+  async function conflictsFor(
+    domain: VisibilityDomain,
+    key: string,
+    target: CapabilityVisibility | undefined,
+  ): Promise<VisibilityConflict[]> {
+    if (target === undefined) return [];
+    // `visibleIn` 只读该 key 的条目，用「只有目标条目」的临时集合即可。
+    const sets = emptyVisibilitySets();
+    sets[domain][key] = target;
+    let store: Awaited<ReturnType<typeof readOverridesStore>>;
+    try {
+      store = await readOverridesStore(overridesStoreFile(deps.dshHome));
+    } catch {
+      return [];
+    }
+    const conflicts: VisibilityConflict[] = [];
+    for (const [projectRoot, entry] of Object.entries(store.projects)) {
+      if (!projectEnabledOf(setOf(entry), domain).includes(key)) continue;
+      const targetWorkspace: WorkspaceTarget = {
+        projectRoot,
+        ...(typeof entry.cwd === "string" && entry.cwd.length > 0 ? { cwd: entry.cwd } : {}),
+      };
+      if (visibleIn(sets, domain, key, targetWorkspace)) continue;
+      conflicts.push({
+        workspace: typeof entry.cwd === "string" && entry.cwd.length > 0 ? entry.cwd : projectRoot,
+        projectRoot,
+      });
+    }
+    conflicts.sort((a, b) => a.workspace.localeCompare(b.workspace));
+    return conflicts;
+  }
+
+  /**
+   * 把项目条目回写为给定声明（只动六名单字段；空名单删除，条目全空由
+   * `writeOverridesStore` 统一删除，`cwd` 等其它字段保持原值）。
+   */
+  function applyProjectSet(entry: OverridesProjectEntry, set: OverridesSet): void {
+    const fields = ["mcp", "skills", "tools", "enabledSkills", "enabledMcp", "enabledTools"] as const;
+    for (const field of fields) {
+      const values = set[field];
+      if (values.length > 0) entry[field] = values;
+      else delete entry[field];
+    }
+  }
+
+  /**
+   * 从项目的「显式开启」名单里移除某能力（`resolveConflicts:"clear"` 用）。
+   *
+   * 只清 `enabledSkills` / `enabledMcp` / `enabledTools` 里对应的 key：项目默认
+   * 关闭名单（`skills` / `mcp` / `tools`）与其它能力条目一律不动；条目六名单全空
+   * 时按既有规则整条删除。项目存储坏文件显式报错（不静默丢弃用户数据）。
+   */
+  async function clearProjectEnabled(
+    domain: VisibilityDomain,
+    key: string,
+    conflicts: readonly VisibilityConflict[],
+  ): Promise<{ cleared: string[]; errors: string[] }> {
+    const storeFile = overridesStoreFile(deps.dshHome);
+    try {
+      return await withFileLock(storeFile, async () => {
+        const store = await readOverridesStore(storeFile);
+        const cleared: string[] = [];
+        for (const conflict of conflicts) {
+          const entry = store.projects[conflict.projectRoot];
+          if (entry === undefined) continue;
+          const set = setOf(entry);
+          const enabled = projectEnabledOf(set, domain);
+          if (!enabled.includes(key)) continue;
+          const next = withProjectLists(
+            set,
+            domain,
+            projectDisabledOf(set, domain),
+            enabled.filter((item) => item !== key),
+          );
+          applyProjectSet(entry, next);
+          entry.updatedAt = Date.now();
+          cleared.push(conflict.workspace);
+        }
+        if (cleared.length > 0) await writeOverridesStore(storeFile, store);
+        return { cleared, errors: [] };
+      });
+    } catch (error) {
+      return { cleared: [], errors: [errMessage(error)] };
+    }
+  }
+
+  /**
+   * 写某个能力的**可见性**（v21 `overrides.setVisibility`；v21.1 加冲突检测）。
+   *
+   * `workspaces` 是完整映射（整份替换）：key = 工作区 path（**原样，不做
+   * projectRoot 归一化**；运行时按「projectRoot 精确 → path 精确 → cwd 最长前缀」
+   * 匹配）。`mode=all` 且 workspaces 为空 ⇒ 删除该条目（等价缺省全可见）。
+   * 读→改→写按全局文件串行化；坏 visibility 显式报错（严格读，不静默丢配置）。
+   *
+   * **冲突检测（v21.1）**：本次会把某工作区变为不可见、而该工作区项目覆盖里显式
+   * 开启该能力时：
+   *   - 未传 `resolveConflicts` ⇒ **不写盘**，返回
+   *     `{ok:false, code:"visibility-conflicts", conflicts}`；
+   *   - `keep` ⇒ 照常写盘，返回 `retained`（保留显式开启）；
+   *   - `clear` ⇒ 写盘并从这些工作区移除对应 `enabled*` 项，返回 `cleared`。
+   */
+  async function setVisibility(
+    input: GlobalVisibilityInput | Record<string, unknown>,
+  ): Promise<VisibilitySetResult> {
+    const domain = (input as { domain?: unknown }).domain;
+    if (domain !== "skills" && domain !== "mcp" && domain !== "tools") {
+      return { ok: false, errors: [`visibility only supports the "skills" / "mcp" / "tools" domains (got "${String(domain)}")`] };
+    }
+    const rawKey = (input as { key?: unknown }).key;
+    const key = typeof rawKey === "string" ? rawKey.trim() : "";
+    if (key.length === 0) return { ok: false, errors: ["key must not be empty"] };
+    if (key.length > 256) return { ok: false, errors: [`invalid capability key "${key}": too long (max 256)`] };
+    const mode = (input as { mode?: unknown }).mode;
+    if (mode !== "all" && mode !== "selected" && mode !== "none") {
+      return { ok: false, errors: ['"mode" must be "all" | "selected" | "none"'] };
+    }
+    const parsed = parseVisibilityWorkspaces((input as { workspaces?: unknown }).workspaces);
+    if (parsed.workspaces === undefined) return { ok: false, errors: parsed.errors };
+    const workspaces = parsed.workspaces;
+    const resolveConflicts = (input as { resolveConflicts?: unknown }).resolveConflicts;
+    if (resolveConflicts !== undefined && resolveConflicts !== "keep" && resolveConflicts !== "clear") {
+      return { ok: false, errors: ['"resolveConflicts" must be "keep" | "clear"'] };
+    }
+    const target = targetVisibilityOf(mode, workspaces);
 
     const file = globalOverridesFile(deps.dshHome);
     try {
       return await withFileLock(file, async () => {
         const current = await readGlobalOverrides(file);
+        // 冲突按「本次目标条目」判定（与即将写入的可见性一致）。
+        const conflicts = await conflictsFor(domain, key, target);
+        if (conflicts.length > 0 && resolveConflicts === undefined) {
+          return {
+            ok: false,
+            code: "visibility-conflicts" as const,
+            conflicts,
+            errors: [
+              `可见性变更与 ${conflicts.length} 个工作区的显式开启冲突（${conflicts
+                .map((conflict) => conflict.workspace)
+                .join("、")}）；请选择「保留」或「清除」工作区显式开启后再提交`,
+            ],
+          };
+        }
         const visibility: VisibilitySets = {
           skills: { ...current.visibility.skills },
           mcp: { ...current.visibility.mcp },
           tools: { ...current.visibility.tools },
         };
-        if (mode === "all" && Object.keys(workspaces).length === 0) delete visibility[domain][key];
-        else visibility[domain][key] = { mode, workspaces };
+        if (target === undefined) delete visibility[domain][key];
+        else visibility[domain][key] = target;
         await writeGlobalOverrides(file, { ...current, visibility });
+        // 全局文件已写入（请求的可见性已生效）；随后按策略处理工作区显式开启。
+        if (resolveConflicts === "clear" && conflicts.length > 0) {
+          const cleared = await clearProjectEnabled(domain, key, conflicts);
+          if (cleared.errors.length > 0) {
+            return { ok: false, errors: ["可见性已写入，但清除工作区显式开启失败：", ...cleared.errors] };
+          }
+          return { ok: true, cleared: cleared.cleared };
+        }
+        if (resolveConflicts === "keep" && conflicts.length > 0) {
+          return { ok: true, retained: conflicts.map((conflict) => conflict.workspace) };
+        }
         return { ok: true };
       });
     } catch (error) {
       return { ok: false, errors: [errMessage(error)] };
     }
+  }
+
+  /**
+   * 查询某次可见性变更会引发的冲突（v21.1，RPC `overrides.visibilityConflicts`）。
+   *
+   * 入参 `{domain, key, mode?, workspaces}`：`mode` 缺省按 `all`（确认框打开前用
+   * 当前草稿的 mode/workspaces 预查询；比较的是「写入后是否可见」）。只读、不写盘。
+   */
+  async function visibilityConflicts(
+    input: GlobalVisibilityInput | Record<string, unknown>,
+  ): Promise<{ ok: true; conflicts: VisibilityConflict[] } | { ok: false; errors: string[] }> {
+    const domain = (input as { domain?: unknown }).domain;
+    if (domain !== "skills" && domain !== "mcp" && domain !== "tools") {
+      return { ok: false, errors: [`visibility only supports the "skills" / "mcp" / "tools" domains (got "${String(domain)}")`] };
+    }
+    const rawKey = (input as { key?: unknown }).key;
+    const key = typeof rawKey === "string" ? rawKey.trim() : "";
+    if (key.length === 0) return { ok: false, errors: ["key must not be empty"] };
+    const rawMode = (input as { mode?: unknown }).mode;
+    const mode = rawMode === undefined ? "all" : rawMode;
+    if (mode !== "all" && mode !== "selected" && mode !== "none") {
+      return { ok: false, errors: ['"mode" must be "all" | "selected" | "none"'] };
+    }
+    const parsed = parseVisibilityWorkspaces((input as { workspaces?: unknown }).workspaces);
+    if (parsed.workspaces === undefined) return { ok: false, errors: parsed.errors };
+    const conflicts = await conflictsFor(domain as VisibilityDomain, key, targetVisibilityOf(mode, parsed.workspaces));
+    return { ok: true, conflicts };
   }
 
   /** 翻转一个清单的成员关系（先排序，保持落盘稳定）。 */
@@ -745,6 +936,7 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
     globalToggle,
     globalToggleMany,
     setVisibility,
+    visibilityConflicts,
     visibilitySets,
     visibilityKeys,
     invisibleKeys,
