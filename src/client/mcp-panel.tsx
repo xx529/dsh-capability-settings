@@ -610,12 +610,16 @@ export function McpView({
         runtimeServers: runtime.servers,
         runtimeHiddenCount: runtime.hiddenCount ?? 0,
         globalOverrides,
+        projectRoot: list.projectRoot,
+        projectFile: list.projectFile,
       };
     },
     [api, mcpApi, workspace],
     // v21.3：按作用域缓存，切回已访问作用域时同步出旧列表再后台刷新。
     { cacheKey: `mcp:${workspace ?? "global"}` },
   );
+  /** v21.1：项目级配置实际归属的项目根（同根工作区共享）。 */
+  const projectRootName = data?.projectRoot !== undefined ? baseName(data.projectRoot) : undefined;
   const servers = data?.servers ?? [];
   const listErrors = data?.listErrors ?? [];
   const runtimeServers = data?.runtimeServers ?? [];
@@ -979,7 +983,11 @@ export function McpView({
       <div className="skp-group-scroll skp-group-scroll-plain">
         {visibleProject.length > 0 && (
           <>
-            {renderGroupHead(`本项目 · ${projectName ?? "工作区"}`, projectServers.length, "工作区独有")}
+            {renderGroupHead(
+              projectRootName !== undefined ? `项目配置（项目根 ${projectRootName}）` : `本项目 · ${projectName ?? "工作区"}`,
+              projectServers.length,
+              projectRootName !== undefined ? "同根工作区共享" : "工作区独有",
+            )}
             {renderServerScroll(visibleProject, "本项目 MCP")}
           </>
         )}
@@ -1117,6 +1125,8 @@ export function McpView({
           scope={scope === "global" ? "global" : "project"}
           workspace={workspace}
           projectName={projectName}
+          projectRoot={data?.projectRoot}
+          projectFile={data?.projectFile}
           onClose={() => setAddOpen(false)}
           onMutated={() => reload({ silent: true })}
         />
@@ -2145,15 +2155,20 @@ function McpAddDialog({
   scope,
   workspace,
   projectName,
+  projectRoot,
+  projectFile,
   onClose,
   onMutated,
 }: {
   api: McpApi;
   servers: ClientMcpServer[];
-  /** 固定落点：global = ~/.agents/mcp.json；project = <工作区>/.mcp.json。 */
+  /** 固定落点：global = ~/.agents/mcp.json；project = <项目根>/.mcp.json（同根工作区共享）。 */
   scope: McpScope;
   workspace?: string;
   projectName?: string;
+  /** v21.1：宿主解析出的项目根 / 项目级配置文件真实路径（缺失时回退旧展示）。 */
+  projectRoot?: string;
+  projectFile?: string;
   onClose(): void;
   /** 任意写操作成功后刷新列表（不关闭弹窗）。 */
   onMutated(): void;
@@ -2161,7 +2176,14 @@ function McpAddDialog({
   const [tab, setTab] = useState<"form" | "json">("form");
   const isGlobal = scope === "global";
   const title = isGlobal ? "添加 MCP 到全局" : `添加 MCP 到工作区 ${projectName ?? "工作区"}`;
-  const targetPath = isGlobal ? "~/.agents/mcp.json" : `${workspace ?? "<工作区>"}/.mcp.json`;
+  const targetPath = isGlobal
+    ? "~/.agents/mcp.json"
+    : (projectFile ?? `${workspace ?? "<工作区>"}/.mcp.json`);
+  const projectNote = isGlobal
+    ? "仅此作用域生效 · 与当前对话无关"
+    : projectRoot !== undefined
+      ? `项目根 ${projectRoot} · 同根工作区共享`
+      : "项目级配置 · 与项目根下其它工作区共享";
   return (
     <Modal title={title} onClose={onClose}>
       {/* 固定落点卡：作用域徽章 + 写入路径 + 与当前对话无关。 */}
@@ -2174,7 +2196,7 @@ function McpAddDialog({
           <span className={isGlobal ? "skp-tag skp-tag-global" : "skp-tag skp-tag-project"}>
             {isGlobal ? "全局" : `工作区 ${projectName ?? "工作区"}`}
           </span>
-          <span className="skp-landing-note">仅此作用域生效 · 与当前对话无关</span>
+          <span className="skp-landing-note">{projectNote}</span>
           <span className="skp-detail-head-spacer" />
           <span className="skp-landing-hint">要换落点？先切换顶部作用域</span>
         </div>

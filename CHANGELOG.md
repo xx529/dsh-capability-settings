@@ -3,6 +3,21 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.10.6] - 2026-11-02
+
+### 修复
+
+- **MCP「添加」弹窗显示了错误的落点路径**：项目级 MCP 实际写入 `<项目根>/.mcp.json`
+  （项目根 = 从工作区向上找到的第一个含 `.git` / `.dsh` / `.agents` / `.claude` /
+  `dsh.json` 的目录，同根下的多个工作区共享），但弹窗原来显示 `<工作区>/.mcp.json`。
+  现在宿主 `mcp.list` 返回 `projectRoot` / `projectFile`，弹窗显示真实路径并注明
+  「项目根 … · 同根工作区共享」；项目分组头在项目根与工作区不一致时也显示
+  「项目配置（项目根 …）」。
+
+### 验证
+
+- `npx tsc --noEmit` / `pnpm build` → 0；v21 UI 24/24、v20.2 UI 9/9。
+
 ## [1.10.5] - 2026-11-02
 
 ### 修复

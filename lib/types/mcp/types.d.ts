@@ -132,6 +132,13 @@ export interface McpListResult {
      * 全局视图缺省 0。
      */
     hiddenCount?: number;
+    /**
+     * 工作区视图的**项目根**（从 cwd 向上找到的第一个含 .git/.dsh/.agents/.claude/dsh.json 的目录）。
+     * 项目级 MCP 落在 `<项目根>/.mcp.json`，同项目根下的多个工作区共享；全局视图缺省。
+     */
+    projectRoot?: string;
+    /** 工作区视图的项目级 MCP 配置文件真实路径（= `<项目根>/.mcp.json`）；全局视图缺省。 */
+    projectFile?: string;
 }
 /** 一条 server 在一个 session 内的实时挂载状态。 */
 export type McpMountState = "mounted" | "failed" | "conflict";

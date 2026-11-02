@@ -301,7 +301,12 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
     }
     const views = [...projectRows, ...globalRows];
     views.sort((a, b) => a.key.localeCompare(b.key));
-    return { servers: views, errors, hiddenCount };
+    return {
+      servers: views,
+      errors,
+      hiddenCount,
+      ...(cwd !== undefined ? { projectRoot: findProjectRoot(cwd), projectFile: projectMcpFile(cwd) } : {}),
+    };
   }
 
   /** 新增或整体覆盖一条 server（校验失败不落盘），成功后重挂。 */

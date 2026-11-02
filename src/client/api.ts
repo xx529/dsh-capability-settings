@@ -413,6 +413,10 @@ export interface ClientMcpList {
    * 面板据此提示「另有 N 个能力未对此外工作区开放」。
    */
   hiddenCount?: number;
+  /** v21.1：工作区视图的项目根（项目级配置的实际归属目录；全局视图缺省）。 */
+  projectRoot?: string;
+  /** v21.1：项目级 MCP 配置文件真实路径（`<项目根>/.mcp.json`；全局视图缺省）。 */
+  projectFile?: string;
 }
 
 /** 一条 server 在一个 session 内的挂载状态。 */
