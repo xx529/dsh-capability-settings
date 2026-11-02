@@ -104,7 +104,7 @@ danger-full-access 审批重试同一条命令即可。手动兜底通道仍是 
 | `src/session-state.ts` | 会话级开关持久化（`<dshHome>/dsh-capability-settings/session-capabilities.json`：原子写 + 文件锁 + 懒加载 + 两阶段对账；Skills / MCP / Tools / 派生继承共用一个实例） |
 | `src/derive/manager.ts` | 派生继承（spawn-time snapshot）：`agent/created` 且 `source=startup` 时按父会话 `deriveMode` 把三域显式覆盖复制到 child 记录（或只写工作区快照）；早于三个域注册 |
 | `src/session-state-reconcile.ts` | 孤儿记录对账调度（启动后 / 每 24h 存在性校验；`session/disposed` 只标记不删；持久化服务缺失/抛错一律保留） |
-| `src/shared/` | 通用：原子写、文件锁、项目根探测、agents home、JSON 配置、skill 定位/来源；`visibility.ts` = 能力可见性/每工作区默认纯计算（v21） |
+| `src/shared/` | 通用：原子写、文件锁、工作区根（= 项目根）解析、agents home、JSON 配置、skill 定位/来源；`visibility.ts` = 能力可见性/每工作区默认纯计算（v21） |
 
 RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒为 `{ ok: true, value }`；
 业务失败必须包成 `value: { ok: false, errors: [...] }`，**不能**直接返回通道层失败信封，
@@ -120,9 +120,10 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
 
 - **agents home**：显式配置 → `DSH_AGENTS_HOME` → `~/.agents`（旧位置 `~/.dsh`、
   `~/.claude` 只读兼容）。见 `src/shared/agents-home.ts`。
-- **项目根**：从 cwd 向上找第一个含 `.git` / `.dsh` / `.agents` / `.claude` / `dsh.json`
-  的目录；用户主目录永不当作项目根；找不到则回退原 cwd。见 `src/shared/project-root.ts`。
-- **配置文件**：全局 `~/.agents/mcp.json`、项目 `<项目根>/.mcp.json`；skills 目录；
+- **项目根 = 工作区目录本身**（v2.0 起）：不再向上探测 `.git` / `.dsh` / `.agents` /
+  `.claude` / `dsh.json`；项目级配置全部落在当前工作区目录，同根祖先目录的旧配置
+  **不再读取、不迁移**。见 `src/shared/project-root.ts`。
+- **配置文件**：全局 `~/.agents/mcp.json`、项目 `<工作区>/.mcp.json`；skills 目录；
   `quick-messages.json`；项目级「全局能力引用」`capability-imports.json`（导入/引用）。
 - **能力全局默认 + 可见性（v20.1 B2 / v20.2 MCP / v21 三域）**：
   `<dshHome>/dsh-capability-settings/capability-global-overrides.json`
@@ -133,7 +134,7 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
   `enabledSkills` / `enabledMcp` / `enabledTools` 重新打开；项目自己的条目
   （`.mcp.json` / 项目技能 / 项目引用）**不做可见性**。
 - **项目级「默认关闭」统一存储**：`<dshHome>/dsh-capability-settings/capability-overrides.json`
-  （`src/overrides/*`；一个文件按**项目根**分 key：`projects.<项目根>.mcp` /
+  （`src/overrides/*`；一个文件按**工作区目录**分 key：`projects.<工作区>.mcp` /
   `.skills`（禁用）/ `.enabledSkills`（重新打开），条目带 `updatedAt` / 最近 `cwd`；
   文件权限 0600）。旧项目内 `.agents/capability-overrides.json`（兼容 `.dsh` / `.claude`）
   **只读兼容**，首次写入时并入统一存储并删除旧文件；**不要把声明再写回项目仓库**。
@@ -163,7 +164,7 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
    `status().settling` + 面板静默轮询收敛。
 4. **「默认关闭」= 项目级 overrides**：面板每行的「默认」开关写统一存储
    `<dshHome>/dsh-capability-settings/capability-overrides.json` 里
-   `projects.<项目根>.mcp` 列表（旧项目内 `.agents/capability-overrides.json` 只读
+   `projects.<工作区>.mcp` 列表（旧项目内 `.agents/capability-overrides.json` 只读
    兼容，首次写入时迁移删除）；新建对话按它来。
    **「当前对话」开关按会话落盘**：内存镜像 `loader.sessionToggles`（键
    `project:<key>` / `server:<serverName>`），磁盘在

@@ -618,8 +618,6 @@ export function McpView({
     // v21.3：按作用域缓存，切回已访问作用域时同步出旧列表再后台刷新。
     { cacheKey: `mcp:${workspace ?? "global"}` },
   );
-  /** v21.1：项目级配置实际归属的项目根（同根工作区共享）。 */
-  const projectRootName = data?.projectRoot !== undefined ? baseName(data.projectRoot) : undefined;
   const servers = data?.servers ?? [];
   const listErrors = data?.listErrors ?? [];
   const runtimeServers = data?.runtimeServers ?? [];
@@ -983,11 +981,7 @@ export function McpView({
       <div className="skp-group-scroll skp-group-scroll-plain">
         {visibleProject.length > 0 && (
           <>
-            {renderGroupHead(
-              projectRootName !== undefined ? `项目配置（项目根 ${projectRootName}）` : `本项目 · ${projectName ?? "工作区"}`,
-              projectServers.length,
-              projectRootName !== undefined ? "同根工作区共享" : "工作区独有",
-            )}
+            {renderGroupHead(`本项目 · ${projectName ?? "工作区"}`, projectServers.length, "工作区独有")}
             {renderServerScroll(visibleProject, "本项目 MCP")}
           </>
         )}
@@ -2178,12 +2172,8 @@ function McpAddDialog({
   const title = isGlobal ? "添加 MCP 到全局" : `添加 MCP 到工作区 ${projectName ?? "工作区"}`;
   const targetPath = isGlobal
     ? "~/.agents/mcp.json"
-    : (projectFile ?? `${workspace ?? "<工作区>"}/.mcp.json`);
-  const projectNote = isGlobal
-    ? "仅此作用域生效 · 与当前对话无关"
-    : projectRoot !== undefined
-      ? `项目根 ${projectRoot} · 同根工作区共享`
-      : "项目级配置 · 与项目根下其它工作区共享";
+    : `${workspace ?? "<工作区>"}/.mcp.json`;
+  const projectNote = "仅此作用域生效 · 与当前对话无关";
   return (
     <Modal title={title} onClose={onClose}>
       {/* 固定落点卡：作用域徽章 + 写入路径 + 与当前对话无关。 */}

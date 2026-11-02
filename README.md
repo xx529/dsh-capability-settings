@@ -62,19 +62,19 @@ Skills / MCP / Tools（Tools 以插件为单元），一次请求批量打 0–1
 | 配置 | 写入目标 | 读取兼容（旧位置） |
 |---|---|---|
 | **能力全局默认 / 可见性**（v20.1 B2 Skills、v20.2 MCP、v21 扩到 Tools 与按工作区可见性） | `<dshHome>/dsh-capability-settings/capability-global-overrides.json`（v2：`{"version":2,"skills":[…],"mcp":[…],"tools":[…],"visibility":{"skills|mcp|tools":{"<name>":{"mode":"all|selected|none","workspaces":{"<workspace path>":{"visible":true,"defaultEnabled":false}}}}}}`；空名单/空 visibility 不落字段；目录 `700` / 文件 `600`、原子写 + 文件锁；v1 文件读取兼容 = 全部可见；不改技能文件 / 不改注入方配置、不卸载实例） | — |
-| 项目级「默认关闭」声明（MCP 面板的「默认」开关 + Skills / Tools 工作区开关；B2 增 `enabledSkills`、v20.2 增 `enabledMcp`、v21 增 `tools`/`enabledTools`） | `<dshHome>/dsh-capability-settings/capability-overrides.json`（一个文件按**项目根**分 key：`projects.<项目根>.mcp` / `.skills` / `.tools`（禁用）/ `.enabledSkills` / `.enabledMcp` / `.enabledTools`（重新打开）） | 旧项目内 `.agents/capability-overrides.json`（兼容 `.dsh` → `.claude`）：只读兼容，首次写入时把内容并入统一存储并删除旧文件 |
-| 项目级「全局能力引用」声明（MCP 的「导入到本项目」） | `<项目根>/.agents/capability-imports.json` | — |
+| 项目级「默认关闭」声明（MCP 面板的「默认」开关 + Skills / Tools 工作区开关；B2 增 `enabledSkills`、v20.2 增 `enabledMcp`、v21 增 `tools`/`enabledTools`） | `<dshHome>/dsh-capability-settings/capability-overrides.json`（一个文件按**工作区目录**分 key：`projects.<工作区>...` / `.skills` / `.tools`（禁用）/ `.enabledSkills` / `.enabledMcp` / `.enabledTools`（重新打开）） | 旧项目内 `.agents/capability-overrides.json`（兼容 `.dsh` → `.claude`）：只读兼容，首次写入时把内容并入统一存储并删除旧文件 |
+| 项目级「全局能力引用」声明（MCP 的「导入到本项目」） | `<工作区>/.agents/capability-imports.json` | — |
 | 会话级能力开关（Skills / MCP / Tools 三域 + 派生继承设置，按 sessionId） | `<dshHome>/dsh-capability-settings/session-capabilities.json`（`version: 1`，记录内 `skills` / `mcp` / `tools` / `deriveMode` / `derivedMode` / `derivedFrom` / `derivedAt`） | — |
 | Tools 归属扫描缓存（自动发现） | `<dshHome>/dsh-capability-settings/tool-attribution.json`（`version: 1`；包名+version+mtime+宿主版本失效；目录 `700` / 文件 `600`、原子写 + 锁；损坏自动重建） | — |
 | Tools **全局默认**（能力面板 Tools 页开关；所有会话 / 新会话） | 新写入：`capability-global-overrides.json` 的 `tools` 名单（v21）；旧文件 `<dshHome>/dsh-capability-settings/tools-global.json`（`{"version":1,"disabled":["<unit>",…]}`）**只读合并**，缺省 = 全部启用 | — |
 | 全局 MCP 服务器 | `~/.agents/mcp.json` | `~/.dsh` → `~/.claude` |
 | Skills（项目/全局） | `.agents/skills`、`~/.agents/skills` | `.dsh/skills`（可写）、`.claude/skills`（只读展示） |
-| 项目 MCP 服务器 | `<项目根>/.mcp.json`（Claude Code 标准，位置不变） | — |
+| 项目 MCP 服务器 | `<工作区>/.mcp.json`（Claude Code 标准） | — |
 | 快捷消息（**已下线**） | **不再读写** | 旧文件 `<项目根>/.agents/quick-messages.json`、`~/.agents/quick-messages.json`（以及旧位置 `.dsh` 同名文件）**原样保留**，不会自动删除；需要清理请手动处理 |
 | Jev 能力决策配置（TypeSafe Jev） | `<dshHome>/dsh-capability-settings/jev.json`（默认 `~/.dsh/dsh-capability-settings/jev.json`；目录权限 `700`、文件权限 `600`） | 旧目录 `~/.dsh/capability-panel/jev.json` 首次读取时自动迁移（`rename`，幂等）；不读写 `~/.agents/jev.json` |
 
 首次写入新位置时，旧文件内容会自动**并入并删除**（不丢配置、不留两份）。
-`.agents` 与 `.dsh` 同时参与"项目根"判定（`.claude` 也纳入），换目录 / 换
+`项目级配置一律以**工作区目录本身**为归属（v2.0 起不再向上探测 `.git`/`.dsh`/`.agents`/`.claude`/`dsh.json`），换目录 = 换一套项目配置。
 工具搬家都不会影响配置归属。
 
 ## 亮点
@@ -319,7 +319,7 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 
 - **面板行开关 = 本项目默认启停**：写统一存储
   `<dshHome>/dsh-capability-settings/capability-overrides.json` 里
-  `projects.<项目根>.skills` 列表（与 `mcp` 列表并列、互不影响），新建对话按它
+  `projects.<工作区>.skills` 列表（与 `mcp` 列表并列、互不影响），新建对话按它
   决定该注入技能是否默认可用；只影响本项目。注入技能没有磁盘文件，所以
   **不写 frontmatter**，由插件在 `agent/created` 时按该名单在 agent 作用域注册
   同名 runtime shadow。
@@ -497,7 +497,7 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 ### 🔌 MCP：改配置即热挂载，不重启、不改 preset
 
 - 配置文件与 **Claude Code 的 `.mcp.json` 格式兼容**：项目级
-  `<projectRoot>/.mcp.json`，全局级 `~/.agents/mcp.json`（读取兼容旧位置
+  `<工作区>/.mcp.json`，全局级 `~/.agents/mcp.json`（读取兼容旧位置
   `~/.dsh/mcp.json`），同名 key 项目级覆盖全局级；`env`/`headers`/`args`
   支持 `${VAR}` 环境变量插值。
 - **用途描述与凭据掩码**：新增/编辑弹窗新增「用途描述（可选，供 Jev 能力判断）」，
@@ -514,7 +514,7 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 - 列表行的 **hover / 选中底色覆盖整行**（含右侧「默认」开关），不是只覆盖左侧卡片。
 - 全局级 `<agentsHome>/mcp.json` 的条目**整个 harness 只挂一份实例**（挂在
   本插件自己的 Cordis context 上，`serverName` 按 root 作用域预留，各 session
-  共用同一个 MCP 进程）；**项目级** `<项目根>/.mcp.json` 的条目仍挂在 agent
+  共用同一个 MCP 进程）；**项目级** `<工作区>/.mcp.json` 的条目仍挂在 agent
   自己的 Cordis context 上——工具以 `mcp__<serverName>__<tool>` 出现在**该
   session 内**，同一工作区里各 session 各一份、彼此隔离，agent 销毁自动卸载。
 - **「工具与参数」是手风琴**：每个工具一行，只显示**工具名 + 参数个数**（不显示
@@ -586,7 +586,7 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   整体屏蔽，删除即恢复）；
 - **MCP**：「导入到本项目」登记**引用**（内容实时跟随全局，启停是引用上的
   项目级标记，写在 `.agents/capability-imports.json`）；全局条目的行尾
-  「默认」开关写统一存储 `capability-overrides.json` 的 `projects.<项目根>.mcp`
+  「默认」开关写统一存储 `capability-overrides.json` 的 `projects.<工作区>.mcp`
   列表，决定新建对话是否默认启用；
 - **全局实例的「关掉」靠 `tools.restrict`**：全局 MCP 实例是共享的、无法按
   项目卸载，所以按 session 在该 agent 作用域上 deny 掉
@@ -717,7 +717,7 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   只在子 agent 创建那一刻生效（`agent/created` + `source=startup`）：
   `resume` 不重新继承，已存在的派生 agent 不受影响，切换下拉也只影响之后创建的
   child。派生会话页只读展示创建时的模式（`派生继承会话 · 创建时快照`），不提供
-  可编辑开关；父 / 子不在同一个项目根时自动降级为工作区默认。持久化字段在
+  可编辑开关；父 / 子工作区目录不同时自动降级为工作区默认。持久化字段在
   `session-capabilities.json` 的会话记录：`deriveMode`（本会话设置）、
   `derivedMode` / `derivedFrom` / `derivedAt`（派生快照）；RPC 为
   `session.deriveGet` / `session.deriveSet`。
@@ -1019,7 +1019,7 @@ src/
   remote.ts       host↔client RPC 接线（endpoint 按域前缀路由）
   session-state.ts 会话级开关持久化（session-capabilities.json：skills / mcp / tools 三域）
   session-bulk.ts 三域批量端点 session.setBulk（三域的 enable / disable / reset）
-  shared/         项目根探测 / 文件写锁 / skill 根定位与来源分类 / 插件归属映射表 + 宿主内建排除
+  shared/         工作区根（= 项目根）解析 / 文件写锁 / skill 根定位与来源分类 / 插件归属映射表 + 宿主内建排除
                   （plugin-attribution.ts，两端共用）
   skills/         skills 域：磁盘读写、CRUD、安装/导出、URL 下载、shadow stub、校验、
                   registry 桥（宿主注入技能合并 / 详情 fallback / 资源边界 / 导出快照）

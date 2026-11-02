@@ -1,54 +1,32 @@
 /**
- * 项目根目录探测——skills 与 mcp 两个域共享的基础工具。
+ * 项目根 = **当前工作区目录本身**（v2.0 起）。
  *
- * skill 根目录解析（skills/roots.ts）、MCP 项目配置文件定位（mcp/paths.ts）、
- * MCP 按 session 自动挂载（mcp/loader.ts）以及 MCP 写操作后的定向重挂
- * （mcp/manager.ts）都需要先找到工作区所属的"项目根"，因此把这段向上查找
- * 的逻辑收拢到这里，而不是在某个域内重复实现。
+ * 历史行为是从 cwd 向上找第一个含 `.git` / `.dsh` / `.agents` / `.claude` /
+ * `dsh.json` 的祖先目录，导致「工作区」是子目录时，项目级 MCP / Skills 配置
+ * 落到父目录、被同根多个工作区共享（与面板「工作区」语义不一致，用户明确要求
+ * 以工作区目录为项目配置的归属）。
+ *
+ * 现在所有「项目级」路径都直接使用工作区目录：
+ *   - 项目级 MCP：`<工作区>/.mcp.json`
+ *   - 项目级 Skills：`<工作区>/.agents/skills`（以及 `.dsh` 兼容路径）
+ *   - 项目级 overrides / imports：按工作区目录存放
+ *   - MCP loader 的项目层条目、会话项目默认投影同样按工作区目录解析
+ *
+ * 不再向上探测，也**不兼容**旧的项目根（祖先目录）配置——旧文件不会被读取。
  *
  * @module dsh-capability-settings/shared/project-root
  */
 
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 
 /**
- * 判定一个目录属于"项目根"的标记（命中其一即算：.git / .dsh / .agents /
- * .claude / dsh.json）。`.agents` 与 `.claude` 随配置文件迁移加入——
- * 项目级配置现在优先写入 `.agents`，而 Claude Code 生态以 `.claude`
- * 为项目标记，两者都应与 `.dsh` 同样参与项目根判定。
- */
-const PROJECT_MARKERS = [".git", ".dsh", ".agents", ".claude", "dsh.json"] as const;
-
-/**
- * 从 `cwd` 向上逐级查找项目根。
+ * 返回工作区目录（= 项目根）。
  *
- * 行为与 skills 文件系统 provider 的 `findProjectRoot` 保持一致：
- * 向上走到第一个含项目标记的祖先目录即停。
+ * 保留函数名以兼容既有调用方；语义是「项目级配置的归属目录 = 工作区自身」。
  *
- * 两道防误判的护栏：
- *   - **用户主目录永远不被当作祖先级项目根**——主目录下恒有 `.dsh`
- *     （dsh home），若放行，主目录下任意无标记的子目录（例如 `~/Desktop`）
- *     都会被误判成"项目"，其 skill / MCP 目录会错误地指向全局目录；
- *   - 找不到任何标记时回退到**原始 cwd**，而不是向上走到尽头（文件系统根）。
- *
- * @param cwd 起始目录（工作区路径），须为绝对路径
- * @returns 项目根绝对路径
+ * @param cwd 工作区路径（绝对路径）
+ * @returns 规范化后的工作区绝对路径
  */
 export function findProjectRoot(cwd: string): string {
-  const start = resolve(cwd);
-  const home = resolve(homedir());
-  let current = start;
-  while (true) {
-    if (hasProjectMarker(current) && !(current === home && current !== start)) return current;
-    const parent = resolve(current, "..");
-    if (parent === current) return start;
-    current = parent;
-  }
-}
-
-/** 判断一个目录下是否存在任一项目标记（.git / .dsh / .agents / .claude / dsh.json）。 */
-function hasProjectMarker(dir: string): boolean {
-  return PROJECT_MARKERS.some((marker) => existsSync(join(dir, marker)));
+  return resolve(cwd);
 }

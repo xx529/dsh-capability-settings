@@ -3,6 +3,24 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.11.0] - 2026-11-02
+
+### 变更（破坏性）
+
+- **项目级配置改为落在「工作区目录」本身**（用户要求：旧的项目根语义是错的）：
+  - 项目级 MCP：`<工作区>/.mcp.json`（不再向上找含 `.git`/`.dsh`/`.agents`/`.claude`/
+    `dsh.json` 的祖先目录）；
+  - 项目级 Skills：`<工作区>/.agents/skills`（及 `.dsh/skills` 兼容路径）；
+  - 项目级 overrides（默认关闭 / 重新打开）：`capability-overrides.json` 的 key
+    从「项目根」改为**工作区目录**；
+  - 项目级「全局能力引用」：`<工作区>/.agents/capability-imports.json`；
+  - MCP loader 的项目层挂载、按项目的重挂、Skills 项目默认投影都按工作区目录解析。
+- **不兼容、不迁移旧的项目根（祖先目录）配置**：旧 `<祖先>/.mcp.json` /
+  `<祖先>/.agents/skills` 里的条目不会再被读取，也不会自动复制；需要的话请手动
+  移动到工作区目录后重新添加。
+- 面板「添加」弹窗的落点路径随之为 `<工作区>/.mcp.json` / `<工作区>/.agents/skills`，
+  与实际写入一致；项目分组头恢复「本项目 · <工作区>」/「工作区独有」。
+
 ## [1.10.6] - 2026-11-02
 
 ### 修复
