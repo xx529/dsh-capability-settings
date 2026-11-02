@@ -188,6 +188,22 @@ export interface SkillRegistryBridgeDeps {
 export interface SkillRegistryBridge {
   /** 合并注入行（只返回注入行；磁盘行由调用方拼在其前面）。 */
   merge(input: InjectedMergeInput): Promise<SkillSummaryView[]>;
+  /**
+   * v21.3：**全局注入行**（cwd / session 无关）的短 TTL 缓存，供会话列表补全用。
+   *
+   * 会话列表先做一次带 scope 的 `merge`；某些插件 / preset 注入的全局技能会在
+   * 带 cwd 的快照里漏掉，需要再取一次全局快照补齐。每次列表都做第二次全量
+   * snapshot 在技能多 / 插件多的真实环境里很贵，因此把这份**与 cwd 无关**的结果
+   * 缓存 3s：`skills/change` 立即失效，TTL 过期后重新读取（注入技能删除后最多
+   * 3s 从会话列表消失）。
+   *
+   * 返回的行不含磁盘行（`diskRows: []`）与项目禁用标记（`projectDisabled` 为空集）；
+   * 调用方复用时要自己排除与磁盘行同名的条目、并按当前项目名单重算
+   * `disabledInProject`。registry 不可用 / snapshot 失败返回 `[]`（降级不抛）。
+   *
+   * @param ttlMs 缓存有效期（缺省 3000ms；测试可传 0 强制刷新）
+   */
+  globalInjected(ttlMs?: number): Promise<SkillSummaryView[]>;
   /** 当前 scope 视图里属于注入条目的名字集合（项目默认只作用于这些名字）。 */
   injectedNames(agent: unknown, sessionId: string | undefined, cwd?: string): Promise<Set<string> | undefined>;
   /** 名字在当前视图里的性质（写拦截用；registry 不可用返回 undefined）。 */
@@ -399,6 +415,12 @@ export function createSkillRegistryBridge(deps: SkillRegistryBridgeDeps): SkillR
   const lastGood = new Map<string, SkillSummaryView[]>();
   /** 注入元数据缓存（key = `${scopeKey}::${name}`；仅 agent scope 使用）。 */
   const metaCache = new Map<string, ClassifiedInjectedRow>();
+  /** v21.3：全局注入行缓存（与 cwd / session 无关；3s TTL + skills/change 失效）。 */
+  const GLOBAL_INJECTED_TTL_MS = 3_000;
+  let globalInjectedCache: { at: number; rows: SkillSummaryView[] } | undefined;
+  let globalInjectedPending: Promise<SkillSummaryView[]> | undefined;
+  /** 失效代数：in-flight 请求完成时若代数变了，不写回缓存（避免旧快照复活）。 */
+  let globalInjectedGeneration = 0;
   /** preset id 缓存（sessionId → presetId；`undefined` 也缓存，避免重复解析失败）。 */
   const presetCache = new Map<string, string | undefined>();
   /** 已警告过的降级原因（避免每次 list 刷日志）。 */
@@ -469,6 +491,10 @@ export function createSkillRegistryBridge(deps: SkillRegistryBridgeDeps): SkillR
   function onSkillsChange(): void {
     lastGood.clear();
     presetCache.clear();
+    // v21.3：全局注入行缓存必须跟着失效（插件注入技能新增/删除 / shadow 变化）。
+    globalInjectedGeneration += 1;
+    globalInjectedCache = undefined;
+    globalInjectedPending = undefined;
     for (const key of [...metaCache.keys()]) {
       const separator = key.indexOf("::");
       if (separator < 0) {
@@ -676,6 +702,44 @@ export function createSkillRegistryBridge(deps: SkillRegistryBridgeDeps): SkillR
     rows.sort((a, b) => a.name.localeCompare(b.name));
     lastGood.set(scope, rows);
     return rows;
+  }
+
+  /**
+   * v21.3：全局注入行（cwd / session 无关）短 TTL 缓存。实现见接口注释。
+   *
+   * 用 `merge({cwd: undefined, sessionId: undefined, diskRows: [], projectDisabled: 空})`
+   * 取「纯注入行」：不含磁盘行、不含项目禁用标记；由调用方按当前 cwd 的磁盘行 /
+   * 项目名单二次过滤与标注（因此缓存本身与工作区无关，可跨作用域复用）。
+   */
+  async function globalInjected(ttlMs = GLOBAL_INJECTED_TTL_MS): Promise<SkillSummaryView[]> {
+    const ttl = typeof ttlMs === "number" && Number.isFinite(ttlMs) && ttlMs >= 0 ? ttlMs : GLOBAL_INJECTED_TTL_MS;
+    const now = Date.now();
+    if (globalInjectedCache !== undefined && now - globalInjectedCache.at < ttl) {
+      return globalInjectedCache.rows.map((row) => ({ ...row }));
+    }
+    if (globalInjectedPending !== undefined) return globalInjectedPending;
+    const generation = globalInjectedGeneration;
+    globalInjectedPending = (async () => {
+      try {
+        const rows = await merge({
+          cwd: undefined,
+          sessionId: undefined,
+          diskRows: [],
+          projectDisabled: new Set<string>(),
+        });
+        if (generation === globalInjectedGeneration) {
+          globalInjectedCache = { at: Date.now(), rows };
+        }
+        return rows;
+      } catch {
+        // 降级：不抛、也不缓存失败结果（下次调用重试）。
+        return [] as SkillSummaryView[];
+      } finally {
+        globalInjectedPending = undefined;
+      }
+    })();
+    const rows = await globalInjectedPending;
+    return rows.map((row) => ({ ...row }));
   }
 
   /** 当前 scope 下的注入名字集合（项目默认只作用于这些名字）。 */
@@ -1123,6 +1187,7 @@ export function createSkillRegistryBridge(deps: SkillRegistryBridgeDeps): SkillR
 
   return {
     merge,
+    globalInjected,
     injectedNames,
     inspectName,
     readDetail,

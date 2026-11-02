@@ -634,6 +634,8 @@ button.skp-tag:focus-visible{outline:none;box-shadow:0 0 0 2px var(--skp-accent-
 .skp-pane-title-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 /* v13 修复：Skills「全局」作用域的启停范围说明（避免误读成全局关闭）。 */
 .skp-pane-note{flex:none;padding:0 6px 6px;font-size:11px;line-height:15px;color:var(--skp-text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+/* v21.3：已有列表数据时的轻量刷新提示（不遮挡列表，替代整屏「加载中…」）。 */
+.skp-refresh-note{flex:none;font-size:11px;line-height:15px;color:var(--skp-text-3);white-space:nowrap;}
 .skp-workspace-row{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;min-width:0;padding:8px 10px;border:0;border-radius:8px;background:none;font:inherit;text-align:left;cursor:pointer;}
 .skp-workspace-row:hover{background:var(--skp-hover);}
 .skp-workspace-row:focus-visible{outline:none;box-shadow:inset 0 0 0 1px var(--skp-accent);}

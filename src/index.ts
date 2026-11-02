@@ -26,7 +26,7 @@ import type {} from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/dsh-skill";
 
 import { createService } from "./skills/manager.js";
-import { createSkillSessionRegistry, supplementInjectedRows } from "./skills/session.js";
+import { createSkillSessionRegistry } from "./skills/session.js";
 import type { SessionSkillView, SkillSessionRegistry } from "./skills/session.js";
 import { createSkillRegistryBridge } from "./skills/registry.js";
 import type { SkillRegistryBridge } from "./skills/registry.js";
@@ -319,16 +319,12 @@ export function apply(ctx: any, config: Config = {}) {
     const defaults = await overridesRaw.defaultSets(cwd);
     let merged: SkillSummaryView[];
     try {
-      const injected = await skillsRegistry.merge({ cwd, diskRows, projectDisabled: defaults.projectDisabled });
+      // v21.3 性能：面板没有 session / agent，注入行只来自**全局快照**；因此固定
+      // 用 `cwd: undefined` **只 merge 一次**（v21 的双次 snapshot 是工作区视图
+      // 卡顿的放大点），磁盘行仍由 `diskList(cwd)` 提供（含项目磁盘技能），
+      // 注入行不会因 cwd 过滤而缺失。`projectDisabled` 仍按当前 cwd 的项目覆盖传入。
+      const injected = await skillsRegistry.merge({ cwd: undefined, diskRows, projectDisabled: defaults.projectDisabled });
       merged = [...diskRows, ...injected].sort((a, b) => a.name.localeCompare(b.name));
-      // v21 修复：工作区作用域快照可能漏掉全局注入技能（插件 / preset 注入），
-      // 再取一次全局快照（cwd=undefined）只补注入行，保证它们在每个工作区都出现。
-      if (cwd !== undefined) {
-        const globalInjected = await skillsRegistry
-          .merge({ cwd: undefined, diskRows, projectDisabled: defaults.projectDisabled })
-          .catch(() => [] as SkillSummaryView[]);
-        merged = supplementInjectedRows(merged, globalInjected);
-      }
     } catch {
       merged = diskRows;
     }

@@ -3,6 +3,30 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.10.4] - 2026-11-02
+
+### 修复 / 性能
+
+- **切换能力作用域/工作区的加载等待**：面板 Skills 工作区列表原来会做两次 registry
+  snapshot/merge（cwd 快照 + 全局快照补注入行）。实测服务端 RPC 仅 50–70ms，但真实环境
+  （插件多、技能多）double snapshot 会放大延迟。现在：
+  - 面板无 session/agent，注入行固定来自全局快照：`panelSkillRows(cwd)` 只做**一次**
+    `merge({ cwd: undefined, diskRows, projectDisabled })`，磁盘行仍按工作区读取。
+  - 会话列表保留一次 session merge；补额外的全局注入行改走 `registry.globalInjected()` 的
+    **3s TTL 缓存**（`skills/change` 立即失效、并发合并、失败降级），不再每次双 snapshot。
+- **客户端 stale-while-revalidate**：`useAsyncList` 增加 cacheKey + 模块级缓存，切换作用域/
+  工作区时**同步渲染已访问过的列表**并后台刷新；无缓存时保留上一份数据，不再清空成
+  「加载中…」；有数据时只显示轻量「刷新中…」。
+- **列表行 memo 化**（Skills/MCP/Tools）：切换/选中/刷新提示变化时不再整表重渲 160+ 行。
+
+### 验证
+
+- 服务端自测 3/3：`globalInjected` TTL / skills-change 失效 / 浅拷贝；面板单次 merge 含注入行；
+  会话列表无双 snapshot。
+- 客户端 jsdom 11/11：三域 global↔workspace↔global 第二次切换同步出缓存、轻刷新提示；
+  筛选/搜索/选中不整表重渲。
+- v21 host 41/41、v21 UI 24/24、v20.2 UI 9/9；`npx tsc --noEmit` / `pnpm build` 通过。
+
 ## [1.10.3] - 2026-11-02
 
 ### 变更

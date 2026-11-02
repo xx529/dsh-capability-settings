@@ -36,7 +36,7 @@
  * @module dsh-capability-settings/client/panel
  */
 
-import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type {
   CapabilityPanelApi,
   ClientCapabilityVisibility,
@@ -65,6 +65,8 @@ import {
   visibilityModeOf,
   visibleWorkspaceCountOf,
   workspaceOverrideOf,
+  type VisibilityWorkspace,
+  type WorkspaceOverrideState,
 } from "./visibility.js";
 import { SkillContent, skillRefOf } from "./skill-content.js";
 import { isGlobalSkillSource } from "../shared/skill-sources.js";
@@ -742,11 +744,16 @@ function SkillsView({
   // 全局作用域 cwd = undefined（宿主只返回全局 + 注入），工作区作用域 cwd = 该
   // 工作区（宿主返回项目 + 全局 + 注入，并投影 v20.1 的有效默认字段）。
   // v21：行数据之外还要工作区视图的 `hiddenCount`（可见性过滤掉的条数）。
-  const { data, loading, error, reload } = useAsyncList(async () => {
-    const view =
-      skillsApi.listView !== undefined ? await skillsApi.listView() : { skills: await skillsApi.list(), hiddenCount: 0 };
-    return { items: view.skills, hiddenCount: view.hiddenCount ?? 0 };
-  }, [skillsApi, workspace]);
+  const { data, loading, error, reload } = useAsyncList(
+    async () => {
+      const view =
+        skillsApi.listView !== undefined ? await skillsApi.listView() : { skills: await skillsApi.list(), hiddenCount: 0 };
+      return { items: view.skills, hiddenCount: view.hiddenCount ?? 0 };
+    },
+    [skillsApi, workspace],
+    // v21.3：按作用域缓存，切换回已访问过的工作区/全局时同步出旧列表再后台刷新。
+    { cacheKey: `skills:${workspace ?? "global"}` },
+  );
   const items = data?.items ?? [];
   const hiddenCount = data?.hiddenCount ?? 0;
   const projectItems = useMemo(() => items.filter((item) => isProjectSource(item.source)), [items]);
@@ -944,149 +951,54 @@ function SkillsView({
   const listTitle = scope === "global" ? "全局 Skills" : `${projectName ?? "工作区"} · Skills`;
   const listNote = scope === "global" ? "所有工作区" : "仅此工作区";
 
-  const renderRow = (item: ClientSkillSummary) => {
-    const key = skillRowKey(item);
-    const isProject = isProjectSource(item.source);
-    const isInjected = item.injected === true;
-    const state = invocationState(item);
-    /** v21：只有「全局视图里的全局条目」编辑可见性；项目自己的条目不参与。 */
-    const visibilityEditable = scope === "global" && !isProject;
-    const entry = visibilityOf(item.name);
-    const mode = item.visibilityMode ?? visibilityModeOf(entry);
-    const visibleCount = item.visibleWorkspaceCount ?? visibleWorkspaceCountOf(entry, projects);
-    const invisible = visibilityEditable && isRowInvisible(item, entry, projects);
-    /** 工作区视图：全局条目是否已显式覆盖「每工作区默认」。 */
-    const overrideState = workspaceSelected && !isProject ? workspaceOverrideOf(projectOverrides, "skills", item.name) : "inherit";
-    // 开关勾选态：全局视图 = 全局默认；工作区视图 = 有效默认；项目磁盘行 = 调用状态。
-    const checked =
-      scope === "global"
-        ? globalDefaultEnabledOf(item)
-        : isProject
-          ? item.shadowStub === true
-            ? false
-            : item.modelInvocable && item.userInvocable
-          : effectiveDefaultEnabledOf(item);
-    const tags = skillTags(item, diskGlobalItems.some((global) => global.name === item.name));
-    const switcher = skillSwitchDisabled(item, scope);
-    const dotClass = isInjected
-      ? checked
-        ? "skp-dot skp-dot-enabled"
-        : "skp-dot skp-dot-hollow"
-      : item.shadowStub === true || item.readOnly
-        ? "skp-dot skp-dot-hollow"
-        : state === "full"
-          ? "skp-dot skp-dot-enabled"
-          : state === "partial"
-            ? "skp-dot skp-dot-partial"
-            : "skp-dot";
-    const dotText = isInjected
-      ? checked
-        ? "已启用"
-        : "默认关闭"
-      : item.shadowStub === true
-        ? "屏蔽占位"
-        : item.readOnly
-          ? "只读"
-          : state === "full"
-            ? "已启用"
-            : state === "partial"
-              ? "部分禁用"
-              : "已禁用";
-    // v21 UX 修订：全局视图行尾不再有单开关（默认按工作区在弹层里配）；
-    // 工作区视图保留行尾默认开关（写本工作区覆盖）。
-    const switchLabel = `${projectName ?? "工作区"} 默认 · ${overrideState === "inherit" ? "跟随全局" : "已覆盖"}`;
-    const switchTitle = switcher.title;
-    return (
-      <div
-        role="option"
-        aria-selected={selected === key}
-        tabIndex={selected === key ? 0 : -1}
-        className={selected === key ? "skp-row skp-row-active" : "skp-row"}
-        ref={(element) => {
-          if (element === null) rowRefs.current.delete(key);
-          else rowRefs.current.set(key, element);
-        }}
-        onClick={() => selectRow(key)}
-        onKeyDown={(event) => onRowKeyDown(event, key)}
-      >
-        <div className="skp-row-name">
-          {/* 状态点：绿=启用 / 蓝=部分禁用 / 灰=禁用 / 空心=只读或默认关闭。 */}
-          {(isProject || isInjected || scope === "workspace") && (
-            <>
-              <span className={dotClass} aria-hidden="true" />
-              <span className="skp-sr-only">{dotText}</span>
-            </>
-          )}
-          <span className="skp-row-title" title={item.name}>
-            {item.name}
-          </span>
-        </div>
-        <div className="skp-row-mid">
-          <div className="skp-row-tags">
-            {tags.map((tag) => (
-              <span key={tag.key} className={tag.className} title={tag.title}>
-                {tag.label}
-              </span>
-            ))}
-            {visibilityEditable && (
-              <VisibilityRowMeta
-                entry={entry}
-                workspaces={projects}
-                globalOff={globalOffOf(item)}
-                mode={mode}
-                count={visibleCount}
-                invisible={invisible}
-              />
-            )}
-            {overrideState !== "inherit" && (
-              <span
-                className="skp-tag skp-tag-warn"
-                title={
-                  overrideState === "on"
-                    ? "本工作区显式打开该能力（覆盖全局的每工作区默认）；点行尾开关可关闭"
-                    : "本工作区显式关闭该能力（覆盖全局的每工作区默认）；点行尾开关可打开"
-                }
-              >
-                已覆盖
-              </span>
-            )}
-          </div>
-          {/* 行尾开关（仅工作区视图 = 本工作区默认覆盖；全局默认在「可见范围」弹层里按工作区配）。 */}
-          {scope === "workspace" && (
-            <label
-              className="skp-row-toggle"
-              title={switchTitle}
-              onClick={(event) => event.stopPropagation()}
-              onKeyDown={(event) => event.stopPropagation()}
-            >
-              <span className="skp-row-default-label">{switchLabel}</span>
-              <span className="skp-switch">
-                <input
-                  type="checkbox"
-                  role="switch"
-                  aria-label={`启用 ${item.name}`}
-                  checked={checked}
-                  disabled={switcher.disabled || busyRow === key}
-                  onChange={(event) => void toggleRow(item, event.target.checked)}
-                />
-                <span className="skp-switch-track" />
-              </span>
-            </label>
-          )}
-        </div>
-        <div className="skp-row-desc">{item.description.length > 0 ? item.description : "（无描述）"}</div>
-      </div>
-    );
-  };
+  /** v21.3：稳定回调（配合 `SkillListRow` 的 React.memo，避免切换作用域时全量重渲）。 */
+  const rowActionsRef = useRef({ selectRow, toggleRow, onRowKeyDown });
+  rowActionsRef.current = { selectRow, toggleRow, onRowKeyDown };
+  const stableSelectRow = useCallback((key: string) => rowActionsRef.current.selectRow(key), []);
+  const stableToggleRow = useCallback((item: ClientSkillSummary, next: boolean) => {
+    void rowActionsRef.current.toggleRow(item, next);
+  }, []);
+  const stableRowKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLElement>, key: string) => rowActionsRef.current.onRowKeyDown(event, key),
+    [],
+  );
 
-  /** 一组技能行（列表容器 + 可访问性标签）。 */
+  /** 一组技能行（列表容器 + 可访问性标签）。行组件 memo 化，只重渲状态变化的行。 */
   const renderRows = (list: ClientSkillSummary[], label: string) => (
     <ul className="skp-list" role="listbox" aria-label={label}>
-      {list.map((item) => (
-        <li key={skillRowKey(item)} role="presentation">
-          {renderRow(item)}
-        </li>
-      ))}
+      {list.map((item) => {
+        const key = skillRowKey(item);
+        const isProject = isProjectSource(item.source);
+        const visibilityEditable = scope === "global" && !isProject;
+        const entry = visibilityOf(item.name);
+        const invisible = visibilityEditable && isRowInvisible(item, entry, projects);
+        const overrideState: WorkspaceOverrideState =
+          workspaceSelected && !isProject ? workspaceOverrideOf(projectOverrides, "skills", item.name) : "inherit";
+        const switcher = skillSwitchDisabled(item, scope);
+        return (
+          <li key={key} role="presentation">
+            <SkillListRow
+              item={item}
+              selected={selected === key}
+              busy={busyRow === key}
+              scope={scope}
+              projectName={projectName}
+              projects={projects}
+              visibilityEntry={entry}
+              globalOff={globalOffOf(item)}
+              invisible={invisible}
+              overrideState={overrideState}
+              hasDiskGlobal={diskGlobalItems.some((global) => global.name === item.name)}
+              switchDisabled={switcher.disabled}
+              switchTitle={switcher.title}
+              rowRefs={rowRefs}
+              onSelect={stableSelectRow}
+              onToggle={stableToggleRow}
+              onKeyDown={stableRowKeyDown}
+            />
+          </li>
+        );
+      })}
     </ul>
   );
 
@@ -1190,6 +1102,7 @@ function SkillsView({
               {q.length > 0 ? `${visibleItems.length} / ${scopeTotal}` : scopeTotal}
             </span>
             <span className="skp-list-note">{listNote}</span>
+            {loading && data !== undefined && <span className="skp-refresh-note">刷新中…</span>}
             <span className="skp-detail-head-spacer" />
             <button
               type="button"
@@ -1767,6 +1680,175 @@ function SkillDetail({
     </div>
   );
 }
+
+/**
+ * Skills 列表单行（v21.3，`React.memo`）：列表 160+ 行时避免切作用域/选中/搜索
+ * 引发全量重渲。props 全部为原始值或稳定引用（回调由父级 ref 包装成稳定函数）。
+ */
+const SkillListRow = memo(function SkillListRow({
+  item,
+  selected,
+  busy,
+  scope,
+  projectName,
+  projects,
+  visibilityEntry,
+  globalOff,
+  invisible,
+  overrideState,
+  hasDiskGlobal,
+  switchDisabled,
+  switchTitle,
+  rowRefs,
+  onSelect,
+  onToggle,
+  onKeyDown,
+}: {
+  item: ClientSkillSummary;
+  selected: boolean;
+  busy: boolean;
+  scope: "global" | "workspace";
+  projectName?: string;
+  projects: VisibilityWorkspace[];
+  visibilityEntry?: ClientCapabilityVisibility;
+  globalOff: boolean;
+  invisible: boolean;
+  overrideState: WorkspaceOverrideState;
+  hasDiskGlobal: boolean;
+  switchDisabled: boolean;
+  switchTitle: string;
+  rowRefs: { current: Map<string, HTMLElement> };
+  onSelect(key: string): void;
+  onToggle(item: ClientSkillSummary, next: boolean): void;
+  onKeyDown(event: ReactKeyboardEvent<HTMLElement>, key: string): void;
+}) {
+  const key = skillRowKey(item);
+  const isProject = isProjectSource(item.source);
+  const isInjected = item.injected === true;
+  const state = invocationState(item);
+  /** 只有「全局视图里的全局条目」编辑可见性；项目自己的条目不参与。 */
+  const visibilityEditable = scope === "global" && !isProject;
+  const mode = item.visibilityMode ?? visibilityModeOf(visibilityEntry);
+  const visibleCount = item.visibleWorkspaceCount ?? visibleWorkspaceCountOf(visibilityEntry, projects);
+  // 开关勾选态：全局视图 = 全局默认；工作区视图 = 有效默认；项目磁盘行 = 调用状态。
+  const checked =
+    scope === "global"
+      ? globalDefaultEnabledOf(item)
+      : isProject
+        ? item.shadowStub === true
+          ? false
+          : item.modelInvocable && item.userInvocable
+        : effectiveDefaultEnabledOf(item);
+  const tags = skillTags(item, hasDiskGlobal);
+  const dotClass = isInjected
+    ? checked
+      ? "skp-dot skp-dot-enabled"
+      : "skp-dot skp-dot-hollow"
+    : item.shadowStub === true || item.readOnly
+      ? "skp-dot skp-dot-hollow"
+      : state === "full"
+        ? "skp-dot skp-dot-enabled"
+        : state === "partial"
+          ? "skp-dot skp-dot-partial"
+          : "skp-dot";
+  const dotText = isInjected
+    ? checked
+      ? "已启用"
+      : "默认关闭"
+    : item.shadowStub === true
+      ? "屏蔽占位"
+      : item.readOnly
+        ? "只读"
+        : state === "full"
+          ? "已启用"
+          : state === "partial"
+            ? "部分禁用"
+            : "已禁用";
+  // v21 UX 修订：全局视图行尾不再有单开关（默认按工作区在弹层里配）；
+  // 工作区视图保留行尾默认开关（写本工作区覆盖）。
+  const switchLabel = `${projectName ?? "工作区"} 默认 · ${overrideState === "inherit" ? "跟随全局" : "已覆盖"}`;
+  return (
+    <div
+      role="option"
+      aria-selected={selected}
+      tabIndex={selected ? 0 : -1}
+      className={selected ? "skp-row skp-row-active" : "skp-row"}
+      ref={(element) => {
+        if (element === null) rowRefs.current.delete(key);
+        else rowRefs.current.set(key, element);
+      }}
+      onClick={() => onSelect(key)}
+      onKeyDown={(event) => onKeyDown(event, key)}
+    >
+      <div className="skp-row-name">
+        {/* 状态点：绿=启用 / 蓝=部分禁用 / 灰=禁用 / 空心=只读或默认关闭。 */}
+        {(isProject || isInjected || scope === "workspace") && (
+          <>
+            <span className={dotClass} aria-hidden="true" />
+            <span className="skp-sr-only">{dotText}</span>
+          </>
+        )}
+        <span className="skp-row-title" title={item.name}>
+          {item.name}
+        </span>
+      </div>
+      <div className="skp-row-mid">
+        <div className="skp-row-tags">
+          {tags.map((tag) => (
+            <span key={tag.key} className={tag.className} title={tag.title}>
+              {tag.label}
+            </span>
+          ))}
+          {visibilityEditable && (
+            <VisibilityRowMeta
+              entry={visibilityEntry}
+              workspaces={projects}
+              globalOff={globalOff}
+              mode={mode}
+              count={visibleCount}
+              invisible={invisible}
+            />
+          )}
+          {overrideState !== "inherit" && (
+            <span
+              className="skp-tag skp-tag-warn"
+              title={
+                overrideState === "on"
+                  ? "本工作区显式打开该能力（覆盖全局的每工作区默认）；点行尾开关可关闭"
+                  : "本工作区显式关闭该能力（覆盖全局的每工作区默认）；点行尾开关可打开"
+              }
+            >
+              已覆盖
+            </span>
+          )}
+        </div>
+        {/* 行尾开关（仅工作区视图 = 本工作区默认覆盖；全局默认在「可见范围」弹层里按工作区配）。 */}
+        {scope === "workspace" && (
+          <label
+            className="skp-row-toggle"
+            title={switchTitle}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
+            <span className="skp-row-default-label">{switchLabel}</span>
+            <span className="skp-switch">
+              <input
+                type="checkbox"
+                role="switch"
+                aria-label={`启用 ${item.name}`}
+                checked={checked}
+                disabled={switchDisabled || busy}
+                onChange={(event) => onToggle(item, event.target.checked)}
+              />
+              <span className="skp-switch-track" />
+            </span>
+          </label>
+        )}
+      </div>
+      <div className="skp-row-desc">{item.description.length > 0 ? item.description : "（无描述）"}</div>
+    </div>
+  );
+});
 
 // ---------------------------------------------------------------------------
 // 模态框

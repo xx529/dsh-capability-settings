@@ -21,18 +21,29 @@ import { isProjectSkillSource } from "../shared/skill-sources.js";
 export declare function hasWorkspaceLabel(workspace: string | undefined): boolean;
 /** source 是否属于"项目系"（决定分组归属，composer 弹层的分组口径与此一致）。 */
 export declare const isProjectSource: typeof isProjectSkillSource;
+/** 清空异步列表缓存（`prefix` 给定时只清该前缀，如 `skills:`；测试用/强制刷新用）。 */
+export declare function clearAsyncListCache(prefix?: string): void;
 /**
- * 两域视图共用的"拉取 + 重拉"状态机。
+ * 两域视图共用的"拉取 + 重拉"状态机（v21.3 带可选缓存）。
  *
  * `load` 由调用方组装（Skills 直接 list；MCP 把 list+status+runtime 合并
  * 投影成单个结果对象），返回的结果整体存进 `data`，视图从 `data` 派生
  * 各自的行/错误。依赖变化（挂载、工作区切换）与显式 `reload()` 都会触发
  * 拉取。
  *
+ * **`cacheKey`（可选）**：
+ * - 同 key 的最近结果缓存在模块级 Map；依赖变化时，若新 key 有缓存则
+ *   **渲染阶段同步**返回缓存数据，同时后台刷新（stale-while-revalidate）；
+ * - 新 key 无缓存时保留旧 `data`（不清空、不闪「加载中」），刷新完成后替换；
+ * - `data` 是否为「本 key 的新鲜结果」由 `loading` 单独表达，视图可据此显示
+ *   轻量「刷新中…」而不是整屏 loading。
+ *
  * 内部用请求序号守卫：并发触发（连点写操作、工作区快速切换）时只让
  * **最新一次**请求的结果落地，防乱序旧响应覆盖新状态。
  */
-export declare function useAsyncList<T>(load: () => Promise<T>, deps: readonly unknown[]): {
+export declare function useAsyncList<T>(load: () => Promise<T>, deps: readonly unknown[], options?: {
+    cacheKey?: string;
+}): {
     data: T | undefined;
     loading: boolean;
     error: string | undefined;

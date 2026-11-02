@@ -22,7 +22,7 @@
  * @module dsh-capability-settings/client/mcp-panel
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type {
   CapabilityPanelApi,
@@ -95,7 +95,7 @@ const INSPECT_HEAD_RIGHT_STYLE: CSSProperties = {
  *   - 工作区视图 = **该工作区的默认**（写项目 overrides，仅此工作区生效）。
  * 行内不渲染文字按钮——启用/编辑/删除/导入/探测/使用记录全部在详情卡里。
  */
-function McpServerRow({
+function McpServerRowImpl({
   server,
   scope,
   projectName,
@@ -130,8 +130,9 @@ function McpServerRow({
   selected: boolean;
   /** 写操作进行中（同一时间只允许一个开关操作）。 */
   busy: boolean;
-  onSelect(): void;
-  onToggleDefault(): void;
+  /** v21.3：稳定回调（父级 ref 包装）——server 由行组件回传，保证 memo 生效。 */
+  onSelect(server: ClientMcpServer): void;
+  onToggleDefault(server: ClientMcpServer): void;
 }) {
   const isGlobal = server.scope === "global";
   // 勾选态：全局视图 = 配置级 enabled；工作区视图 = 该工作区默认是否启用。
@@ -156,7 +157,7 @@ function McpServerRow({
   const showVisibility = scope === "global" && isGlobal;
   return (
     <li className={selected ? "skp-row-wrap skp-row-wrap-active" : "skp-row-wrap"}>
-      <button type="button" className={selected ? "skp-row skp-row-active" : "skp-row"} style={{ minHeight: 72 }} onClick={onSelect}>
+      <button type="button" className={selected ? "skp-row skp-row-active" : "skp-row"} style={{ minHeight: 72 }} onClick={() => onSelect(server)}>
         <span className="skp-row-name">
           <span className={dotClass} title={checked ? "已启用" : "已关闭"} />
           <span className="skp-row-title" title={server.key}>
@@ -232,7 +233,7 @@ function McpServerRow({
               aria-label={`${switchLabel} ${server.key}`}
               checked={checked}
               disabled={busy}
-              onChange={onToggleDefault}
+              onChange={() => onToggleDefault(server)}
             />
             <span className="skp-switch-track" />
           </span>
@@ -241,6 +242,9 @@ function McpServerRow({
     </li>
   );
 }
+
+/** v21.3：列表行 memo 化（160+ 行时避免整表重渲）；回调由父级稳定引用驱动。 */
+const McpServerRow = memo(McpServerRowImpl);
 
 /**
  * 一条「外部注入」实例行：**配置只读、默认开关可写**。
@@ -359,7 +363,7 @@ function externalInjectionText(server: ClientMcpRuntimeServer): string {
   return server.origin === "entry" ? "loader 条目（profile patch insert）" : "动态 fiber（其它插件在 apply 中挂载）";
 }
 
-function McpExternalRow({
+function McpExternalRowImpl({
   server,
   scope,
   projectName,
@@ -391,8 +395,8 @@ function McpExternalRow({
   overrideState: WorkspaceOverrideState;
   selected: boolean;
   busy: boolean;
-  onSelect(): void;
-  onToggleDefault(): void;
+  onSelect(server: ClientMcpRuntimeServer): void;
+  onToggleDefault(server: ClientMcpRuntimeServer): void;
 }) {
   /** 全局默认关闭（原始名单；宿主 `disabledGlobally` 为 true 时也必然是关闭）。 */
   const globalOff = globalDefaultDisabled || server.disabledGlobally === true;
@@ -440,7 +444,7 @@ function McpExternalRow({
           : "打开：仅此工作区默认启用（写工作区覆盖）";
   return (
     <li className={selected ? "skp-row-wrap skp-row-wrap-active" : "skp-row-wrap"}>
-      <button type="button" className={selected ? "skp-row skp-row-active" : "skp-row"} style={{ minHeight: 72 }} onClick={onSelect}>
+      <button type="button" className={selected ? "skp-row skp-row-active" : "skp-row"} style={{ minHeight: 72 }} onClick={() => onSelect(server)}>
         {/* 名称行只放状态点 + serverName；来源两枚标签移到 meta 行。 */}
         <span className="skp-row-name">
           <span
@@ -501,7 +505,7 @@ function McpExternalRow({
               aria-label={`${switchLabel} ${server.serverName}`}
               checked={checked}
               disabled={!canToggle || busy}
-              onChange={onToggleDefault}
+              onChange={() => onToggleDefault(server)}
             />
             <span className="skp-switch-track" />
           </span>
@@ -510,6 +514,9 @@ function McpExternalRow({
     </li>
   );
 }
+
+/** v21.3：外部注入行同样 memo 化。 */
+const McpExternalRow = memo(McpExternalRowImpl);
 
 /** 路径最后一段（工作区名）；空串/纯分隔符回退为原串。 */
 function baseName(path: string): string {
@@ -606,6 +613,8 @@ export function McpView({
       };
     },
     [api, mcpApi, workspace],
+    // v21.3：按作用域缓存，切回已访问作用域时同步出旧列表再后台刷新。
+    { cacheKey: `mcp:${workspace ?? "global"}` },
   );
   const servers = data?.servers ?? [];
   const listErrors = data?.listErrors ?? [];
@@ -823,6 +832,24 @@ export function McpView({
     setAddOpen(true);
   };
 
+  /**
+   * v21.3：列表行 memo 需要稳定回调——用 ref 取最新实现，避免行组件因闭包
+   * 函数每次重建而全量重渲。行组件把 server 回传给回调。
+   */
+  const rowActionsRef = useRef({ selectServer, selectExternal, toggleRow, toggleExternal });
+  rowActionsRef.current = { selectServer, selectExternal, toggleRow, toggleExternal };
+  const stableSelectServer = useCallback((server: ClientMcpServer) => rowActionsRef.current.selectServer(server), []);
+  const stableToggleServer = useCallback((server: ClientMcpServer) => {
+    void rowActionsRef.current.toggleRow(server);
+  }, []);
+  const stableSelectExternal = useCallback(
+    (server: ClientMcpRuntimeServer) => rowActionsRef.current.selectExternal(server),
+    [],
+  );
+  const stableToggleExternal = useCallback((server: ClientMcpRuntimeServer) => {
+    void rowActionsRef.current.toggleExternal(server);
+  }, []);
+
   /** 非空的服务器列表（组内滚动 + listbox 语义）。 */
   const renderServerScroll = (list: ClientMcpServer[], label: string) => (
     <div className="skp-group-scroll">
@@ -848,8 +875,8 @@ export function McpView({
               }
               selected={selected === rowId(server)}
               busy={busyKey !== undefined}
-              onSelect={() => selectServer(server)}
-              onToggleDefault={() => void toggleRow(server)}
+              onSelect={stableSelectServer}
+              onToggleDefault={stableToggleServer}
             />
           );
         })}
@@ -910,8 +937,8 @@ export function McpView({
                 }
                 selected={selectedExternalName === server.serverName}
                 busy={busyKey !== undefined}
-                onSelect={() => selectExternal(server)}
-                onToggleDefault={() => void toggleExternal(server)}
+                onSelect={stableSelectExternal}
+                onToggleDefault={stableToggleExternal}
               />
             ))}
           </ul>
@@ -994,6 +1021,7 @@ export function McpView({
               {searching ? `${visibleProject.length + visibleGlobal.length} / ${scopeTotal}` : scopeTotal}
             </span>
             <span className="skp-list-note">{listNote}</span>
+            {loading && data !== undefined && <span className="skp-refresh-note">刷新中…</span>}
             <span className="skp-detail-head-spacer" />
             <button
               type="button"
