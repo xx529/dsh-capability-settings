@@ -69,6 +69,7 @@ import { isProjectSource, useAsyncList } from "./panel-common.js";
 import {
   EMPTY_VISIBILITY_SETS,
   VisibilityDetailFields,
+  VisibilityEditControl,
   VisibilityRowMeta,
   isRowInvisible,
   safeGlobalGet,
@@ -1629,6 +1630,18 @@ function SkillDetail({
             </>
           )}
           <span className="skp-strip-right">
+            {visibility !== undefined && (
+              <VisibilityEditControl
+                api={visibility.api}
+                domain="skills"
+                capabilityKey={summary.name}
+                name={summary.name}
+                entry={visibility.entry}
+                workspaces={workspaces}
+                globalOff={visibility.globalOff}
+                onSaved={visibility.onSaved}
+              />
+            )}
             <button
               type="button"
               className="skp-strip-meta-btn"
@@ -1661,6 +1674,7 @@ function SkillDetail({
           {visibility !== undefined && (
             <dl className="skp-detail-fields" style={{ marginTop: 12 }}>
               <VisibilityDetailFields
+                summaryOnly
                 api={visibility.api}
                 domain="skills"
                 capabilityKey={summary.name}

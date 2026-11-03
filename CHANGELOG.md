@@ -3,6 +3,22 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.12.1] - 2026-11-03
+
+### 修复
+
+- **全局条目的「编辑可见范围」移到详情状态条外层**（用户反馈：藏在「元数据」面板里，
+  要先展开才能看到）：Skills / MCP 全局详情现在与「使用记录」「元数据」并排直接提供
+  「编辑可见范围」胶囊按钮（tooltip = 当前可见范围摘要），点开即弹层；元数据面板里的
+  「可见范围」行只保留摘要（`VisibilityDetailFields summaryOnly`），不重复按钮。
+  新增 `VisibilityEditControl`（`src/client/visibility.tsx`）。
+
+### 验证
+
+- `pnpm typecheck` / `pnpm build` → 0。
+- `node notes/verify/v22-detail-layout.mjs` → 12/12（新增 V22-08/08b/08c：
+  状态条外层入口可见、点开即弹层、元数据只留摘要不重复按钮）。
+
 ## [1.12.0] - 2026-11-03
 
 ### 变更

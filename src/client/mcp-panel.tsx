@@ -60,6 +60,7 @@ import { hasWorkspaceLabel, useAsyncList } from "./panel-common.js";
 import {
   EMPTY_VISIBILITY_SETS,
   VisibilityDetailFields,
+  VisibilityEditControl,
   VisibilityRowMeta,
   isRowInvisible,
   safeGlobalGet,
@@ -1969,6 +1970,18 @@ function McpDetail({
             命名空间 <span className="skp-strip-strong">{namespace}</span>
           </span>
           <span className="skp-strip-right">
+            {scope === "global" && isGlobal && (
+              <VisibilityEditControl
+                api={panelApi}
+                domain="mcp"
+                capabilityKey={server.serverName}
+                name={server.key}
+                entry={visibilityEntry}
+                workspaces={projects}
+                globalOff={globalOff}
+                onSaved={onVisibilitySaved}
+              />
+            )}
             <button type="button" className="skp-link-btn" onClick={() => setUsageOpen(true)}>
               使用记录
             </button>
@@ -2011,6 +2024,7 @@ function McpDetail({
           {scope === "global" && isGlobal && (
             <dl className="skp-detail-fields" style={{ marginTop: 12 }}>
               <VisibilityDetailFields
+                summaryOnly
                 api={panelApi}
                 domain="mcp"
                 capabilityKey={server.serverName}

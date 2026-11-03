@@ -99,7 +99,7 @@ export declare function VisibilityRowMeta({ entry, workspaces, globalOff, mode, 
  * 「可见范围：全部工作区 · 默认：N 开 / M 关」；模式与每工作区默认都在
  * 「编辑可见范围」弹层里配置（弹层内已有分段 + 表格）。
  */
-export declare function VisibilityDetailFields({ api, domain, capabilityKey, name, entry, workspaces, globalOff, onSaved, }: {
+export declare function VisibilityDetailFields({ api, domain, capabilityKey, name, entry, workspaces, globalOff, onSaved, summaryOnly, }: {
     api: CapabilityPanelApi;
     domain: ClientCapabilityDomain;
     /** 可见性存储 key：skills=name / mcp=serverName / tools=unit。 */
@@ -111,6 +111,27 @@ export declare function VisibilityDetailFields({ api, domain, capabilityKey, nam
     /** 兜底默认：名字在全局默认关闭名单里。 */
     globalOff: boolean;
     /** 保存成功后回调（面板重拉列表 + 全局层）。 */
+    onSaved: () => void;
+    /**
+     * v22：只渲染「可见范围」摘要（编辑入口在详情状态条外层，见 VisibilityEditControl）；
+     * 默认 false = 摘要 + 编辑按钮（保持旧调用方行为）。
+     */
+    summaryOnly?: boolean;
+}): ReactNode;
+/**
+ * v22：全局条目的「编辑可见范围」外层入口（详情状态条右侧，不用先展开元数据面板）。
+ *
+ * 只渲染一个胶囊按钮（tooltip = 可见范围摘要）+ 保存成功回调；摘要本身仍在
+ * 元数据面板的「可见范围」行（`VisibilityDetailFields summaryOnly`）。
+ */
+export declare function VisibilityEditControl({ api, domain, capabilityKey, name, entry, workspaces, globalOff, onSaved, }: {
+    api: CapabilityPanelApi;
+    domain: ClientCapabilityDomain;
+    capabilityKey: string;
+    name: string;
+    entry?: ClientCapabilityVisibility;
+    workspaces: VisibilityWorkspace[];
+    globalOff: boolean;
     onSaved: () => void;
 }): ReactNode;
 /**

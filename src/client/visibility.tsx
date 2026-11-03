@@ -292,6 +292,7 @@ export function VisibilityDetailFields({
   workspaces,
   globalOff,
   onSaved,
+  summaryOnly = false,
 }: {
   api: CapabilityPanelApi;
   domain: ClientCapabilityDomain;
@@ -305,6 +306,11 @@ export function VisibilityDetailFields({
   globalOff: boolean;
   /** 保存成功后回调（面板重拉列表 + 全局层）。 */
   onSaved: () => void;
+  /**
+   * v22：只渲染「可见范围」摘要（编辑入口在详情状态条外层，见 VisibilityEditControl）；
+   * 默认 false = 摘要 + 编辑按钮（保持旧调用方行为）。
+   */
+  summaryOnly?: boolean;
 }): ReactNode {
   const [open, setOpen] = useState(false);
   const summary = visibilitySummaryText(entry, workspaces, globalOff);
@@ -316,9 +322,11 @@ export function VisibilityDetailFields({
           <span className="skp-vis-detail-summary" title={summary}>
             {summary}
           </span>
-          <button type="button" className="skp-btn" onClick={() => setOpen(true)}>
-            编辑可见范围
-          </button>
+          {!summaryOnly && (
+            <button type="button" className="skp-btn" onClick={() => setOpen(true)}>
+              编辑可见范围
+            </button>
+          )}
         </div>
         <div className="skp-vis-tip">{VISIBILITY_EFFECT_NOTE}</div>
         {open && (
@@ -338,6 +346,63 @@ export function VisibilityDetailFields({
           />
         )}
       </dd>
+    </>
+  );
+}
+
+/**
+ * v22：全局条目的「编辑可见范围」外层入口（详情状态条右侧，不用先展开元数据面板）。
+ *
+ * 只渲染一个胶囊按钮（tooltip = 可见范围摘要）+ 保存成功回调；摘要本身仍在
+ * 元数据面板的「可见范围」行（`VisibilityDetailFields summaryOnly`）。
+ */
+export function VisibilityEditControl({
+  api,
+  domain,
+  capabilityKey,
+  name,
+  entry,
+  workspaces,
+  globalOff,
+  onSaved,
+}: {
+  api: CapabilityPanelApi;
+  domain: ClientCapabilityDomain;
+  capabilityKey: string;
+  name: string;
+  entry?: ClientCapabilityVisibility;
+  workspaces: VisibilityWorkspace[];
+  globalOff: boolean;
+  onSaved: () => void;
+}): ReactNode {
+  const [open, setOpen] = useState(false);
+  const summary = visibilitySummaryText(entry, workspaces, globalOff);
+  return (
+    <>
+      <button
+        type="button"
+        className="skp-strip-meta-btn"
+        title={`可见范围：${summary}（点击按工作区配置可见与默认开关）`}
+        onClick={() => setOpen(true)}
+      >
+        编辑可见范围
+      </button>
+      {open && (
+        <VisibilityModal
+          api={api}
+          domain={domain}
+          capabilityKey={capabilityKey}
+          name={name}
+          entry={entry}
+          workspaces={workspaces}
+          globalOff={globalOff}
+          onClose={() => setOpen(false)}
+          onSaved={() => {
+            setOpen(false);
+            onSaved();
+          }}
+        />
+      )}
     </>
   );
 }
