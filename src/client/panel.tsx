@@ -59,7 +59,6 @@ import {
   DetailTitleBar,
   MetaCell,
   MetaGrid,
-  MetaPanel,
   MoreMenu,
   StripSeparator,
   ToggleSwitch,
@@ -1655,7 +1654,7 @@ function SkillDetail({
       </div>
 
       {metaOpen && (
-        <MetaPanel>
+        <Modal wide title={`元数据 · ${summary.name}`} onClose={() => setMetaOpen(false)}>
           <MetaGrid>
             <MetaCell label="来源">{sourceText}</MetaCell>
             <MetaCell label="格式">{summary.format === "directory" ? "目录（多文件）" : "单文件"}</MetaCell>
@@ -1687,7 +1686,17 @@ function SkillDetail({
             </dl>
           )}
           {frontmatter !== undefined && <SkillFrontmatterSection spec={frontmatter} />}
-        </MetaPanel>
+          <div className="skp-modal-actions">
+            {summary.path !== undefined && (
+              <button type="button" className="skp-btn" onClick={() => void copyPath()}>
+                {copied ? "已复制路径" : "复制路径"}
+              </button>
+            )}
+            <button type="button" className="skp-btn" onClick={() => setMetaOpen(false)}>
+              关闭
+            </button>
+          </div>
+        </Modal>
       )}
 
       {opError !== undefined && (

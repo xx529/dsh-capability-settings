@@ -12,12 +12,14 @@
  */
 import type { ReactNode } from "react";
 /** 模态框外壳：标题 + 内容；点遮罩关闭（内容区点击已拦截）。 */
-export declare function Modal({ title, children, header, footer, onClose, }: {
+export declare function Modal({ title, children, header, footer, wide, onClose, }: {
     title: string;
     children: ReactNode;
     /** 可选：固定头（不随内容滚动），如可见性弹层的模式分段 + 说明。 */
     header?: ReactNode;
     /** 可选：固定底栏（不随内容滚动），如「取消 / 保存」。传入后内容区独立滚动。 */
     footer?: ReactNode;
+    /** 宽版（元数据弹层用：三列网格 + 长路径需要更多横向空间）。 */
+    wide?: boolean;
     onClose: () => void;
 }): import("react").JSX.Element;

@@ -19,6 +19,7 @@ export function Modal({
   children,
   header,
   footer,
+  wide = false,
   onClose,
 }: {
   title: string;
@@ -27,13 +28,16 @@ export function Modal({
   header?: ReactNode;
   /** 可选：固定底栏（不随内容滚动），如「取消 / 保存」。传入后内容区独立滚动。 */
   footer?: ReactNode;
+  /** 宽版（元数据弹层用：三列网格 + 长路径需要更多横向空间）。 */
+  wide?: boolean;
   onClose: () => void;
 }) {
   const fixed = header !== undefined || footer !== undefined;
+  const sizeClass = wide ? " skp-modal-wide" : "";
   return (
     <div className="skp-modal-overlay" onClick={onClose}>
       <div
-        className={fixed ? "skp-modal skp-modal-fixed" : "skp-modal"}
+        className={(fixed ? "skp-modal skp-modal-fixed" : "skp-modal") + sizeClass}
         role="dialog"
         aria-label={title}
         onClick={(e) => e.stopPropagation()}

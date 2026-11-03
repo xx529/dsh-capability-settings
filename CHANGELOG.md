@@ -3,6 +3,27 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.12.2] - 2026-11-03
+
+### 变更
+
+- **详情状态条三个入口样式统一、全部走弹窗**（用户反馈）：
+  - `编辑可见范围` / `使用记录` / `元数据` 统一为同一款胶囊按钮（`skp-strip-meta-btn`），
+    不再混用文字链接；
+  - `元数据` 从 inline 展开面板改为**宽版弹窗**（`Modal wide`，760px：三列元数据网格 +
+    可见范围摘要 + frontmatter / 服务器提示 + 复制动作 + 关闭）；
+  - `使用记录`、`编辑可见范围` 继续走弹窗；MCP / Skills 两域一致（Skills 无工具调用
+    数据源，因此只有「编辑可见范围 / 元数据」两项）。
+  - `detail-shell.tsx` 移除未再使用的 `MetaPanel`；`Modal` 新增 `wide` 选项。
+
+### 验证
+
+- `pnpm typecheck` / `pnpm build` → 0。
+- `node notes/verify/v22-detail-layout.mjs` → 13/13（新增 V22-09：三个入口同类名；
+  V22-04 改为断言宽弹窗；V22-08c 断言弹窗内只留可见范围摘要）。
+- `node notes/verify/v22-visual.mjs` → 真实渲染截图 `notes/real-gui-evidence/v22/`
+  （mcp-detail.png / mcp-metadata-modal.png）。
+
 ## [1.12.1] - 2026-11-03
 
 ### 修复

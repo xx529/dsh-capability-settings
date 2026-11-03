@@ -50,7 +50,6 @@ import {
   DetailTitleBar,
   MetaCell,
   MetaGrid,
-  MetaPanel,
   MoreMenu,
   StripSeparator,
   ToggleSwitch,
@@ -1532,7 +1531,7 @@ function McpExternalDetail({
             命名空间 <span className="skp-strip-strong">{namespace}</span>
           </span>
           <span className="skp-strip-right">
-            <button type="button" className="skp-link-btn" onClick={() => setUsageOpen(true)}>
+            <button type="button" className="skp-strip-meta-btn" onClick={() => setUsageOpen(true)}>
               使用记录
             </button>
             <button
@@ -1548,7 +1547,7 @@ function McpExternalDetail({
       </div>
 
       {metaOpen && (
-        <MetaPanel>
+        <Modal wide title={`元数据 · ${server.serverName}`} onClose={() => setMetaOpen(false)}>
           {externalAttributionIsSpeculative(server) && (
             <div className="skp-note skp-note-warn">来源为推测，请核对工具清单</div>
           )}
@@ -1633,15 +1632,18 @@ function McpExternalDetail({
               </dd>
             </dl>
           </div>
-          <div className="skp-meta-actions">
+          <div className="skp-modal-actions">
             <button type="button" className="skp-btn" onClick={() => copyText("namespace", namespace)}>
               {copiedKey === "namespace" ? "已复制命名空间" : "复制命名空间"}
             </button>
             <button type="button" className="skp-btn" onClick={() => copyText("source", sourceLabel)}>
               {copiedKey === "source" ? "已复制来源" : "复制来源"}
             </button>
+            <button type="button" className="skp-btn" onClick={() => setMetaOpen(false)}>
+              关闭
+            </button>
           </div>
-        </MetaPanel>
+        </Modal>
       )}
 
       <div className="skp-detail-toolbar">
@@ -1982,7 +1984,7 @@ function McpDetail({
                 onSaved={onVisibilitySaved}
               />
             )}
-            <button type="button" className="skp-link-btn" onClick={() => setUsageOpen(true)}>
+            <button type="button" className="skp-strip-meta-btn" onClick={() => setUsageOpen(true)}>
               使用记录
             </button>
             <button
@@ -1998,7 +2000,7 @@ function McpDetail({
       </div>
 
       {metaOpen && (
-        <MetaPanel>
+        <Modal wide title={`元数据 · ${server.key}`} onClose={() => setMetaOpen(false)}>
           <MetaGrid>
             <MetaCell label="命名空间" mono title={namespace}>
               {namespace}
@@ -2014,7 +2016,7 @@ function McpDetail({
             )}
           </MetaGrid>
           {instruction.length > 0 && (
-            <div className="skp-meta-wide" style={{ marginTop: 12 }}>
+            <div className="skp-meta-wide">
               <span className="skp-meta-label">服务器提示</span>
               <p style={{ margin: "4px 0 0", fontSize: 12, lineHeight: "18px", color: "var(--skp-text-2)", whiteSpace: "pre-wrap" }}>
                 {instruction}
@@ -2022,7 +2024,7 @@ function McpDetail({
             </div>
           )}
           {scope === "global" && isGlobal && (
-            <dl className="skp-detail-fields" style={{ marginTop: 12 }}>
+            <dl className="skp-detail-fields">
               <VisibilityDetailFields
                 summaryOnly
                 api={panelApi}
@@ -2037,7 +2039,7 @@ function McpDetail({
             </dl>
           )}
           {isReference && <div className="skp-note">引用：内容跟随全局配置，默认开关只作用于本工作区。</div>}
-          <div className="skp-meta-actions">
+          <div className="skp-modal-actions">
             <button type="button" className="skp-btn" onClick={() => copyText("namespace", namespace)}>
               {copiedKey === "namespace" ? "已复制命名空间" : "复制命名空间"}
             </button>
@@ -2047,8 +2049,11 @@ function McpDetail({
             <button type="button" className="skp-btn" onClick={() => copyText("path", server.filePath)}>
               {copiedKey === "path" ? "已复制路径" : "复制配置文件路径"}
             </button>
+            <button type="button" className="skp-btn" onClick={() => setMetaOpen(false)}>
+              关闭
+            </button>
           </div>
-        </MetaPanel>
+        </Modal>
       )}
 
       <div className="skp-detail-toolbar">

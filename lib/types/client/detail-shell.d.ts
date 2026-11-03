@@ -11,8 +11,8 @@
  * 内容区（flex:1，内部滚动）
  * ```
  *
- * 长元数据（URL / 配置文件 / frontmatter / 可见范围 …）由 `MetaPanel` 承载，
- * 默认收起、点状态条右侧「元数据」展开；低频与破坏性动作收进 `MoreMenu`。
+ * 长元数据（URL / 配置文件 / frontmatter / 可见范围 …）点状态条右侧「元数据」
+ * 以宽弹窗打开（`Modal wide`）；低频与破坏性动作收进 `MoreMenu`。
  *
  * 纯展示组件，不含业务状态；MCP / Skills 两个域各自传入数据与回调。
  *
@@ -62,10 +62,6 @@ export interface MoreMenuItem {
 export declare function MoreMenu({ items, label }: {
     items: MoreMenuItem[];
     label?: string;
-}): import("react").JSX.Element;
-/** 元数据面板（默认收起；展开后内容区整体下移，自身不滚动）。 */
-export declare function MetaPanel({ children }: {
-    children: ReactNode;
 }): import("react").JSX.Element;
 /** 元数据网格（3 列；窄容器降为 2 列 / 1 列）。 */
 export declare function MetaGrid({ children }: {
