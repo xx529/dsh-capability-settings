@@ -3,6 +3,21 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.11.1] - 2026-11-03
+
+### 修复
+
+- **项目自己的 Skills / MCP 行不再显示「默认 · 跟随全局」**：项目条目没有「全局默认」
+  概念，这段文案无意义；现在项目原生条目的行尾开关不显示该标签（tooltip 说明是
+  「本项目默认」）。工作区视图里全局条目的「跟随全局 / 已覆盖」保留。
+- **项目 MCP 行尾开关勾选态修正**：工作区视图里项目原生 MCP 的开关现在表示「本工作区
+  默认是否启用」（`disabledInProject`），原来错误地显示配置文件条目自身的 enabled；
+  点击仍写 `capability-overrides.json` 的 `projects.<工作区>.mcp`。
+
+### 验证
+
+- `npx tsc --noEmit` / `pnpm build` → 0；v21 UI 24/24、v20.2 UI 9/9。
+
 ## [1.11.0] - 2026-11-02
 
 ### 变更（破坏性）

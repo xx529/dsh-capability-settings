@@ -1766,7 +1766,8 @@ const SkillListRow = memo(function SkillListRow({
             : "已禁用";
   // v21 UX 修订：全局视图行尾不再有单开关（默认按工作区在弹层里配）；
   // 工作区视图保留行尾默认开关（写本工作区覆盖）。
-  const switchLabel = `默认 · ${overrideState === "inherit" ? "跟随全局" : "已覆盖"}`;
+  /** 项目自己的技能没有「全局默认」可言：不显示「跟随全局/已覆盖」文案。 */
+  const switchLabel = isProject ? "" : `默认 · ${overrideState === "inherit" ? "跟随全局" : "已覆盖"}`;
   return (
     <div
       role="option"
@@ -1830,7 +1831,7 @@ const SkillListRow = memo(function SkillListRow({
             onClick={(event) => event.stopPropagation()}
             onKeyDown={(event) => event.stopPropagation()}
           >
-            <span className="skp-row-default-label">{switchLabel}</span>
+            {switchLabel.length > 0 && <span className="skp-row-default-label">{switchLabel}</span>}
             <span className="skp-switch">
               <input
                 type="checkbox"

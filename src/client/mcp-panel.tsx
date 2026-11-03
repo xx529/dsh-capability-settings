@@ -136,7 +136,8 @@ function McpServerRowImpl({
 }) {
   const isGlobal = server.scope === "global";
   // 勾选态：全局视图 = 配置级 enabled；工作区视图 = 该工作区默认是否启用。
-  const checked = scope === "global" ? server.enabled : isGlobal ? server.disabledInProject !== true : server.enabled;
+  // 工作区视图：两种条目都表示「该工作区默认是否启用」（项目条目同样有本工作区默认）。
+  const checked = scope === "global" ? server.enabled : server.disabledInProject !== true;
   const dotClass = checked ? "skp-dot skp-dot-enabled" : "skp-dot skp-dot-hollow";
   /** 归属标签按「出身」：引用 / 旧版导入副本本质是全局条目，标「引用」「导入」。 */
   const scopeTag =
@@ -148,11 +149,15 @@ function McpServerRowImpl({
           ? { label: "全局", className: "skp-tag skp-tag-global" }
           : { label: "本项", className: "skp-tag skp-tag-project" };
   const defaultOff = scope === "workspace" && isGlobal && server.disabledInProject === true;
+  /** 项目原生条目没有「全局默认」可言：不显示「跟随全局/已覆盖」文案。 */
+  const isProjectEntry = scope === "workspace" && !isGlobal;
   const switchLabel = invisible
     ? "不可见 · 不参与默认"
-    : scope === "global"
-      ? "全局默认"
-      : `默认 · ${overrideState === "inherit" ? "跟随全局" : "已覆盖"}`;
+    : isProjectEntry
+      ? ""
+      : scope === "global"
+        ? "全局默认"
+        : `默认 · ${overrideState === "inherit" ? "跟随全局" : "已覆盖"}`;
   /** 只有全局视图的全局条目能编辑可见性（项目原生 / 引用不参与）。 */
   const showVisibility = scope === "global" && isGlobal;
   return (
@@ -220,17 +225,21 @@ function McpServerRowImpl({
         <label
           className="skp-row-toggle"
           title={
-            checked
-              ? "关闭：仅此工作区默认不启用（写项目覆盖，其它工作区不受影响）"
-              : "打开：仅此工作区默认启用（写项目覆盖）"
+            isProjectEntry
+              ? checked
+                ? "本项目默认：新建对话启用该 MCP；点击仅改本工作区默认"
+                : "本项目默认：新建对话不启用该 MCP；点击仅改本工作区默认"
+              : checked
+                ? "关闭：仅此工作区默认不启用（写项目覆盖，其它工作区不受影响）"
+                : "打开：仅此工作区默认启用（写项目覆盖）"
           }
         >
-          <span className="skp-row-default-label">{switchLabel}</span>
+          {switchLabel.length > 0 && <span className="skp-row-default-label">{switchLabel}</span>}
           <span className="skp-switch">
             <input
               type="checkbox"
               role="switch"
-              aria-label={`${switchLabel} ${server.key}`}
+              aria-label={`${isProjectEntry ? "本项目默认" : switchLabel} ${server.key}`}
               checked={checked}
               disabled={busy}
               onChange={() => onToggleDefault(server)}
@@ -730,8 +739,7 @@ export function McpView({
     if (busyKey !== undefined) return;
     // 当前勾选态（与 McpServerRow 的行内口径一致）：全局配置条目看配置级 enabled；
     // 全局视图看配置级 enabled；工作区视图的全局条目看本工作区有效默认。
-    const current =
-      scope === "global" ? server.enabled : server.scope === "global" ? server.disabledInProject !== true : server.enabled;
+    const current = scope === "global" ? server.enabled : server.disabledInProject !== true;
     setBusyKey(id);
     setDefaultError(undefined);
     try {
