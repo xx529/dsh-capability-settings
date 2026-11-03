@@ -99,7 +99,7 @@ danger-full-access 审批重试同一条命令即可。手动兜底通道仍是 
 | `src/channel.ts` | RPC 通道名唯一来源：`CHANNEL = "/capability-panel"`（两端 import，禁止硬编码） |
 | `src/remote.ts` | 宿主 ⇄ 浏览器 RPC：在 `webServer` 挂 `CHANNEL` 前缀路由；endpoint 为 `skills.* / mcp.* / quick.* / overrides.*`（见文件头注释与路由表） |
 | `src/client.ts` | 客户端插件入口：注入样式/语言包，注册 `sidebar.panellist` + `main`（面板）与 `conversation.input.*`（composer），构造面板 api 与**每会话** composer api |
-| `src/client/*.tsx` | UI：`panel.tsx`（skills/quick 共用列表/详情）、`mcp-panel.tsx`、`quick-messages-panel.tsx`、`composer-*.tsx`、`composer-capability.tsx`（会话能力：首屏 `conversation.hero.options` 行内入口 + 背景模糊配置弹窗 + 顶部「能力」Tab 整页；Tab 打开时隐藏输入框）、`select.tsx`（自绘下拉）、`panel-entry.tsx`（主区域页面 + 侧栏图标）、`styles.ts` |
+| `src/client/*.tsx` | UI：`panel.tsx`（skills/quick 共用列表/详情）、`mcp-panel.tsx`、`quick-messages-panel.tsx`、`detail-shell.tsx`（v22 详情页共用外壳：`DetailPage` 固定头部三段 / `DetailTitleBar` / `DetailStrip` / `ToggleSwitch` / `MoreMenu` / `MetaPanel`）、`composer-*.tsx`、`composer-capability.tsx`（会话能力：首屏 `conversation.hero.options` 行内入口 + 背景模糊配置弹窗 + 顶部「能力」Tab 整页；Tab 打开时隐藏输入框）、`select.tsx`（自绘下拉）、`panel-entry.tsx`（主区域页面 + 侧栏图标）、`styles.ts` |
 | `src/{skills,mcp,quick-messages,overrides,imports}/` | 各域宿主实现（配置读写、CRUD、挂载、探测、声明文件）；`skills/session.ts` = 会话级 Skills 开关（agent 作用域同名 runtime shadow，按会话落盘 + 项目默认投影） |
 | `src/session-state.ts` | 会话级开关持久化（`<dshHome>/dsh-capability-settings/session-capabilities.json`：原子写 + 文件锁 + 懒加载 + 两阶段对账；Skills / MCP / Tools / 派生继承共用一个实例） |
 | `src/derive/manager.ts` | 派生继承（spawn-time snapshot）：`agent/created` 且 `source=startup` 时按父会话 `deriveMode` 把三域显式覆盖复制到 child 记录（或只写工作区快照）；早于三个域注册 |
@@ -259,6 +259,13 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
     行尾开关可写 `190:7` / 工作区视图 · 继承·已覆盖全局默认 `190:79` / 优先级与落点
     规范 `190:153`）。对应实现：MCP 全局默认层（`capability-global-overrides.json` 的
     `mcp` 名单 + 项目 `enabledMcp` 三态）。
+  - `Capability Panel · 详情页内容优先 v22 草案`（page `201:2`）：**详情页布局基线（已落代码）**——
+    头部压缩为「标题行 / 状态条 / 内容工具条」三段 + 长元数据收进可展开面板；MCP 用
+    方案 B 主从分栏（左 262px 工具列表 + 右常驻参数详情），Skills **目录树常驻**（单文件也显示）。
+    6 帧 1194×878：MCP 备选 A 手风琴 `201:224` / A + 元数据 `201:466` / **MCP 定稿 B `201:763`** /
+    Skills 单文件 `201:1108` / Skills 多文件 + 元数据 `201:1303` / 规范 `201:1654`；待确认清单
+    `201:1744`。预览图 `docs/figma/preview/v22-*`；对应实现 `src/client/detail-shell.tsx`、
+    `mcp-panel.tsx`、`panel.tsx`、`skill-content.tsx`、`styles.ts`。
   - `Capability Panel · 可见性与默认 v21 草案`（page `192:2`）：5 块（全局可见性标签/每工作区
     默认 `193:35` / 可见范围弹层 `193:152` / 工作区只列可见 `193:323` / 首屏复用既有弹窗
     `194:645` / 规范 `193:550`）。对应实现：v21 能力可见性（`visibility` v2 + 三域

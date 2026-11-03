@@ -53,6 +53,18 @@ import { JevPanel } from "./jev-panel.js";
 import { Modal } from "./modal.js";
 import { ScopeChain } from "./scope-chain.js";
 import { SkpSelect } from "./select.js";
+import {
+  DetailPage,
+  DetailStrip,
+  DetailTitleBar,
+  MetaCell,
+  MetaGrid,
+  MetaPanel,
+  MoreMenu,
+  StripSeparator,
+  ToggleSwitch,
+  type MoreMenuItem,
+} from "./detail-shell.js";
 import { isProjectSource, useAsyncList } from "./panel-common.js";
 import {
   EMPTY_VISIBILITY_SETS,
@@ -1128,7 +1140,7 @@ function SkillsView({
         </div>
 
         {/* 详情栏：作用域链（全局 → 工作区）+ 条目详情。 */}
-        <div className="skp-detail skp-detail-fixed">
+        <div className="skp-detail skp-detail-fixed skp-detail-flush">
           {selectedItem !== undefined ? (
             <SkillDetail
               key={skillRowKey(selectedItem)}
@@ -1247,6 +1259,8 @@ function SkillDetail({
   const [exportPathOpen, setExportPathOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  /** v22：长元数据（frontmatter / 可见范围 / 路径 / 调用方式）默认收起。 */
+  const [metaOpen, setMetaOpen] = useState(false);
   /**
    * v21.2：详情 frontmatter（`skills.read` 的 spec：name/description/whenToUse/
    * invocation/metadata）。读取失败或注入行 fallback 失败时静默降级（不渲染区块，
@@ -1444,224 +1458,234 @@ function SkillDetail({
         ? "将删除全局 Skills，所有工作区都将不再可用。此操作不可撤销。"
         : "将删除本工作区中的这份 Skills（含目录下的所有文件）。此操作不可撤销。";
 
+  const sourceText = injected
+    ? (summary.channel !== undefined && summary.channel.length > 0 ? summary.channel : originLabel(summary))
+    : summary.source;
+  const formatText = injected
+    ? injectedOriginText(summary)
+    : summary.format === "directory"
+      ? "目录格式"
+      : "单文件";
+  const invocationNode =
+    injected || summary.readOnly || summary.shadowStub === true ? (
+      <span>
+        模型 {summary.modelInvocable ? "✓" : "✗"} · 用户 {summary.userInvocable ? "✓" : "✗"}
+      </span>
+    ) : (
+      <span className="skp-invoke-btns">
+        <button
+          type="button"
+          className={`skp-btn ${summary.modelInvocable ? "skp-state-on" : "skp-state-off"}`}
+          disabled={busy}
+          title={
+            summary.modelInvocable
+              ? "点击关闭模型调用（agent 不再自动触发；用户仍可 /name 调用）"
+              : "点击开启模型调用（agent 可自动触发）"
+          }
+          onClick={() => void doSetInvocation(!summary.modelInvocable, summary.userInvocable)}
+        >
+          模型 {summary.modelInvocable ? "✓" : "✗"}
+        </button>
+        <button
+          type="button"
+          className={`skp-btn ${summary.userInvocable ? "skp-state-on" : "skp-state-off"}`}
+          disabled={busy}
+          title={
+            summary.userInvocable
+              ? "点击关闭用户调用（输入框 /name 不再注入此 Skills；模型仍可自动触发）"
+              : "点击开启用户调用（输入框 /name 可注入此 Skills）"
+          }
+          onClick={() => void doSetInvocation(summary.modelInvocable, !summary.userInvocable)}
+        >
+          用户 {summary.userInvocable ? "✓" : "✗"}
+        </button>
+      </span>
+    );
+  /** v22：低频与破坏性动作收进 ⋯ 菜单（启停开关常驻标题行）。 */
+  const menuItems: MoreMenuItem[] = [];
+  if (summary.path !== undefined) {
+    menuItems.push({ key: "copy-path", label: copied ? "已复制路径" : "复制路径", onSelect: () => void copyPath() });
+  }
+  if (!summary.readOnly && !injected) {
+    if (hasWorkspace && isGlobal) {
+      menuItems.push({
+        key: "import",
+        label: confirmImport ? "确认覆盖工作区内的同名 Skills？" : "复制到本工作区",
+        danger: confirmImport,
+        title: confirmImport
+          ? "工作区内已有同名 Skills，再次点击将覆盖为全局副本"
+          : "复制到本工作区（.agents/skills），此后可在本工作区独立启停",
+        onSelect: () => void doImport(confirmImport),
+      });
+    }
+    menuItems.push({ key: "export", label: "导出", onSelect: () => void doExportDownload() });
+    menuItems.push({ key: "export-path", label: "导出到路径…", onSelect: () => setExportPathOpen(true) });
+    menuItems.push({ key: "delete", label: "删除", danger: true, title: deleteBody, onSelect: () => setDeleteOpen(true) });
+  }
+  const toggleTitle = injected || summary.readOnly
+    ? "只读条目不可启停"
+    : state === "partial"
+      ? "部分禁用（模型 / 用户其一已关）：点击启用全部调用方向"
+      : state === "full"
+        ? isGlobal
+          ? "全局默认在列表行尾设置；此处切换会同时影响所有工作区"
+          : "点击禁用（用户与模型都不可调用）"
+        : "点击启用（恢复用户与模型调用）";
   return (
-    <div className="skp-detail-card">
-      {/* 标题行：名称 + 归属/来源标签 + 只读/覆盖/遮蔽徽标 + 右侧「复制路径」。 */}
-      <div className="skp-detail-head">
-        <h3 title={summary.name}>{summary.name}</h3>
-        {injected ? (
-          <>
-            <span className={originTagClass(summary)} title="注入来源类别（内置 / 插件 / 预设渠道）">
-              {originLabel(summary)}
-            </span>
-            <span className="skp-tag skp-tag-flat">{summary.format === "directory" ? "目录" : ".md"}</span>
-            {summary.channel !== undefined && summary.channel.length > 0 && (
-              <span className="skp-tag skp-tag-channel" title="注入方 / 渠道名（只读来源，无磁盘副本）">
-                {summary.channel}
-              </span>
-            )}
-          </>
-        ) : (
-          <>
-            <span
-              className={isGlobal ? "skp-tag skp-tag-global" : "skp-tag skp-tag-project"}
-              title={isGlobal ? "全局 Skills（对所有工作区生效）" : "仅存在于所选工作区的 Skills"}
-            >
-              {isGlobal ? "全局" : "本项"}
-            </span>
-            <span className="skp-tag skp-tag-flat">{summary.format === "directory" ? "目录" : ".md"}</span>
-            {summary.readOnly && <span className="skp-badge">只读</span>}
-          </>
-        )}
-        {!injected && summary.shadowStub === true && (
-          <span className="skp-badge" title="屏蔽占位：使同名全局 Skills 在本工作区不可用；删除本条目即可恢复">
-            屏蔽占位
-          </span>
-        )}
-        {isGlobal && summary.projectShadow === "stub" && (
-          <span className="skp-badge" title="该工作区已禁用同名全局 Skills；可在工作区作用域重新打开（不影响其它工作区）">
-            工作区默认关闭
-          </span>
-        )}
-        {isGlobal && summary.projectShadow === "skill" && (
-          <span className="skp-badge" title="工作区有同名 Skills，按宿主优先级在该工作区生效的是工作区副本">
-            工作区副本生效中
-          </span>
-        )}
-        <span className="skp-detail-head-spacer" />
-        {summary.path !== undefined && (
-          <button type="button" className="skp-link-btn" title={summary.path} onClick={() => void copyPath()}>
-            {copied ? "已复制" : "复制路径"}
-          </button>
-        )}
-      </div>
-
-      {injected && (
-        <div className="skp-detail-readonly">
-          <span className="skp-detail-readonly-icon" aria-hidden="true">
-            i
-          </span>
-          <span>{injectedReadonlyNote(summary)}</span>
-        </div>
-      )}
-
-      {/* v20.1：两段作用域链（全局 → 工作区）。全局视图先选工作区，再切换。 */}
-      <ScopeChain
-        scope={scope}
-        projectName={projectName}
-        globalSeg={globalSegment}
-        workspaceSeg={workspaceSegment}
-        workspaces={workspaces}
-        onSelectWorkspace={onSelectWorkspace}
-      />
-
-      {visibility !== undefined && (
-        <dl className="skp-detail-fields">
-          <VisibilityDetailFields
-            api={visibility.api}
-            domain="skills"
-            capabilityKey={summary.name}
-            name={summary.name}
-            entry={visibility.entry}
-            workspaces={workspaces}
-            globalOff={visibility.globalOff}
-            onSaved={visibility.onSaved}
-          />
-        </dl>
-      )}
-
-      {!summary.readOnly && !injected && (
-        <div className="skp-detail-actions">
-          {!isGlobal && summary.shadowStub !== true && (
-            <button
-              type="button"
-              className={`skp-btn ${state === "full" ? "skp-state-on" : state === "partial" ? "skp-state-partial" : "skp-state-off"}`}
-              disabled={busy}
-              title={state === "full" ? "点击禁用（用户与模型都不可调用）" : "点击启用（恢复用户与模型调用）"}
-              onClick={() => void doSetEnabled(state !== "full")}
-            >
-              {state === "full" ? "已启用" : state === "none" ? "已禁用" : "部分禁用"}
-            </button>
-          )}
-          {isGlobal && state !== "full" && (
-            <button
-              type="button"
-              className="skp-btn skp-state-off"
-              disabled={busy}
-              title="此全局 Skills 当前为禁用状态；点击恢复启用（对所有项目生效）"
-              onClick={() => void doSetEnabled(true)}
-            >
-              已禁用
-            </button>
-          )}
-          {hasWorkspace && isGlobal && (
-            <button
-              type="button"
-              className={confirmImport ? "skp-btn skp-btn-danger" : "skp-btn"}
-              disabled={busy}
-              title={
-                confirmImport
-                  ? "工作区内已有同名 Skills，再次点击将覆盖为全局副本"
-                  : "复制到本工作区（.agents/skills），此后可在本工作区独立启停"
-              }
-              onClick={() => void doImport(confirmImport)}
-            >
-              {confirmImport ? "确认覆盖工作区内的同名 Skills？" : "复制到本工作区"}
-            </button>
-          )}
-          <button type="button" className="skp-btn" disabled={busy} onClick={() => void doExportDownload()}>
-            导出
-          </button>
-          <button type="button" className="skp-btn" disabled={busy} onClick={() => setExportPathOpen(true)}>
-            导出到路径…
-          </button>
-          <button
-            type="button"
-            className="skp-btn skp-btn-danger-ghost"
-            disabled={busy}
-            title={deleteBody}
-            onClick={() => setDeleteOpen(true)}
-          >
-            删除
-          </button>
-        </div>
-      )}
-
-      {/* 描述 / 使用时机（旧版详情字段，压缩为 2 行；正文里也有完整内容）。 */}
-      {(summary.description.length > 0 || summary.whenToUse !== undefined) && (
-        <div className="skp-detail-desc">
-          {summary.description.length > 0 && <p className="skp-detail-desc-text">{summary.description}</p>}
-          {summary.whenToUse !== undefined && (
-            <p className="skp-detail-desc-text">
-              <span className="skp-detail-meta-strong">使用时机</span> {summary.whenToUse}
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* 元信息条（单行，压缩自旧版 dl 字段；调用方式开关保留原语义）。 */}
-      <div className="skp-detail-meta">
-        <span className="skp-detail-meta-item">
-          来源{" "}
-          <span className="skp-detail-meta-strong">
-            {injected ? (summary.channel !== undefined && summary.channel.length > 0 ? summary.channel : originLabel(summary)) : summary.source}
-          </span>
-        </span>
-        <span className="skp-detail-meta-item">
-          {injected ? injectedOriginText(summary) : summary.format === "directory" ? "目录格式" : "单文件"}
-        </span>
-        {(injected || summary.readOnly || !isGlobal) && (
-          <span className="skp-detail-meta-item">
-            调用方式
-            {injected || summary.readOnly || summary.shadowStub === true ? (
-              <span className="skp-detail-meta-strong">
-                模型 {summary.modelInvocable ? "✓" : "✗"} · 用户 {summary.userInvocable ? "✓" : "✗"}
-              </span>
+    <DetailPage>
+      {/* 头部三段：标题行（开关 + ⋯）/ 描述行 / 状态条（作用域链 + 来源 + 元数据）。 */}
+      <div className="skp-detail-head-wrap">
+        <DetailTitleBar
+          title={summary.name}
+          tags={
+            injected ? (
+              <>
+                <span className={originTagClass(summary)} title="注入来源类别（内置 / 插件 / 预设渠道）">
+                  {originLabel(summary)}
+                </span>
+                <span className="skp-tag skp-tag-flat">{summary.format === "directory" ? "目录" : ".md"}</span>
+                {summary.channel !== undefined && summary.channel.length > 0 && (
+                  <span className="skp-tag skp-tag-channel" title="注入方 / 渠道名（只读来源，无磁盘副本）">
+                    {summary.channel}
+                  </span>
+                )}
+              </>
             ) : (
-              <span className="skp-invoke-btns">
-                <button
-                  type="button"
-                  className={`skp-btn ${summary.modelInvocable ? "skp-state-on" : "skp-state-off"}`}
-                  disabled={busy}
-                  title={
-                    summary.modelInvocable
-                      ? "点击关闭模型调用（agent 不再自动触发；用户仍可 /name 调用）"
-                      : "点击开启模型调用（agent 可自动触发）"
-                  }
-                  onClick={() => void doSetInvocation(!summary.modelInvocable, summary.userInvocable)}
+              <>
+                <span
+                  className={isGlobal ? "skp-tag skp-tag-global" : "skp-tag skp-tag-project"}
+                  title={isGlobal ? "全局 Skills（对所有工作区生效）" : "仅存在于所选工作区的 Skills"}
                 >
-                  模型 {summary.modelInvocable ? "✓" : "✗"}
-                </button>
-                <button
-                  type="button"
-                  className={`skp-btn ${summary.userInvocable ? "skp-state-on" : "skp-state-off"}`}
-                  disabled={busy}
-                  title={
-                    summary.userInvocable
-                      ? "点击关闭用户调用（输入框 /name 不再注入此 Skills；模型仍可自动触发）"
-                      : "点击开启用户调用（输入框 /name 可注入此 Skills）"
-                  }
-                  onClick={() => void doSetInvocation(summary.modelInvocable, !summary.userInvocable)}
-                >
-                  用户 {summary.userInvocable ? "✓" : "✗"}
-                </button>
-              </span>
-            )}
+                  {isGlobal ? "全局" : "本项"}
+                </span>
+                <span className="skp-tag skp-tag-flat">{summary.format === "directory" ? "目录" : ".md"}</span>
+                {summary.readOnly && <span className="skp-badge">只读</span>}
+              </>
+            )
+          }
+          right={
+            <>
+              {!injected && !summary.readOnly && (
+                <ToggleSwitch
+                  checked={state !== "none"}
+                  partial={state === "partial"}
+                  disabled={busy || (isGlobal && state === "full")}
+                  label={state === "full" ? "已启用" : state === "none" ? "已禁用" : "部分禁用"}
+                  title={toggleTitle}
+                  onChange={(next) => void doSetEnabled(next)}
+                />
+              )}
+              {menuItems.length > 0 && <MoreMenu items={menuItems} />}
+            </>
+          }
+        />
+        {summary.shadowStub === true && <span className="skp-badge skp-badge-inline">屏蔽占位</span>}
+        {isGlobal && summary.projectShadow === "stub" && <span className="skp-badge skp-badge-inline">工作区默认关闭</span>}
+        {isGlobal && summary.projectShadow === "skill" && (
+          <span className="skp-badge skp-badge-inline">工作区副本生效中</span>
+        )}
+        {summary.description.length > 0 && (
+          <div className="skp-detail-desc">
+            <p className="skp-detail-desc-text" title={summary.description}>
+              {summary.description}
+            </p>
+          </div>
+        )}
+        {injected && (
+          <div className="skp-detail-readonly">
+            <span className="skp-detail-readonly-icon" aria-hidden="true">
+              i
+            </span>
+            <span>{injectedReadonlyNote(summary)}</span>
+          </div>
+        )}
+        <DetailStrip>
+          <ScopeChain
+            compact
+            scope={scope}
+            projectName={projectName}
+            globalSeg={globalSegment}
+            workspaceSeg={workspaceSegment}
+            workspaces={workspaces}
+            onSelectWorkspace={onSelectWorkspace}
+          />
+          <StripSeparator />
+          <span className="skp-strip-item">
+            来源 <span className="skp-strip-strong">{sourceText}</span>
           </span>
-        )}
-        {summary.path !== undefined && (
-          <button type="button" className="skp-detail-path" title={summary.path} onClick={() => void copyPath()}>
-            {summary.path}
-          </button>
-        )}
+          <StripSeparator />
+          <span className="skp-strip-item">{formatText}</span>
+          {summary.path !== undefined && (
+            <>
+              <StripSeparator />
+              <button
+                type="button"
+                className="skp-link-btn skp-strip-item"
+                title={summary.path}
+                onClick={() => void copyPath()}
+              >
+                {copied ? "已复制路径" : "复制路径"}
+              </button>
+            </>
+          )}
+          <span className="skp-strip-right">
+            <button
+              type="button"
+              className="skp-strip-meta-btn"
+              aria-expanded={metaOpen}
+              onClick={() => setMetaOpen((value) => !value)}
+            >
+              元数据 {metaOpen ? "⌃" : "⌄"}
+            </button>
+          </span>
+        </DetailStrip>
       </div>
 
-      {frontmatter !== undefined && <SkillFrontmatterSection spec={frontmatter} />}
+      {metaOpen && (
+        <MetaPanel>
+          <MetaGrid>
+            <MetaCell label="来源">{sourceText}</MetaCell>
+            <MetaCell label="格式">{summary.format === "directory" ? "目录（多文件）" : "单文件"}</MetaCell>
+            {summary.path !== undefined && (
+              <MetaCell label="路径" mono title={summary.path}>
+                {summary.path}
+              </MetaCell>
+            )}
+            <MetaCell label="调用方式">{invocationNode}</MetaCell>
+            {summary.whenToUse !== undefined && (
+              <MetaCell label="使用时机" title={summary.whenToUse}>
+                {summary.whenToUse}
+              </MetaCell>
+            )}
+          </MetaGrid>
+          {visibility !== undefined && (
+            <dl className="skp-detail-fields" style={{ marginTop: 12 }}>
+              <VisibilityDetailFields
+                api={visibility.api}
+                domain="skills"
+                capabilityKey={summary.name}
+                name={summary.name}
+                entry={visibility.entry}
+                workspaces={workspaces}
+                globalOff={visibility.globalOff}
+                onSaved={visibility.onSaved}
+              />
+            </dl>
+          )}
+          {frontmatter !== undefined && <SkillFrontmatterSection spec={frontmatter} />}
+        </MetaPanel>
+      )}
 
-      {opError !== undefined && <div className="skp-error">{opError}</div>}
+      {opError !== undefined && (
+        <div className="skp-error" style={{ margin: "8px 24px 0" }}>
+          {opError}
+        </div>
+      )}
 
-      {/* 内容区：文件树 + 阅读器（本版核心新增；flat 自动隐藏树）。 */}
-      <SkillContent summary={summary} api={api} refreshKey={contentVersion} />
+      {/* 内容区：目录树常驻（单文件也显示）+ 阅读器；高度由详情页 flex 分配，内部滚动。 */}
+      <div className="skp-detail-body">
+        <SkillContent summary={summary} api={api} refreshKey={contentVersion} />
+      </div>
 
       {exportPathOpen && <ExportToPathDialog summary={summary} api={api} onClose={() => setExportPathOpen(false)} />}
       {deleteOpen && (
@@ -1677,7 +1701,7 @@ function SkillDetail({
           </div>
         </Modal>
       )}
-    </div>
+    </DetailPage>
   );
 }
 

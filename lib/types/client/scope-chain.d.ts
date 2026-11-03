@@ -34,11 +34,13 @@ export interface ScopeChainSegment {
  * @param workspaces 全部工作区；全局视图点击第二段后展示
  * @param onSelectWorkspace 选中工作区后切换面板作用域
  */
-export declare function ScopeChain({ scope, projectName, globalSeg, workspaceSeg, workspaces, onSelectWorkspace, }: {
+export declare function ScopeChain({ scope, projectName, globalSeg, workspaceSeg, workspaces, onSelectWorkspace, compact, }: {
     scope: "global" | "workspace";
     projectName?: string;
     globalSeg: ScopeChainSegment;
     workspaceSeg: ScopeChainSegment;
     workspaces: ScopeChainWorkspace[];
     onSelectWorkspace(path: string): void;
+    /** v22：详情状态条里的单行紧凑态（隐藏 note，只保留 全局 → 工作区 摘要）。 */
+    compact?: boolean;
 }): import("react").JSX.Element;

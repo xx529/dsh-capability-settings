@@ -3,6 +3,43 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 变更
+
+- **详情页改为「内容优先」布局（Skills / MCP 两域）**：用户反馈旧详情把作用域卡片、
+  动作行、字段表 / frontmatter 堆在正文上方，`工具与参数`、`SKILL.md` 正文只剩半屏。
+  现在详情页是「固定头部三段 + 内容区独立滚动」：
+  - 头部 = 标题行（名称 / 徽章 / 常驻启停开关 / `⋯` 菜单）+ 状态条（单行作用域链 +
+    来源 + 命名空间 / 格式 + 使用记录 / 元数据）+ 内容工具条；MCP 约占 136px，
+    Skills 多一行描述。
+  - 长元数据（MCP 命名空间 / 命令或 URL / 配置文件 / 用途描述 / 可见范围 / 服务器提示；
+    Skills 来源 / 格式 / 路径 / 调用方式 / 使用时机 / frontmatter）收进「元数据」面板，
+    默认收起、inline 展开（内容区仍 ≥ 56%）。
+  - **MCP 工具与参数改为主从分栏**：左 262px 工具列表（搜索 / 参数数 / 选中态 /
+    ↑↓ 键盘切换），右侧常驻参数详情；详情打开即探测一次（`mcp.test`，零副作用），
+    失败只在内容区提示 + 重新测试，不影响已挂载连接。
+  - **Skills 目录树常驻**：flat / 单文件技能也显示所在目录与文件（此前隐藏树、阅读器
+    占满）；多文件仍按目录分组、点文件切预览 / 源码。
+  - 详情动作收进 `⋯` 菜单（编辑配置 / 导出 / 导出到路径 / 复制到本工作区 / 删除等），
+    危险项红色；MCP 删除改用确认对话框（原两击确认）；使用记录改为弹窗（2s 轮询不变）。
+  - 新增共享外壳 `src/client/detail-shell.tsx`（DetailPage / DetailTitleBar / DetailStrip /
+    ToggleSwitch / MoreMenu / MetaPanel）；`ScopeChain` 增加 `compact` 单行变体。
+- **Figma 原型**：新增 `Capability Panel · 详情页内容优先 v22 草案`（page `201:2`，
+  6 帧 1194×878：MCP 备选 A 手风琴 / A + 元数据 / **MCP 定稿 B 主从分栏** /
+  Skills 单文件 / Skills 多文件 + 元数据 / 规范）；预览 `docs/figma/preview/v22-*.png`。
+  2026-11-03 反馈：MCP 选方案 B；Skills 目录树必须常驻。
+
+### 验证
+
+- `pnpm typecheck` / `pnpm build` → 0。
+- `node notes/verify/v22-detail-layout.mjs` → 9/9（自动探测、工具切换、元数据面板、
+  ⋯ 菜单、开关写 `mcp.setEnabled`、Skills 目录树常驻）。
+- `node notes/verify/v22-visual.mjs` → 真实 CSS + Chromium 截图
+  `notes/real-gui-evidence/v22/mcp-detail.png`（MCP 详情主从分栏目视通过）。
+- 既有 `notes/verify/render-smoke.mjs` 12/20：失败项均为 v20.1 已删除的 ScopeNav 旧断言
+  （改动前基线同样失败），非本次回归。
+
 ## [1.11.1] - 2026-11-03
 
 ### 修复

@@ -44,6 +44,18 @@ import { Modal } from "./modal.js";
 import { ScopeChain } from "./scope-chain.js";
 import { ToolParameterTable, toolParameters } from "./tool-schema.js";
 import { SkpSelect } from "./select.js";
+import {
+  DetailPage,
+  DetailStrip,
+  DetailTitleBar,
+  MetaCell,
+  MetaGrid,
+  MetaPanel,
+  MoreMenu,
+  StripSeparator,
+  ToggleSwitch,
+  type MoreMenuItem,
+} from "./detail-shell.js";
 import { hasWorkspaceLabel, useAsyncList } from "./panel-common.js";
 import {
   EMPTY_VISIBILITY_SETS,
@@ -72,18 +84,6 @@ const ROW_SUMMARY_STYLE: CSSProperties = {
   overflow: "hidden",
   textOverflow: "ellipsis",
   WebkitLineClamp: "unset",
-};
-
-/** 详情头右侧的标签组（两个标签并排，无对应样式类）。 */
-const HEAD_TAGS_STYLE: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 6, flex: "none" };
-
-/** 检视区标题行右侧（计数 / 重新测试并排）。 */
-const INSPECT_HEAD_RIGHT_STYLE: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 10,
-  flexWrap: "wrap",
-  justifyContent: "flex-end",
 };
 
 /**
@@ -1053,7 +1053,7 @@ export function McpView({
         </div>
 
         {/* 详情栏：作用域链（全局 → 工作区）+ 条目详情。 */}
-        <div className="skp-detail skp-detail-fixed">
+        <div className="skp-detail skp-detail-fixed skp-detail-flush">
           {selectedExternal !== undefined ? (
             <McpExternalDetail
               key={selectedExternal.serverName}
@@ -1150,6 +1150,164 @@ export function McpView({
 // ---------------------------------------------------------------------------
 // 详情卡片
 // ---------------------------------------------------------------------------
+
+/**
+ * v22 工具主从分栏（MCP 详情内容区）：左 262px 工具列表（搜索 + 参数数 + 选中态）
+ * + 右常驻参数详情。切换工具只重绘右栏；搜索/选中都是本地状态，不触发探测。
+ */
+function ToolsSplitView({
+  tools,
+  selectedName,
+  onSelect,
+  query,
+  onQuery,
+  loading = false,
+}: {
+  tools: readonly ClientMcpTool[];
+  selectedName?: string;
+  onSelect(name: string): void;
+  query: string;
+  onQuery(next: string): void;
+  loading?: boolean;
+}) {
+  const filtered = useMemo(() => {
+    const keyword = query.trim().toLowerCase();
+    if (keyword.length === 0) return tools;
+    return tools.filter(
+      (tool) =>
+        tool.name.toLowerCase().includes(keyword) || (tool.description ?? "").toLowerCase().includes(keyword),
+    );
+  }, [tools, query]);
+  const selected = tools.find((tool) => tool.name === selectedName);
+  const move = (delta: number) => {
+    if (filtered.length === 0) return;
+    const index = filtered.findIndex((tool) => tool.name === selectedName);
+    const next = filtered[Math.max(0, Math.min(filtered.length - 1, (index < 0 ? 0 : index) + delta))];
+    if (next !== undefined) onSelect(next.name);
+  };
+  return (
+    <div className="skp-tools-split">
+      <div className="skp-tools-list">
+        <input
+          className="skp-tools-search"
+          type="search"
+          value={query}
+          placeholder="搜索工具…"
+          aria-label="搜索工具"
+          onChange={(event) => onQuery(event.target.value)}
+        />
+        <div
+          className="skp-tools-list-scroll"
+          role="listbox"
+          aria-label="工具列表"
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              move(1);
+            } else if (event.key === "ArrowUp") {
+              event.preventDefault();
+              move(-1);
+            }
+          }}
+        >
+          {filtered.length === 0 && (
+            <div className="skp-note">
+              {loading ? "正在读取工具清单…" : tools.length === 0 ? "该服务器未暴露工具" : "没有匹配的工具"}
+            </div>
+          )}
+          {filtered.map((tool) => {
+            const count = toolParameters(tool.parameters).length;
+            const active = tool.name === selectedName;
+            return (
+              <button
+                key={tool.name}
+                type="button"
+                role="option"
+                aria-selected={active}
+                title={tool.name}
+                className={active ? "skp-tool-row skp-tool-row-active" : "skp-tool-row"}
+                onClick={() => onSelect(tool.name)}
+              >
+                <span className="skp-tool-row-name">{tool.name}</span>
+                <span className="skp-tool-row-count">{count === 0 ? "无参数" : `${count} 个参数`}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className="skp-tool-detail">
+        <div className="skp-tool-detail-scroll">
+          {selected === undefined ? (
+            <div className="skp-note">{loading ? "正在连接并读取工具清单…" : "选择左侧工具查看参数"}</div>
+          ) : (
+            <>
+              <div className="skp-tool-detail-head">
+                <span className="skp-tool-detail-name">{selected.name}</span>
+                {selected.description !== undefined && selected.description.trim().length > 0 && (
+                  <span className="skp-tool-detail-desc">{selected.description}</span>
+                )}
+              </div>
+              <ToolParameterTable parameters={toolParameters(selected.parameters)} emptyText="该工具无参数" />
+              <div className="skp-tool-detail-note">参数来自最近一次连接快照；服务器改动后点「重新测试」刷新。</div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 「测试连接」成功报告（仅新增 / 编辑弹窗用）：状态行 + 服务器提示 + 工具名
+ * 与参数个数。详情页已改为「工具列表 + 参数详情」主从分栏（见 ToolsSplitView），
+ * 这里只保留轻量摘要，避免在弹窗里再嵌一套分栏。
+ */
+function ToolsReport({ result }: { result: McpTestResult }) {
+  if (!result.ok) return <div className="skp-error">{result.errors.join("\n")}</div>;
+  const instruction = typeof result.instruction === "string" ? result.instruction.trim() : "";
+  return (
+    <div className="skp-test">
+      <div className="skp-test-head">
+        <span className="skp-tag skp-tag-global">连接正常</span>
+        <span className="skp-test-stat">{result.tools.length} 个工具</span>
+        <span className="skp-test-stat">耗时 {result.elapsedMs}ms</span>
+      </div>
+      {instruction.length > 0 && <McpInstruction text={instruction} />}
+      {result.tools.length === 0 ? (
+        <div className="skp-note">连接成功，但服务器未暴露任何工具。</div>
+      ) : (
+        <div className="skp-test-tools">
+          {result.tools.map((tool) => {
+            const count = toolParameters(tool.parameters).length;
+            return (
+              <div key={tool.name} className="skp-test-tool-row" title={tool.name}>
+                <code className="skp-tool-name">{tool.name}</code>
+                <span className="skp-tool-count">{count === 0 ? "无参数" : `${count} 个参数`}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 服务器提示（`instructions`）：默认折叠 3 行，点「展开/收起」切换。 */
+function McpInstruction({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="skp-test-instruction">
+      <div className="skp-test-instruction-head">
+        <span className="skp-field-label">服务器提示</span>
+        <button type="button" className="skp-link-btn" onClick={() => setExpanded((value) => !value)}>
+          {expanded ? "收起" : "展开"}
+        </button>
+      </div>
+      <p className={expanded ? "skp-test-instruction-body" : "skp-test-instruction-body skp-clamp-3"}>{text}</p>
+    </div>
+  );
+}
 
 /**
  * 「使用记录」只读区：最近谁（哪个 session）在什么时候调用了该 server 的哪个 tool。
@@ -1294,166 +1452,225 @@ function McpExternalDetail({
   workspaces: Array<{ path: string; title?: string }>;
   onSelectWorkspace(path: string): void;
 }) {
-  const [toolsOpen, setToolsOpen] = useState(false);
-  // 「使用记录」：宿主内存里的 MCP 工具调用记录（只读、不落盘），打开才拉取。
+  const [metaOpen, setMetaOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
+  const [selectedTool, setSelectedTool] = useState<string | undefined>(server.tools[0]?.name);
+  const [toolQuery, setToolQuery] = useState("");
+  const [copiedKey, setCopiedKey] = useState<string | undefined>(undefined);
   const hasTools = server.tools.length > 0;
   /** 全局默认关闭（原始名单；宿主 `disabledGlobally` 为 true 时也必然是关闭）。 */
   const globalOff = globalOffProp || globalDefaultDisabled || server.disabledGlobally === true;
   /** 本工作区有效默认关闭（含全局默认继承；本工作区重新打开后为 false）。 */
   const workspaceOff = disabledInWorkspaceOf(server);
+  const namespace = `mcp__${server.serverName}__*`;
+  const sourceLabel = externalChannelOf(server) ?? server.source ?? "来源未识别";
+  const copyText = (key: string, text: string) => {
+    void navigator.clipboard?.writeText(text).catch(() => undefined);
+    setCopiedKey(key);
+    window.setTimeout(() => setCopiedKey((current) => (current === key ? undefined : current)), 1500);
+  };
+  const menuItems: MoreMenuItem[] = [
+    {
+      key: "copy-namespace",
+      label: copiedKey === "namespace" ? "已复制命名空间" : "复制命名空间",
+      onSelect: () => copyText("namespace", namespace),
+    },
+    { key: "copy-source", label: "复制来源", onSelect: () => copyText("source", sourceLabel) },
+    { key: "usage", label: "使用记录", onSelect: () => setUsageOpen(true) },
+  ];
   return (
-    <div className="skp-detail-card">
-      <div className="skp-detail-head">
-        <h3>{server.serverName}</h3>
-        <span style={HEAD_TAGS_STYLE}>
-          <ExternalSourceTags server={server} />
-          {externalAttributionIsSpeculative(server) && (
-            <span className="skp-tag skp-tag-warn" title="来源为推测，请核对工具清单">
-              推测
-            </span>
-          )}
-          <span className="skp-tag skp-tag-flat" title="配置由注入方管理（只读）；默认开关可在列表行尾设置（可写）">
-            配置只读
+    <DetailPage>
+      <div className="skp-detail-head-wrap">
+        <DetailTitleBar
+          title={server.serverName}
+          tags={
+            <>
+              <ExternalSourceTags server={server} />
+              {externalAttributionIsSpeculative(server) && (
+                <span className="skp-tag skp-tag-warn" title="来源为推测，请核对工具清单">
+                  推测
+                </span>
+              )}
+              <span className="skp-tag skp-tag-flat" title="配置由注入方管理（只读）；默认开关可在列表行尾设置（可写）">
+                配置只读
+              </span>
+            </>
+          }
+          right={<MoreMenu items={menuItems} />}
+        />
+        <DetailStrip>
+          <ScopeChain
+            compact
+            scope={scope}
+            projectName={projectName}
+            globalSeg={{
+              on: !globalOff,
+              title: globalOff ? "全局默认关闭" : "全局默认启用",
+              note: "全局默认写 capability-global-overrides.json · 不改注入方配置",
+            }}
+            workspaceSeg={{
+              on: !workspaceOff,
+              title: !workspaceOff
+                ? globalOff
+                  ? "已覆盖全局默认"
+                  : "默认启用"
+                : globalOff
+                  ? "继承全局默认关闭"
+                  : "本工作区默认关闭",
+              note: server.restrictable ? "行尾开关可写本工作区默认（不卸载共享实例）" : EXTERNAL_TOGGLE_BLOCKED_TITLE,
+            }}
+            workspaces={workspaces}
+            onSelectWorkspace={onSelectWorkspace}
+          />
+          <StripSeparator />
+          <span className="skp-strip-item">
+            来源 <span className="skp-strip-strong">{sourceLabel}</span>
           </span>
+          <StripSeparator />
+          <span className="skp-strip-item skp-strip-ellipsis" title={namespace}>
+            命名空间 <span className="skp-strip-strong">{namespace}</span>
+          </span>
+          <span className="skp-strip-right">
+            <button type="button" className="skp-link-btn" onClick={() => setUsageOpen(true)}>
+              使用记录
+            </button>
+            <button
+              type="button"
+              className="skp-strip-meta-btn"
+              aria-expanded={metaOpen}
+              onClick={() => setMetaOpen((value) => !value)}
+            >
+              元数据 {metaOpen ? "⌃" : "⌄"}
+            </button>
+          </span>
+        </DetailStrip>
+      </div>
+
+      {metaOpen && (
+        <MetaPanel>
+          {externalAttributionIsSpeculative(server) && (
+            <div className="skp-note skp-note-warn">来源为推测，请核对工具清单</div>
+          )}
+          {(server.attribution?.legacyUnit === true || typeof server.attribution?.legacyUnit === "string") && (
+            <div
+              className="skp-note"
+              title={typeof server.attribution.legacyUnit === "string" ? `旧版键：${server.attribution.legacyUnit}` : undefined}
+            >
+              旧版键已迁移
+            </div>
+          )}
+          <div className="skp-note">
+            {isSynthesized(server)
+              ? `配置只读：该实例由工具命名空间 mcp__${server.serverName}__* 合成（没有 mcp-client 实例，无配置可编辑）；默认开关可写（全局默认 / 本工作区）。`
+              : `配置只读：该 MCP 由 ${externalChannelOf(server) ?? server.source ?? "其它插件"} 在运行时注入，能力面板不能编辑或删除；默认开关可写（全局默认 / 本工作区），不卸载共享实例。`}
+          </div>
+          <div style={{ maxHeight: 300, overflow: "auto", marginTop: 10 }}>
+            <dl className="skp-detail-fields">
+              <dt>来源</dt>
+              <dd>{sourceLabel}</dd>
+              <dt>来源判定</dt>
+              <dd>{externalAttributionText(server)}</dd>
+              <dt>注入方式</dt>
+              <dd>
+                {externalInjectionText(server)}
+                {isSynthesized(server) ? "；无实例配置，传输方式未知" : ""}
+              </dd>
+              <dt>命名空间</dt>
+              <dd>
+                <code>{namespace}</code>
+              </dd>
+              {server.transport !== undefined && (
+                <>
+                  <dt>传输方式</dt>
+                  <dd>
+                    {server.transport}
+                    {server.summary !== undefined ? ` · ${server.summary}` : ""}
+                  </dd>
+                </>
+              )}
+              {scope === "global" && (
+                <VisibilityDetailFields
+                  api={panelApi}
+                  domain="mcp"
+                  capabilityKey={server.serverName}
+                  name={server.serverName}
+                  entry={visibilityEntry}
+                  workspaces={projects}
+                  globalOff={globalOff}
+                  onSaved={onVisibilitySaved}
+                />
+              )}
+              <dt>全局默认</dt>
+              <dd>
+                {globalOff
+                  ? "关闭（在「全局」作用域用列表行尾开关恢复；不改注入方配置、不卸载共享实例）"
+                  : "启用"}
+              </dd>
+              <dt>本工作区</dt>
+              <dd>
+                {!workspaceOff
+                  ? globalOff
+                    ? "已覆盖全局默认：本工作区显式重新打开"
+                    : "继承全局默认（启用）"
+                  : globalOff
+                    ? "继承全局默认（关闭）"
+                    : "本工作区默认关闭"}
+              </dd>
+              <dt>默认开关</dt>
+              <dd>
+                {server.restrictable
+                  ? "列表行尾开关可写：全局视图 = 全局默认（独立文件，所有工作区生效）；工作区视图 = 本工作区默认（可覆盖全局默认）。均不卸载共享实例。"
+                  : EXTERNAL_TOGGLE_BLOCKED_TITLE}
+              </dd>
+              <dt>本次运行调用</dt>
+              <dd>{server.calls > 0 ? `${server.calls} 次` : "还没有调用记录"}</dd>
+              <dt>管理</dt>
+              <dd>
+                {isSynthesized(server)
+                  ? "工具命名空间无法在这里编辑或卸载；请在注入方管理（默认开关仍可写）。"
+                  : "配置由注入方管理；能力面板不提供编辑/删除/卸载，但默认开关可写。"}
+              </dd>
+            </dl>
+          </div>
+          <div className="skp-meta-actions">
+            <button type="button" className="skp-btn" onClick={() => copyText("namespace", namespace)}>
+              {copiedKey === "namespace" ? "已复制命名空间" : "复制命名空间"}
+            </button>
+            <button type="button" className="skp-btn" onClick={() => copyText("source", sourceLabel)}>
+              {copiedKey === "source" ? "已复制来源" : "复制来源"}
+            </button>
+          </div>
+        </MetaPanel>
+      )}
+
+      <div className="skp-detail-toolbar">
+        <span className="skp-toolbar-title">工具与参数</span>
+        <span className="skp-toolbar-stat">
+          {hasTools ? `${server.tools.length} 个工具 · 数据来自运行时工具注册表` : "工具清单不可见"}
         </span>
       </div>
-      <McpScopeChain
-        scope={scope}
-        projectName={projectName}
-        globalSeg={{
-          on: !globalOff,
-          title: globalOff ? "全局默认关闭" : "全局默认启用",
-          note: "全局默认写 capability-global-overrides.json · 不改注入方配置",
-        }}
-        workspaceSeg={{
-          on: !workspaceOff,
-          title: !workspaceOff
-            ? globalOff
-              ? "已覆盖全局默认"
-              : "默认启用"
-            : globalOff
-              ? "继承全局默认关闭"
-              : "本工作区默认关闭",
-          note: server.restrictable ? "行尾开关可写本工作区默认（不卸载共享实例）" : EXTERNAL_TOGGLE_BLOCKED_TITLE,
-        }}
-        workspaces={workspaces}
-        onSelectWorkspace={onSelectWorkspace}
-      />
-      {externalAttributionIsSpeculative(server) && (
-        <div className="skp-note skp-note-warn">来源为推测，请核对工具清单</div>
-      )}
-      {(server.attribution?.legacyUnit === true || typeof server.attribution?.legacyUnit === "string") && (
-        <div className="skp-note" title={typeof server.attribution.legacyUnit === "string" ? `旧版键：${server.attribution.legacyUnit}` : undefined}>
-          旧版键已迁移
+      {hasTools ? (
+        <ToolsSplitView
+          tools={server.tools}
+          selectedName={selectedTool}
+          onSelect={setSelectedTool}
+          query={toolQuery}
+          onQuery={setToolQuery}
+        />
+      ) : (
+        <div className="skp-detail-loading">
+          <div className="skp-note">工具清单不可见（该实例按作用域注入，只能统计调用次数）。</div>
         </div>
       )}
-      <div className="skp-note">
-        {isSynthesized(server)
-          ? `配置只读：该实例由工具命名空间 mcp__${server.serverName}__* 合成（没有 mcp-client 实例，无配置可编辑）；默认开关可写（全局默认 / 本工作区）。`
-          : `配置只读：该 MCP 由 ${externalChannelOf(server) ?? server.source ?? "其它插件"} 在运行时注入，能力面板不能编辑或删除；默认开关可写（全局默认 / 本工作区），不卸载共享实例。`}
-      </div>
-      <div className="skp-detail-actions">
-        <button
-          type="button"
-          className="skp-btn"
-          title={hasTools ? "查看该实例暴露的工具与参数（数据来自运行时工具注册表，不重新连接）" : "该实例的工具清单不可见（只能统计调用次数）"}
-          onClick={() => setToolsOpen((open) => !open)}
-        >
-          {toolsOpen ? "收起工具与参数" : "查看工具与参数"}
-        </button>
-        <button type="button" className="skp-btn" onClick={() => setUsageOpen((open) => !open)}>
-          {usageOpen ? "收起使用记录" : "使用记录"}
-        </button>
-      </div>
-      <dl className="skp-detail-fields">
-        <dt>来源</dt>
-        <dd>{externalChannelOf(server) ?? server.source ?? "来源未识别"}</dd>
-        <dt>来源判定</dt>
-        <dd>{externalAttributionText(server)}</dd>
-        <dt>注入方式</dt>
-        <dd>
-          {externalInjectionText(server)}
-          {isSynthesized(server) ? "；无实例配置，传输方式未知" : ""}
-        </dd>
-        <dt>命名空间</dt>
-        <dd>
-          <code>mcp__{server.serverName}__*</code>
-        </dd>
-        {server.transport !== undefined && (
-          <>
-            <dt>传输方式</dt>
-            <dd>
-              {server.transport}
-              {server.summary !== undefined ? ` · ${server.summary}` : ""}
-            </dd>
-          </>
-        )}
-        {scope === "global" && (
-          <VisibilityDetailFields
-            api={panelApi}
-            domain="mcp"
-            capabilityKey={server.serverName}
-            name={server.serverName}
-            entry={visibilityEntry}
-            workspaces={projects}
-            globalOff={globalOff}
-            onSaved={onVisibilitySaved}
-          />
-        )}
-        <dt>全局默认</dt>
-        <dd>
-          {globalOff
-            ? "关闭（在「全局」作用域用列表行尾开关恢复；不改注入方配置、不卸载共享实例）"
-            : "启用"}
-        </dd>
-        <dt>本工作区</dt>
-        <dd>
-          {!workspaceOff
-            ? globalOff
-              ? "已覆盖全局默认：本工作区显式重新打开"
-              : "继承全局默认（启用）"
-            : globalOff
-              ? "继承全局默认（关闭）"
-              : "本工作区默认关闭"}
-        </dd>
-        <dt>默认开关</dt>
-        <dd>
-          {server.restrictable
-            ? "列表行尾开关可写：全局视图 = 全局默认（独立文件，所有工作区生效）；工作区视图 = 本工作区默认（可覆盖全局默认）。均不卸载共享实例。"
-            : EXTERNAL_TOGGLE_BLOCKED_TITLE}
-        </dd>
-        <dt>本次运行调用</dt>
-        <dd>{server.calls > 0 ? `${server.calls} 次` : "还没有调用记录"}</dd>
-        <dt>管理</dt>
-        <dd>
-          {isSynthesized(server)
-            ? "工具命名空间无法在这里编辑或卸载；请在注入方管理（默认开关仍可写）。"
-            : "配置由注入方管理；能力面板不提供编辑/删除/卸载，但默认开关可写。"}
-        </dd>
-      </dl>
-      {toolsOpen && (
-        <div className="skp-detail-inspect">
-          <div className="skp-detail-inspect-head">
-            <span className="skp-field-label">工具与参数</span>
-            <span className="skp-test-stat">{hasTools ? `${server.tools.length} 个工具 · 点击工具查看参数` : "工具清单不可见"}</span>
-          </div>
-          {hasTools ? (
-            <ToolsInspector tools={server.tools} />
-          ) : (
-            <div className="skp-note">工具清单不可见（该实例按作用域注入，只能统计调用次数）。</div>
-          )}
-        </div>
-      )}
+
       {usageOpen && (
-        <div className="skp-detail-inspect">
+        <Modal title={`使用记录 · ${server.serverName}`} onClose={() => setUsageOpen(false)}>
           <McpUsageSection api={api} serverName={server.serverName} />
-        </div>
+        </Modal>
       )}
-    </div>
+    </DetailPage>
   );
 }
-
 /**
  * 配置条目详情：归属徽标 + 字段 + 写操作 + 「工具与参数」（真连一次探测，
  * 两栏工具/参数）/「使用记录」两个折叠区。
@@ -1475,7 +1692,6 @@ function McpDetail({
   onVisibilitySaved,
   workspaces,
   onSelectWorkspace,
-  confirmingDelete,
   confirmingImport,
   onEdit,
   onToggle,
@@ -1483,7 +1699,7 @@ function McpDetail({
   onImport,
   onToolCount,
 }: {
-  /** 面板 API：详情页的「查看工具与参数」直接复用 `mcp.test` 探测通道。 */
+  /** 面板 API：详情页的工具与参数直接复用 `mcp.test` 探测通道。 */
   api: McpApi;
   /** v21：可见性编辑需要面板级 api（`overrides.setVisibility`）。 */
   panelApi: CapabilityPanelApi;
@@ -1523,30 +1739,71 @@ function McpDetail({
   /** 移除按钮文案：全局导入的副本 = 「移出」（全局原版仍在全局区）；其余 = 「删除」。 */
   const removeVerb = imported ? "移出" : "删除";
   const hasWorkspace = workspace !== undefined;
-  // 「查看工具与参数」：真连一次该条目（零副作用探测），用两栏检视器展开工具与参数。
-  const [inspect, setInspect] = useState<{ open: boolean; testing: boolean; result?: McpTestResult }>({
-    open: false,
-    testing: false,
-  });
-  // 「使用记录」：宿主内存里的 MCP 工具调用记录（只读、不落盘）。
+  const [metaOpen, setMetaOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
-  // 换选中的服务器时收起并丢弃上一次的结果，避免把 A 的清单显示在 B 上。
-  useEffect(() => {
-    setInspect({ open: false, testing: false });
-    setUsageOpen(false);
-  }, [server.key, server.scope]);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState<McpTestResult | undefined>(undefined);
+  const [selectedTool, setSelectedTool] = useState<string | undefined>(undefined);
+  const [toolQuery, setToolQuery] = useState("");
+  const [copiedKey, setCopiedKey] = useState<string | undefined>(undefined);
+
+  const copyText = (key: string, text: string) => {
+    void navigator.clipboard?.writeText(text).catch(() => undefined);
+    setCopiedKey(key);
+    window.setTimeout(() => setCopiedKey((current) => (current === key ? undefined : current)), 1500);
+  };
 
   /** 跑一次探测；失败以 `{ ok:false, errors }` 归一（不抛异常，就地展示）。 */
-  const runInspect = async () => {
-    setInspect({ open: true, testing: true });
+  const runInspect = useCallback(async () => {
+    setTesting(true);
     try {
-      const result = await api.test({ entry: server.entry, key: server.key });
-      setInspect({ open: true, testing: false, result });
-      if (result.ok) onToolCount?.(result.tools.length);
+      const next = await api.test({ entry: server.entry, key: server.key });
+      setResult(next);
+      if (next.ok) {
+        onToolCount?.(next.tools.length);
+        setSelectedTool((current) =>
+          current !== undefined && next.tools.some((tool) => tool.name === current) ? current : next.tools[0]?.name,
+        );
+      }
     } catch (error) {
-      setInspect({ open: true, testing: false, result: { ok: false, errors: [String(error)] } });
+      setResult({ ok: false, errors: [String(error)] });
+    } finally {
+      setTesting(false);
     }
-  };
+  }, [api, server.entry, server.key, onToolCount]);
+
+  // v22：详情页主内容就是工具与参数——打开即探测一次；换条目时丢弃上一次结果。
+  // （探测是零副作用的一次性连接，不挂载、不缓存连接，见 mcp/probe.ts。）
+  useEffect(() => {
+    let alive = true;
+    setResult(undefined);
+    setSelectedTool(undefined);
+    setToolQuery("");
+    setTesting(true);
+    api
+      .test({ entry: server.entry, key: server.key })
+      .then((next) => {
+        if (!alive) return;
+        setResult(next);
+        if (next.ok) {
+          onToolCount?.(next.tools.length);
+          setSelectedTool(next.tools[0]?.name);
+        }
+      })
+      .catch((error) => {
+        if (alive) setResult({ ok: false, errors: [String(error)] });
+      })
+      .finally(() => {
+        if (alive) setTesting(false);
+      });
+    return () => {
+      alive = false;
+    };
+    // 仅在条目变化时自动探测；api / entry 由父级按 key 重建。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [server.key, server.scope]);
+
   /** 两段作用域链：全局 → 工作区（不展示任何会话挂载状态）。 */
   const globalSeg = isGlobal
     ? {
@@ -1575,207 +1832,268 @@ function McpDetail({
           title: server.enabled ? "已配置 · 默认启用" : "已配置 · 配置内禁用",
           note: "来源：工作区 .mcp.json",
         };
+
+  const tools = result?.ok === true ? result.tools : [];
+  const statText = testing
+    ? "正在连接…"
+    : result === undefined
+      ? "尚未连接"
+      : result.ok
+        ? `${result.tools.length} 个工具 · 连接正常 · ${result.elapsedMs}ms`
+        : "连接失败";
+  const instruction = result?.ok === true && typeof result.instruction === "string" ? result.instruction.trim() : "";
+  const namespace = `mcp__${server.serverName}__*`;
+  const sourceLabel = isReference ? "工作区引用" : isGlobal ? "全局 mcp.json" : "工作区 .mcp.json";
+  const endpoint =
+    server.transport === "stdio"
+      ? `${server.entry.command ?? ""} ${formatMaskedArgs(server.entry.args ?? [])}`.trim()
+      : sanitizeDescriptorText(server.entry.url ?? "");
+  // 开关语义沿用旧动作行：工作区条目可启停；全局条目仅在禁用时给恢复入口；
+  // 引用条目的默认开关在列表行尾。
+  const canToggle = isReference ? false : isGlobal ? !server.enabled && scope === "global" : true;
+  const toggleTitle = isReference
+    ? "引用条目的默认开关在列表行尾设置"
+    : isGlobal
+      ? server.enabled
+        ? "全局条目已启用；全局默认开关在列表行尾设置"
+        : scope === "global"
+          ? "此全局服务器当前禁用；点击恢复启用（对所有工作区生效）"
+          : "请在「全局」视图恢复启用"
+      : server.enabled
+        ? "点击禁用（保留在配置文件中，不挂载）"
+        : "点击启用（写入配置文件并挂载）";
+  const deleteBody = isGlobal
+    ? "删除此全局服务器；各工作区内的引用不受影响（变为悬空引用）。此操作不可撤销。"
+    : isReference
+      ? "移出本工作区（移除对全局服务器的引用，全局原版仍在全局区）。"
+      : imported
+        ? "移出本工作区（移除全局导入的副本，全局原版仍在全局区）。"
+        : "删除本工作区中的这个服务器。此操作不可撤销。";
+  const menuItems: MoreMenuItem[] = [
+    ...(!isReference ? [{ key: "edit", label: "编辑配置", onSelect: onEdit }] : []),
+    ...(isGlobal && hasWorkspace
+      ? [
+          {
+            key: "import",
+            label: confirmingImport ? "确认重复导入同名引用？" : "引用到本工作区",
+            danger: confirmingImport,
+            title: confirmingImport
+              ? "工作区内已有同名引用，再次点击将重新登记（保留原启停状态，全局配置不变）"
+              : "在本工作区登记对全局服务器的引用（内容跟随全局，可设置本工作区默认）",
+            onSelect: onImport,
+          },
+        ]
+      : []),
+    {
+      key: "copy-namespace",
+      label: copiedKey === "namespace" ? "已复制命名空间" : "复制命名空间",
+      onSelect: () => copyText("namespace", namespace),
+    },
+    {
+      key: "copy-endpoint",
+      label: server.transport === "stdio" ? "复制命令" : "复制 URL",
+      onSelect: () => copyText("endpoint", endpoint),
+    },
+    {
+      key: "copy-path",
+      label: copiedKey === "path" ? "已复制路径" : "复制配置文件路径",
+      onSelect: () => copyText("path", server.filePath),
+    },
+    { key: "usage", label: "使用记录", onSelect: () => setUsageOpen(true) },
+    { key: "delete", label: `${removeVerb}服务器`, danger: true, title: deleteBody, onSelect: () => setDeleteOpen(true) },
+  ];
+
   return (
-    <div className="skp-detail-card">
-      {/* 头部：标题 + 归属徽标。徽标按"出身"显示：与全局同源的工作区条目
-          （引用 / 旧版导入副本）也标「全局」（绿）。 */}
-      <div className="skp-detail-head">
-        <h3>{server.key}</h3>
-        <span style={HEAD_TAGS_STYLE}>
-          <span
-            className={isGlobal || imported ? "skp-tag skp-tag-global" : "skp-tag skp-tag-project"}
-            title={
-              isGlobal
-                ? server.shadowed
-                  ? "全局服务器（对所有工作区生效）；当前被本工作区内的同名条目遮蔽"
-                  : "全局服务器（对所有工作区生效）"
-                : isReference
-                  ? "本工作区内对全局服务器的引用（内容跟随全局，默认开关只作用于本工作区）"
-                  : imported
-                    ? "本工作区内来自全局导入的副本（遮蔽全局同名条目，控制只作用于本工作区）"
-                    : "本工作区内的服务器（遮蔽全局同名条目）"
-            }
-          >
-            {isGlobal || imported ? "全局" : "本项"}
+    <DetailPage>
+      <div className="skp-detail-head-wrap">
+        <DetailTitleBar
+          title={server.key}
+          tags={
+            <>
+              <span
+                className={isGlobal || imported ? "skp-tag skp-tag-global" : "skp-tag skp-tag-project"}
+                title={
+                  isGlobal
+                    ? server.shadowed
+                      ? "全局服务器（对所有工作区生效）；当前被本工作区内的同名条目遮蔽"
+                      : "全局服务器（对所有工作区生效）"
+                    : isReference
+                      ? "本工作区内对全局服务器的引用（内容跟随全局，默认开关只作用于本工作区）"
+                      : imported
+                        ? "本工作区内来自全局导入的副本（遮蔽全局同名条目，控制只作用于本工作区）"
+                        : "本工作区内的服务器（遮蔽全局同名条目）"
+                }
+              >
+                {isGlobal || imported ? "全局" : "本项"}
+              </span>
+              {isReference && (
+                <span className="skp-tag skp-tag-flat" title="引用：内容跟随全局，默认开关只作用于本工作区">
+                  引用
+                </span>
+              )}
+              <span className="skp-tag skp-tag-flat" title="传输方式">
+                {server.transport}
+              </span>
+              {server.shadowed && <span className="skp-badge">被本工作区遮蔽</span>}
+            </>
+          }
+          right={
+            <>
+              <ToggleSwitch
+                checked={server.enabled}
+                disabled={!canToggle}
+                label={server.enabled ? "已启用" : "已禁用"}
+                title={toggleTitle}
+                onChange={() => onToggle()}
+              />
+              <MoreMenu items={menuItems} />
+            </>
+          }
+        />
+        <DetailStrip>
+          <ScopeChain
+            compact
+            scope={scope}
+            projectName={projectName}
+            globalSeg={globalSeg}
+            workspaceSeg={workspaceSeg}
+            workspaces={workspaces}
+            onSelectWorkspace={onSelectWorkspace}
+          />
+          <StripSeparator />
+          <span className="skp-strip-item">
+            来源 <span className="skp-strip-strong">{sourceLabel}</span>
           </span>
-          {isReference && (
-            <span className="skp-tag skp-tag-flat" title="引用：内容跟随全局，默认开关只作用于本工作区">
-              引用
-            </span>
+          <StripSeparator />
+          <span className="skp-strip-item skp-strip-ellipsis" title={namespace}>
+            命名空间 <span className="skp-strip-strong">{namespace}</span>
+          </span>
+          <span className="skp-strip-right">
+            <button type="button" className="skp-link-btn" onClick={() => setUsageOpen(true)}>
+              使用记录
+            </button>
+            <button
+              type="button"
+              className="skp-strip-meta-btn"
+              aria-expanded={metaOpen}
+              onClick={() => setMetaOpen((value) => !value)}
+            >
+              元数据 {metaOpen ? "⌃" : "⌄"}
+            </button>
+          </span>
+        </DetailStrip>
+      </div>
+
+      {metaOpen && (
+        <MetaPanel>
+          <MetaGrid>
+            <MetaCell label="命名空间" mono title={namespace}>
+              {namespace}
+            </MetaCell>
+            <MetaCell label={server.transport === "stdio" ? "命令" : "URL"} mono title={endpoint}>
+              {endpoint.length > 0 ? endpoint : "—"}
+            </MetaCell>
+            <MetaCell label="配置文件" mono title={server.filePath}>
+              {server.filePath}
+            </MetaCell>
+            {typeof server.entry.description === "string" && server.entry.description.trim().length > 0 && (
+              <MetaCell label="用途描述">{server.entry.description}</MetaCell>
+            )}
+          </MetaGrid>
+          {instruction.length > 0 && (
+            <div className="skp-meta-wide" style={{ marginTop: 12 }}>
+              <span className="skp-meta-label">服务器提示</span>
+              <p style={{ margin: "4px 0 0", fontSize: 12, lineHeight: "18px", color: "var(--skp-text-2)", whiteSpace: "pre-wrap" }}>
+                {instruction}
+              </p>
+            </div>
           )}
+          {scope === "global" && isGlobal && (
+            <dl className="skp-detail-fields" style={{ marginTop: 12 }}>
+              <VisibilityDetailFields
+                api={panelApi}
+                domain="mcp"
+                capabilityKey={server.serverName}
+                name={server.key}
+                entry={visibilityEntry}
+                workspaces={projects}
+                globalOff={globalOff}
+                onSaved={onVisibilitySaved}
+              />
+            </dl>
+          )}
+          {isReference && <div className="skp-note">引用：内容跟随全局配置，默认开关只作用于本工作区。</div>}
+          <div className="skp-meta-actions">
+            <button type="button" className="skp-btn" onClick={() => copyText("namespace", namespace)}>
+              {copiedKey === "namespace" ? "已复制命名空间" : "复制命名空间"}
+            </button>
+            <button type="button" className="skp-btn" onClick={() => copyText("endpoint", endpoint)}>
+              {copiedKey === "endpoint" ? "已复制" : server.transport === "stdio" ? "复制命令" : "复制 URL"}
+            </button>
+            <button type="button" className="skp-btn" onClick={() => copyText("path", server.filePath)}>
+              {copiedKey === "path" ? "已复制路径" : "复制配置文件路径"}
+            </button>
+          </div>
+        </MetaPanel>
+      )}
+
+      <div className="skp-detail-toolbar">
+        <span className="skp-toolbar-title">工具与参数</span>
+        <span className="skp-toolbar-stat">{statText}</span>
+        <span className="skp-toolbar-right">
+          <button type="button" className="skp-btn" disabled={testing} onClick={() => void runInspect()}>
+            {testing ? "连接中…" : "重新测试"}
+          </button>
         </span>
       </div>
-      <McpScopeChain
-        scope={scope}
-        projectName={projectName}
-        globalSeg={globalSeg}
-        workspaceSeg={workspaceSeg}
-        workspaces={workspaces}
-        onSelectWorkspace={onSelectWorkspace}
-      />
-      <div className="skp-detail-actions">
-        {/* 配置级启用/禁用：只对**工作区条目**渲染（全局条目的全局默认开关在列表行尾）。 */}
-        {!isGlobal && !isReference && (
-          <button
-            type="button"
-            className={`skp-btn ${server.enabled ? "skp-state-on" : "skp-state-off"}`}
-            title={server.enabled ? "点击禁用（保留在配置文件中，不挂载）" : "点击启用（写入配置文件并挂载）"}
-            onClick={onToggle}
-          >
-            {server.enabled ? "已启用" : "已禁用"}
-          </button>
-        )}
-        {/* 全局条目自身 disabled（旧数据）时给一个恢复入口（只在全局作用域写全局配置）。 */}
-        {isGlobal && !server.enabled && scope === "global" && (
-          <button
-            type="button"
-            className="skp-btn skp-state-off"
-            title="此全局服务器当前为禁用状态；点击恢复启用（对所有工作区生效）"
-            onClick={onToggle}
-          >
-            已禁用
-          </button>
-        )}
-        {/* 引用到本工作区：只对有工作区的全局条目渲染（登记工作区级引用）。 */}
-        {isGlobal && hasWorkspace && (
-          <button
-            type="button"
-            className={confirmingImport ? "skp-btn skp-btn-danger" : "skp-btn"}
-            title={
-              confirmingImport
-                ? "工作区内已有同名引用，再次点击将重新登记（保留原启停状态，全局配置不变）"
-                : "在本工作区登记对全局服务器的引用（内容跟随全局，可设置本工作区默认）"
-            }
-            onClick={onImport}
-          >
-            {confirmingImport ? "确认重复导入同名引用？" : "引用到本工作区"}
-          </button>
-        )}
-        {/* 引用条目不提供「编辑」（内容就是全局条目，请到全局区编辑）。 */}
-        {!isReference && (
-          <button type="button" className="skp-btn" onClick={onEdit}>
-            编辑
-          </button>
-        )}
-        {/* 查看工具与参数：真连一次并列出描述/工具/参数（零副作用探测）。 */}
-        <button
-          type="button"
-          className="skp-btn"
-          disabled={inspect.testing}
-          title={
-            inspect.open
-              ? "收起工具与参数"
-              : "真连一次该服务器并列出它的描述、工具与参数（不落盘、不注册工具、不影响已挂载的连接）"
-          }
-          onClick={() => {
-            if (inspect.open) setInspect({ open: false, testing: false });
-            else void runInspect();
-          }}
-        >
-          {inspect.testing ? "连接中…" : inspect.open ? "收起工具列表" : "查看工具与参数"}
-        </button>
-        {/* 使用记录：最近哪个对话在什么时候调用了这个 server 的哪个 tool（内存记录、不落盘）。 */}
-        <button
-          type="button"
-          className="skp-btn"
-          title="查看最近哪个对话在什么时候调用了这个 MCP 的哪个工具（仅本次运行的内存记录，不落盘）"
-          onClick={() => setUsageOpen((open) => !open)}
-        >
-          {usageOpen ? "收起使用记录" : "使用记录"}
-        </button>
-        {/* 二次确认：confirmingDelete 时按钮变红并显示确认文案。 */}
-        <button
-          type="button"
-          className={confirmingDelete ? "skp-btn skp-btn-danger" : "skp-btn skp-btn-danger-ghost"}
-          title={
-            isGlobal
-              ? "删除此全局服务器；各工作区内的引用不受影响（变为悬空引用）"
-              : isReference
-                ? "移出本工作区（移除对全局服务器的引用，全局原版仍在全局区）"
-                : imported
-                  ? "移出本工作区（移除全局导入的副本，全局原版仍在全局区）"
-                  : "删除本工作区中的这个服务器"
-          }
-          onClick={onDelete}
-        >
-          {confirmingDelete ? `确认${removeVerb}？` : removeVerb}
-        </button>
-      </div>
-      {isReference && <div className="skp-note">引用：内容跟随全局配置，默认开关只作用于本工作区。</div>}
-      <dl className="skp-detail-fields">
-        {scope === "global" && isGlobal && (
-          <VisibilityDetailFields
-            api={panelApi}
-            domain="mcp"
-            capabilityKey={server.serverName}
-            name={server.key}
-            entry={visibilityEntry}
-            workspaces={projects}
-            globalOff={globalOff}
-            onSaved={onVisibilitySaved}
-          />
-        )}
-        <dt>命名空间</dt>
-        <dd>mcp__{server.serverName}__*</dd>
-        {typeof server.entry.description === "string" && server.entry.description.trim().length > 0 && (
-          <>
-            <dt>用途描述</dt>
-            <dd>{server.entry.description}</dd>
-          </>
-        )}
-        {/* 按传输方式展示不同字段：stdio 显示命令与参数，http 显示 URL。
-            参数/URL 里可能内联凭据（`--header "Bearer …"`），显示前统一掩码。 */}
-        {server.transport === "stdio" ? (
-          <>
-            <dt>命令</dt>
-            <dd className="skp-path">{server.entry.command}</dd>
-            {(server.entry.args ?? []).length > 0 && (
-              <>
-                <dt>参数</dt>
-                <dd className="skp-path">{formatMaskedArgs(server.entry.args ?? [])}</dd>
-              </>
-            )}
-          </>
-        ) : (
-          <>
-            <dt>URL</dt>
-            <dd className="skp-path">{sanitizeDescriptorText(server.entry.url ?? "")}</dd>
-          </>
-        )}
-        <dt>配置文件</dt>
-        <dd className="skp-path">{server.filePath}</dd>
-      </dl>
-      {/* 「查看工具与参数」的结果排在使用记录之前（工具是详情主体），两栏检视器
-          自身滚动，不会把详情页顶长到看不见操作按钮。 */}
-      {inspect.open && (
-        <div className="skp-detail-inspect">
-          <div className="skp-detail-inspect-head">
-            <span className="skp-field-label">工具与参数</span>
-            <span style={INSPECT_HEAD_RIGHT_STYLE}>
-              {inspect.result?.ok === true && inspect.result.tools.length > 0 && (
-                <span className="skp-test-stat">点击工具查看参数</span>
-              )}
-              <button type="button" className="skp-link-btn" disabled={inspect.testing} onClick={() => void runInspect()}>
-                {inspect.testing ? "连接中…" : "重新测试"}
-              </button>
-            </span>
+
+      {result !== undefined && result.ok === false ? (
+        <div className="skp-tools-split">
+          <div className="skp-tool-detail-scroll">
+            <div className="skp-error">{result.errors.join("\n")}</div>
+            <div className="skp-tool-detail-note">连接失败不影响已挂载的连接；检查服务器配置后点「重新测试」。</div>
           </div>
-          {inspect.result === undefined ? (
-            <div className="skp-note">正在连接并读取工具清单…</div>
-          ) : (
-            <ToolsReport result={inspect.result} />
-          )}
         </div>
+      ) : (
+        <ToolsSplitView
+          tools={tools}
+          selectedName={selectedTool}
+          onSelect={setSelectedTool}
+          query={toolQuery}
+          onQuery={setToolQuery}
+          loading={testing}
+        />
       )}
+
       {usageOpen && (
-        <div className="skp-detail-inspect">
+        <Modal title={`使用记录 · ${server.key}`} onClose={() => setUsageOpen(false)}>
           <McpUsageSection api={api} serverName={server.serverName} />
-        </div>
+        </Modal>
       )}
-    </div>
+
+      {deleteOpen && (
+        <Modal title={`${removeVerb} MCP 「${server.key}」？`} onClose={() => setDeleteOpen(false)}>
+          <p className="skp-modal-text">{deleteBody}</p>
+          <div className="skp-modal-actions">
+            <button type="button" className="skp-btn" autoFocus onClick={() => setDeleteOpen(false)}>
+              取消
+            </button>
+            <button
+              type="button"
+              className="skp-btn skp-btn-danger"
+              onClick={() => {
+                setDeleteOpen(false);
+                onDelete();
+              }}
+            >
+              {removeVerb}
+            </button>
+          </div>
+        </Modal>
+      )}
+    </DetailPage>
   );
 }
-
 // ---------------------------------------------------------------------------
 // 新增 / 编辑表单
 // ---------------------------------------------------------------------------
@@ -2039,92 +2357,6 @@ function McpForm({
 // ---------------------------------------------------------------------------
 // 工具与参数（两栏检视器）
 // ---------------------------------------------------------------------------
-
-/**
- * 「工具与参数」手风琴检视器（配置条目与外部注入共用）：
- *  - 每个工具一行，只显示工具名 + 参数个数（不显示 description）；
- *  - 点工具名在其**下方**展开参数表（参数 / 类型 / 必填 / 说明），再点收起；
- *    同一时间只展开一个工具；
- *  - 参数从 `tool.parameters` 的 `properties` + `required` 展开；无参数显示「无参数」。
- *
- * 展开/收起只改变本地状态，**不重新探测**（探测由调用方控制）；工具清单变化
- * （重新测试 / 换服务器）时若当前展开项已不存在则自动收起。
- */
-function ToolsInspector({ tools }: { tools: readonly ClientMcpTool[] }) {
-  // 手风琴：默认全部收起；点工具名展开其参数表，再点收起（同一时间只展开一个）。
-  const [expandedName, setExpandedName] = useState<string | undefined>(undefined);
-  useEffect(() => {
-    setExpandedName((current) => (current !== undefined && tools.some((tool) => tool.name === current) ? current : undefined));
-  }, [tools]);
-  return (
-    <div className="skp-tool-accordion" role="list">
-      {tools.map((tool) => {
-        const open = expandedName === tool.name;
-        const parameters = toolParameters(tool.parameters);
-        return (
-          <div key={tool.name} className={open ? "skp-tool-item skp-tool-item-open" : "skp-tool-item"} role="listitem">
-            <button
-              type="button"
-              className="skp-tool-trigger"
-              aria-expanded={open}
-              title={tool.name}
-              onClick={() => setExpandedName(open ? undefined : tool.name)}
-            >
-              <span className="skp-tool-chevron" aria-hidden="true">{open ? "▾" : "▸"}</span>
-              <code className="skp-tool-name">{tool.name}</code>
-              <span className="skp-tool-count">{parameters.length > 0 ? `${parameters.length} 个参数` : "无参数"}</span>
-            </button>
-            {open && (
-              <div className="skp-tool-body">
-                <ToolParameterTable parameters={parameters} />
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/**
- * 「测试连接」/「查看工具与参数」的成功报告：状态行（连接正常 / 工具数 / 耗时）
- * + 服务器提示（默认折叠 3 行）+ 两栏工具/参数检视器。失败只展示错误块。
- */
-function ToolsReport({ result }: { result: McpTestResult }) {
-  if (!result.ok) return <div className="skp-error">{result.errors.join("\n")}</div>;
-  const instruction = typeof result.instruction === "string" ? result.instruction.trim() : "";
-  return (
-    <div className="skp-test">
-      <div className="skp-test-head">
-        <span className="skp-tag skp-tag-global">连接正常</span>
-        <span className="skp-test-stat">{result.tools.length} 个工具</span>
-        <span className="skp-test-stat">耗时 {result.elapsedMs}ms</span>
-      </div>
-      {instruction.length > 0 && <McpInstruction text={instruction} />}
-      {result.tools.length === 0 ? (
-        <div className="skp-note">连接成功，但服务器未暴露任何工具。</div>
-      ) : (
-        <ToolsInspector tools={result.tools} />
-      )}
-    </div>
-  );
-}
-
-/** 服务器提示（`instructions`）：默认折叠 3 行，点「展开/收起」切换。 */
-function McpInstruction({ text }: { text: string }) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <div className="skp-test-instruction">
-      <div className="skp-test-instruction-head">
-        <span className="skp-field-label">服务器提示</span>
-        <button type="button" className="skp-link-btn" onClick={() => setExpanded((value) => !value)}>
-          {expanded ? "收起" : "展开"}
-        </button>
-      </div>
-      <p className={expanded ? "skp-test-instruction-body" : "skp-test-instruction-body skp-clamp-3"}>{text}</p>
-    </div>
-  );
-}
 
 /**
  * 使用记录的时间列：当天只显示 `HH:mm:ss`，跨天补上 `MM-DD `（避免不同日期的

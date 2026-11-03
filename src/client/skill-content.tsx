@@ -469,7 +469,8 @@ export function SkillContent({
   }, [api, selectedPath, state, summary.injected, summary.name]);
 
   // 折叠树时把下拉的当前项对齐到已选文件（保持选中，不丢状态）。
-  const showTree = summary.format !== "flat";
+  // v22：目录树常驻——单文件 / flat 也显示所在目录与文件（用户反馈：目录内容必须可看）。
+  const showTree = true;
   const treeCollapsed = showTree && contentWidth < TREE_COLLAPSE_WIDTH;
   const treeWidth = contentWidth >= TREE_WIDE_WIDTH ? TREE_WIDTH_WIDE : TREE_WIDTH_MEDIUM;
 
@@ -559,7 +560,7 @@ export function SkillContent({
         <div
           className="skp-file-tree"
           role="tree"
-          aria-label="Skills 文件"
+          aria-label="Skills 目录"
           tabIndex={0}
           ref={treeRef}
           style={{ width: treeWidth }}
@@ -569,7 +570,7 @@ export function SkillContent({
           }}
         >
           <div className="skp-file-tree-head">
-            <span className="skp-file-tree-title">Skills 文件</span>
+            <span className="skp-file-tree-title">目录</span>
             <span
               className="skp-group-count"
               title={

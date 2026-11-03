@@ -52,6 +52,7 @@ export function ScopeChain({
   workspaceSeg,
   workspaces,
   onSelectWorkspace,
+  compact = false,
 }: {
   scope: "global" | "workspace";
   projectName?: string;
@@ -59,6 +60,8 @@ export function ScopeChain({
   workspaceSeg: ScopeChainSegment;
   workspaces: ScopeChainWorkspace[];
   onSelectWorkspace(path: string): void;
+  /** v22：详情状态条里的单行紧凑态（隐藏 note，只保留 全局 → 工作区 摘要）。 */
+  compact?: boolean;
 }) {
   const [anchor, setAnchor] = useState<{ left: number; top: number; width: number; maxHeight: number } | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -116,7 +119,7 @@ export function ScopeChain({
   }, [open]);
 
   return (
-    <div ref={rootRef} className="skp-scope-chain" aria-label="作用域链">
+    <div ref={rootRef} className={compact ? "skp-scope-chain skp-scope-chain-compact" : "skp-scope-chain"} aria-label="作用域链">
       <div className="skp-scope-chain-seg">
         <div className="skp-scope-chain-head">
           <span className={globalSeg.on ? "skp-dot skp-dot-enabled" : "skp-dot skp-dot-hollow"} aria-hidden="true" />

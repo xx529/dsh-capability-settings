@@ -918,6 +918,102 @@ button.skp-dock-rail-fail:hover{filter:brightness(.9);}
 .skp-frontmatter-raw{min-width:0;}
 .skp-frontmatter-raw>summary{cursor:pointer;font-size:12px;color:var(--skp-accent);white-space:nowrap;}
 .skp-frontmatter-yaml{margin:6px 0 0;padding:8px 10px;border:1px solid var(--skp-border);border-radius:6px;background:var(--skp-surface);font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:11.5px;line-height:1.55;color:var(--skp-text-2);white-space:pre;overflow:auto;max-height:220px;scrollbar-width:thin;}
+.skp-test-tools{display:flex;flex-direction:column;gap:2px;min-width:0;}
+.skp-test-tool-row{display:flex;align-items:center;gap:8px;min-height:32px;padding:0 8px;border-radius:6px;min-width:0;}
+.skp-test-tool-row:hover{background:var(--skp-hover);}
+.skp-test-tool-row .skp-tool-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;}
+/* v22 详情页（Skills / MCP 共用，见 detail-shell.tsx）：固定头部三段 + 内容区独立滚动。
+   设计源：docs/figma/preview/v22-*（page Capability Panel · 详情页内容优先 v22 草案）。 */
+.skp-detail-page{flex:1 1 auto;display:flex;flex-direction:column;height:100%;min-width:0;min-height:0;overflow:hidden;font-size:14px;color:var(--skp-text-2);}
+.skp-detail-flush{padding:0;overflow:hidden;}
+.skp-badge-inline{align-self:flex-start;font-size:11px;padding:2px 10px;}
+.skp-detail-head-wrap{flex:none;display:flex;flex-direction:column;gap:6px;padding:16px 24px 8px;border-bottom:1px solid var(--skp-border);min-width:0;}
+.skp-detail-title-row{display:flex;align-items:center;gap:8px;min-width:0;min-height:30px;}
+.skp-detail-title-row h3{flex:0 1 auto;min-width:0;margin:0;font-size:18px;font-weight:600;color:var(--skp-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.skp-detail-title-tags{display:inline-flex;align-items:center;gap:6px;flex:none;}
+.skp-detail-title-row>.skp-badge{font-size:11px;padding:2px 10px;}
+.skp-detail-strip{display:flex;flex-wrap:nowrap;align-items:center;gap:8px;min-width:0;overflow:hidden;font-size:11.5px;color:var(--skp-text-3);}
+.skp-detail-strip>*{flex:0 1 auto;min-width:0;}
+.skp-detail-strip>.skp-strip-right{flex:none;margin-left:auto;}
+.skp-detail-strip>.skp-scope-chain-compact{overflow:hidden;}
+.skp-strip-strong{color:var(--skp-text-2);}
+.skp-strip-sep{width:1px;height:12px;background:var(--skp-border);margin:0 2px;}
+.skp-strip-right{margin-left:auto;display:inline-flex;align-items:center;gap:10px;flex:none;}
+.skp-strip-item{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.skp-strip-ellipsis{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.skp-strip-meta-btn{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 10px;border:1px solid var(--skp-border);border-radius:999px;background:transparent;color:var(--skp-text-2);font:inherit;font-size:11.5px;cursor:pointer;white-space:nowrap;}
+.skp-strip-meta-btn:hover{background:var(--skp-hover);color:var(--skp-text);}
+.skp-strip-meta-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--skp-border-strong);}
+.skp-switch-wrap{display:inline-flex;align-items:center;gap:8px;flex:none;cursor:pointer;}
+.skp-switch-label{font-size:11.5px;color:var(--skp-text-3);white-space:nowrap;}
+.skp-switch{position:relative;display:inline-flex;align-items:center;width:36px;height:20px;border-radius:999px;background:var(--skp-fill);transition:background-color .18s var(--skp-ease);}
+.skp-switch-on{background:var(--skp-accent);}
+.skp-switch-partial{background:color-mix(in srgb,var(--skp-accent) 55%,var(--skp-fill));}
+.skp-switch input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer;}
+.skp-switch input:disabled{cursor:default;}
+.skp-switch:has(input:disabled){opacity:.5;}
+.skp-switch-knob{position:absolute;left:3px;width:14px;height:14px;border-radius:50%;background:#fff;transition:transform .18s var(--skp-ease);}
+.skp-switch-on .skp-switch-knob,.skp-switch-partial .skp-switch-knob{transform:translateX(16px);}
+.skp-more{position:relative;flex:none;}
+.skp-more-btn{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:1px solid var(--skp-border);border-radius:8px;background:transparent;color:var(--skp-text-2);font:inherit;font-size:14px;line-height:1;cursor:pointer;}
+.skp-more-btn:hover{background:var(--skp-hover);color:var(--skp-text);}
+.skp-more-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--skp-border-strong);}
+.skp-more-pop{position:absolute;right:0;top:calc(100% + 6px);z-index:130;min-width:200px;padding:5px;border:1px solid var(--skp-border);border-radius:10px;background:var(--skp-surface);box-shadow:0 12px 32px rgba(15,20,30,.18),0 2px 8px rgba(15,20,30,.08);}
+.skp-more-item{display:block;width:100%;padding:8px 10px;border:0;border-radius:7px;background:none;color:var(--skp-text-2);font:inherit;font-size:13px;text-align:left;cursor:pointer;white-space:nowrap;}
+.skp-more-item:hover:not(:disabled){background:var(--skp-hover);color:var(--skp-text);}
+.skp-more-item:disabled{opacity:.45;cursor:default;}
+.skp-more-item-danger{color:var(--skp-error);}
+.skp-more-item-danger:hover:not(:disabled){background:color-mix(in srgb,var(--skp-error) 10%,transparent);color:var(--skp-error);}
+.skp-meta-panel{flex:none;margin:8px 24px 0;padding:12px 14px;border:1px solid var(--skp-border);border-radius:10px;background:var(--skp-fill);min-width:0;}
+.skp-meta-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 20px;min-width:0;}
+.skp-meta-cell{display:flex;flex-direction:column;gap:3px;min-width:0;}
+.skp-meta-label{font-size:10.5px;font-weight:600;letter-spacing:.04em;color:var(--skp-text-3);}
+.skp-meta-value{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;color:var(--skp-text-2);}
+.skp-meta-mono{font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:11.5px;}
+.skp-meta-wide{grid-column:1 / -1;min-width:0;}
+.skp-meta-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;}
+.skp-meta-actions .skp-btn{height:26px;font-size:11.5px;}
+.skp-meta-panel .skp-frontmatter{margin:12px 0 0;}
+@media (max-width:1100px){.skp-meta-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
+/* 内容工具条 + 工具主从分栏（MCP v22 方案 B） */
+.skp-detail-toolbar{flex:none;display:flex;align-items:center;gap:10px;min-width:0;padding:10px 24px;border-bottom:1px solid var(--skp-border);}
+.skp-toolbar-title{flex:none;font-size:13px;font-weight:600;color:var(--skp-text);}
+.skp-toolbar-stat{flex:none;min-width:0;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;color:var(--skp-text-3);}
+.skp-toolbar-right{margin-left:auto;display:flex;align-items:center;gap:8px;flex:none;}
+.skp-tools-search{width:180px;height:28px;padding:0 10px;border:1px solid var(--skp-border);border-radius:8px;background:var(--skp-surface);font:inherit;font-size:12px;color:var(--skp-text);outline:none;transition:border-color .15s var(--skp-ease),box-shadow .15s var(--skp-ease);}
+.skp-tools-search::placeholder{color:var(--skp-text-3);}
+.skp-tools-search:focus-visible{border-color:var(--skp-border-strong);box-shadow:0 0 0 3px var(--dsw-alias-interactive-bg-active,rgba(20,28,40,.08));}
+.skp-tools-split{flex:1 1 auto;min-height:0;display:flex;gap:16px;padding:12px 24px 16px;min-width:0;}
+.skp-tools-list{flex:none;width:262px;min-height:0;display:flex;flex-direction:column;gap:8px;min-width:0;}
+.skp-tools-list-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:2px;scrollbar-width:thin;}
+.skp-tool-row{display:flex;align-items:center;gap:8px;width:100%;min-height:38px;padding:0 10px;border:0;border-radius:8px;background:none;color:var(--skp-text-2);font:inherit;cursor:pointer;text-align:left;min-width:0;}
+.skp-tool-row:hover{background:var(--skp-hover);color:var(--skp-text);}
+.skp-tool-row:focus-visible{outline:none;box-shadow:inset 0 0 0 1px var(--skp-accent);}
+.skp-tool-row-active,.skp-tool-row-active:hover{position:relative;background:var(--dsw-alias-interactive-bg-active,rgba(20,28,40,.08));color:var(--skp-text);}
+.skp-tool-row-active::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:2px;border-radius:2px;background:var(--skp-accent);}
+.skp-tool-row-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:12.5px;}
+.skp-tool-row-count{flex:none;font-size:10.5px;color:var(--skp-text-3);white-space:nowrap;}
+.skp-tool-detail{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column;border-left:1px solid var(--skp-border);padding-left:16px;}
+.skp-tool-detail-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding-right:4px;scrollbar-width:thin;}
+.skp-tool-detail-head{flex:none;display:flex;flex-direction:column;gap:4px;margin-bottom:10px;}
+.skp-tool-detail-name{font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:14px;color:var(--skp-text);word-break:break-all;}
+.skp-tool-detail-desc{font-size:12px;line-height:19px;color:var(--skp-text-3);}
+.skp-tool-detail-note{font-size:11px;line-height:18px;color:var(--skp-text-3);margin-top:10px;}
+/* Skills 内容区（文件树 + 阅读器）放在新详情页里：由外层给左右留白，内容区自身撑满高度。 */
+.skp-detail-body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;padding:0 24px 16px;min-width:0;}
+.skp-detail-body>.skp-skill-content{min-height:0;}
+.skp-detail-loading{padding:24px;font-size:12.5px;color:var(--skp-text-3);}
+/* 作用域链紧凑态（详情状态条内联）：单行摘要，工作区下拉交互保留。 */
+.skp-scope-chain-compact{flex:none;display:inline-flex;flex-wrap:nowrap;align-items:center;gap:6px;margin:0;min-width:0;font-size:11.5px;color:var(--skp-text-3);}
+.skp-scope-chain-compact .skp-scope-chain-seg{flex:0 0 auto;display:inline-flex;flex-direction:row;align-items:center;gap:5px;min-width:0;padding:0;border:0;background:none;font:inherit;color:inherit;text-align:left;}
+.skp-scope-chain-compact .skp-scope-chain-head{display:inline-flex;align-items:center;gap:5px;min-width:0;}
+.skp-scope-chain-compact .skp-scope-chain-label{min-width:auto;font-size:11.5px;font-weight:500;letter-spacing:0;color:var(--skp-text-3);white-space:nowrap;}
+.skp-scope-chain-compact .skp-scope-chain-title{font-size:11.5px;font-weight:500;color:var(--skp-text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;}
+.skp-scope-chain-compact .skp-scope-chain-note{display:none;}
+.skp-scope-chain-compact .skp-scope-chain-arrow{font-size:11.5px;color:var(--skp-text-3);}
+.skp-scope-chain-compact .skp-scope-chain-action{padding:0;border:0;background:none;cursor:pointer;}
+.skp-scope-chain-compact .skp-scope-chain-action:hover .skp-scope-chain-title{color:var(--skp-text);}
+.skp-scope-chain-compact .skp-dot{margin-right:0;}
 .skp-link-btn:disabled{opacity:.45;cursor:default;text-decoration:none;}
 
 `;
