@@ -3,6 +3,27 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.13.0] - 2026-11-04
+
+### 变更
+
+- **会话「能力」Tab 卡片加强开关状态对比**（用户反馈：一眼看过去开启 / 未开启差不多）：
+  - 开启卡片：品牌色描边（58%）+ 13% 品牌色底 + 左侧 2px 品牌色竖条 + 底部「已启用」标签，
+    hover 底色加深到 18%；
+  - 未开启卡片：整卡压暗（`opacity:.55`，hover 回升到 .85）+ 标题降至 tertiary / 500、
+    描述同为 tertiary + 底部「未启用」标签；
+  - 锁定行（不可切换）不参与亮暗区分：保持 `.skp-dock-card-disabled`（opacity .5、
+    cursor default、无 hover 高亮）；
+  - 新增 `.skp-dock-card-off` / `.skp-dock-card-state` 样式，`CapabilityCard` 增加状态标签。
+
+### 验证
+
+- `pnpm typecheck` / `pnpm build` → 0。
+- `node notes/verify/v24-session-cards.mjs` → 真实渲染对比截图
+  `notes/real-gui-evidence/v24/session-cards.png`（开启 4 张 / 未开启 4 张并排目测通过）。
+- 相关既有套件 `v13-session-bulk` / `v13-tools-ui-layer` / `render-smoke` 的失败项与本改动
+  无关（均为更早版本遗留断言：冷会话 skipped、工具行 switch title、ScopeNav），改动前基线同样失败。
+
 ## [1.12.3] - 2026-11-03
 
 ### 变更

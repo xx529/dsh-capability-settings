@@ -1962,7 +1962,7 @@ export function CapabilityCard({ row, busy, onToggle }: { row: Row; busy: boolea
         : row.name;
   return (
     <div
-      className={`skp-dock-card${row.enabled ? " skp-dock-card-on" : ""}${row.disabled ? " skp-dock-card-disabled" : ""}`}
+      className={`skp-dock-card${row.enabled ? " skp-dock-card-on" : " skp-dock-card-off"}${row.disabled ? " skp-dock-card-disabled" : ""}`}
       role="button"
       tabIndex={0}
       aria-pressed={row.enabled}
@@ -1996,6 +1996,7 @@ export function CapabilityCard({ row, busy, onToggle }: { row: Row; busy: boolea
       </div>
       <p className="skp-dock-card-desc">{desc}</p>
       <div className="skp-dock-card-foot">
+        <span className="skp-dock-card-state">{row.enabled ? "已启用" : "未启用"}</span>
         <Tag label={row.tag} tone={row.tone} />
         {row.kind === "tool" && row.explicit && (
           <span
