@@ -1644,10 +1644,9 @@ function SkillDetail({
             <button
               type="button"
               className="skp-strip-meta-btn"
-              aria-expanded={metaOpen}
               onClick={() => setMetaOpen((value) => !value)}
             >
-              元数据 {metaOpen ? "⌃" : "⌄"}
+              元数据
             </button>
           </span>
         </DetailStrip>

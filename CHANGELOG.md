@@ -3,6 +3,17 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.12.3] - 2026-11-03
+
+### 变更
+
+- **「元数据」入口去掉展开箭头**（用户反馈）：元数据已改为弹窗，不再有展开/收起语义，
+  去掉按钮上的 `⌄ / ⌃` 与 `aria-expanded`（MCP 配置条目 / 外部注入 / Skills 三处一致）。
+
+### 验证
+
+- `pnpm typecheck` / `pnpm build` → 0；`notes/verify/v22-detail-layout.mjs` → 13/13。
+
 ## [1.12.2] - 2026-11-03
 
 ### 变更
