@@ -3,6 +3,29 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.13.1] - 2026-11-04
+
+### 修复
+
+- **MCP 详情页「删除 / 移出服务器」第一次点确认无效果**（用户反馈：点击删除项目级
+  MCP 后不生效）：
+  - 根因：v22 把删除动作从行内按钮收进详情页 `⋯` 菜单 + 确认弹窗后，面板级
+    `onDelete` 里旧的「第一次点击只进入确认态、第二次点击才真正删除」状态机
+    （`confirmDelete`）仍在。弹窗里的「删除」是第一次点击 → 只写确认态、不调
+    `mcp.remove`；弹窗同时关闭，界面毫无变化（第二次再点才会删）。该状态机在行内
+    删除按钮移除后已无用户可见入口，`confirmingDelete` 也不再被详情页渲染。
+  - 修复：确认交由详情页弹窗完成，`onDelete` 直接执行 `mcp.remove` / 引用移出并
+    清空选中；删除 `confirmDelete` / `confirmingDelete` 死状态，与 Skills 详情页
+    删除口径一致。工作区原生条目、全局条目、引用条目三条删除路径同时生效。
+
+### 验证
+
+- `pnpm typecheck` / `pnpm build` → 0。
+- `node notes/verify/mcp-delete-repro.mjs` → 修复前 REPRO-03 失败（`removeCalls: []`），
+  修复后 3/3（点一次弹窗「删除」调一次 `mcp.remove({scope:'project', key:'order-center'})`）。
+- 宿主侧 `mcp.remove` 落盘核对：临时工作区 `.mcp.json` 删条后只剩另一条、触发项目重挂。
+- `node notes/verify/v22-detail-layout.mjs` → 13/13。
+
 ## [1.13.0] - 2026-11-04
 
 ### 变更

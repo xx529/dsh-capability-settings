@@ -581,8 +581,6 @@ export function McpView({
   const [addOpen, setAddOpen] = useState(false);
   /** 正在写开关的行 id（同一时间只允许一个，防重复提交）。 */
   const [busyKey, setBusyKey] = useState<string | undefined>(undefined);
-  // 二次确认删除：记录“待确认的行 id”，再点一次才真正删除。
-  const [confirmDelete, setConfirmDelete] = useState<string | undefined>(undefined);
   // 二次确认导入覆盖：工作区内已有同名时记录“待确认的行 id”，再点一次带 overwrite。
   const [confirmImport, setConfirmImport] = useState<string | undefined>(undefined);
   /** 本次运行内探测成功回填的工具数（serverName → 工具数）；不落盘、不新增宿主字段。 */
@@ -678,7 +676,6 @@ export function McpView({
     setSelected(undefined);
     setSelectedExternalName(undefined);
     setEditServer(undefined);
-    setConfirmDelete(undefined);
     setConfirmImport(undefined);
   }, [scope, workspace]);
 
@@ -805,17 +802,17 @@ export function McpView({
     reload();
   };
 
-  /** 删除：第一次点击进入确认态；同一行再次点击才真正删除并清空选中。 */
-  const onDelete = (server: ClientMcpServer) => {
-    const id = rowId(server);
-    if (confirmDelete !== id) {
-      setConfirmDelete(id);
-      return;
-    }
-    setConfirmDelete(undefined);
-    void runOp(mcpApi.remove({ scope: server.scope, key: server.key })).then((ok) => {
-      if (ok) setSelected(undefined);
-    });
+  /**
+   * 删除 / 移出：确认已经由详情页的确认弹窗完成，这里**直接执行**并清空选中。
+   *
+   * v22 起「删除」动作从行内按钮收进详情页 `⋯` 菜单 + 确认弹窗；旧实现还保留
+   * 面板级的「第一次点击只进入确认态」状态机（`confirmDelete`），弹窗里的确认
+   * 会被它吞掉——点一次「删除」不调 RPC、弹窗已关闭、界面无任何变化（用户反馈
+   * 「点了删除没生效」）。这里删掉那层重复确认，与 Skills 详情页的删除口径一致。
+   */
+  const onDelete = async (server: ClientMcpServer) => {
+    const ok = await runOp(mcpApi.remove({ scope: server.scope, key: server.key }));
+    if (ok) setSelected(undefined);
   };
 
   /** 选中一条配置条目：清掉外部实例选中与所有待确认态。 */
@@ -823,7 +820,6 @@ export function McpView({
     setSelected(rowId(server));
     setSelectedExternalName(undefined);
     setEditServer(undefined);
-    setConfirmDelete(undefined);
     setConfirmImport(undefined);
   };
 
@@ -832,7 +828,6 @@ export function McpView({
     setSelectedExternalName(server.serverName);
     setSelected(undefined);
     setEditServer(undefined);
-    setConfirmDelete(undefined);
     setConfirmImport(undefined);
   };
 
@@ -1093,7 +1088,6 @@ export function McpView({
               }}
               workspaces={projects}
               onSelectWorkspace={onSelectWorkspace}
-              confirmingDelete={confirmDelete === rowId(selectedServer)}
               confirmingImport={confirmImport === rowId(selectedServer)}
               onEdit={() => setEditServer(selectedServer)}
               onToggle={() => {
@@ -1103,7 +1097,7 @@ export function McpView({
                   void runOp(mcpApi.setEnabled({ scope: selectedServer.scope, key: selectedServer.key, enabled: !selectedServer.enabled }));
                 }
               }}
-              onDelete={() => onDelete(selectedServer)}
+              onDelete={() => void onDelete(selectedServer)}
               onImport={() => void onImport(selectedServer)}
               onToolCount={(count) =>
                 setToolCounts((prev) => (prev[selectedServer.serverName] === count ? prev : { ...prev, [selectedServer.serverName]: count }))
@@ -1724,10 +1718,10 @@ function McpDetail({
   workspaces: Array<{ path: string; title?: string }>;
   /** 选中工作区后切换面板作用域。 */
   onSelectWorkspace(path: string): void;
-  confirmingDelete: boolean;
   confirmingImport: boolean;
   onEdit(): void;
   onToggle(): void;
+  /** 删除 / 移出：父级直接执行（本页的确认弹窗已经过一次确认）。 */
   onDelete(): void;
   onImport(): void;
   /** 探测成功时回填工具数（行 meta 用；本次运行内缓存）。 */
