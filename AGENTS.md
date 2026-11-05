@@ -99,8 +99,9 @@ danger-full-access 审批重试同一条命令即可。手动兜底通道仍是 
 | `src/channel.ts` | RPC 通道名唯一来源：`CHANNEL = "/capability-panel"`（两端 import，禁止硬编码） |
 | `src/remote.ts` | 宿主 ⇄ 浏览器 RPC：在 `webServer` 挂 `CHANNEL` 前缀路由；endpoint 为 `skills.* / mcp.* / quick.* / overrides.*`（见文件头注释与路由表） |
 | `src/client.ts` | 客户端插件入口：注入样式/语言包，注册 `sidebar.panellist` + `main`（面板）与 `conversation.input.*`（composer），构造面板 api 与**每会话** composer api |
-| `src/client/*.tsx` | UI：`panel.tsx`（skills/quick 共用列表/详情）、`mcp-panel.tsx`、`quick-messages-panel.tsx`、`detail-shell.tsx`（v22 详情页共用外壳：`DetailPage` 固定头部三段 / `DetailTitleBar` / `DetailStrip` / `ToggleSwitch` / `MoreMenu` / `MetaPanel`）、`composer-*.tsx`、`composer-capability.tsx`（会话能力：首屏 `conversation.hero.options` 行内入口 + 背景模糊配置弹窗 + 顶部「能力」Tab 整页；Tab 打开时隐藏输入框）、`select.tsx`（自绘下拉）、`panel-entry.tsx`（主区域页面 + 侧栏图标）、`styles.ts` |
+| `src/client/*.tsx` | UI：`panel.tsx`（skills/quick 共用列表/详情）、`mcp-panel.tsx`、`quick-messages-panel.tsx`、`detail-shell.tsx`（v22 详情页共用外壳：`DetailPage` 固定头部三段 / `DetailTitleBar` / `DetailStrip` / `ToggleSwitch` / `MoreMenu` / `MetaPanel`）、`composer-*.tsx`、`composer-capability.tsx`（会话能力：首屏 `conversation.hero.options` 行内入口 + 背景模糊配置弹窗 + 顶部「能力」Tab 整页；Tab 打开时隐藏输入框）、`prompt-panel.tsx`（Prompt 域列表/详情/编辑器/可见范围弹层）、`prompt-tab.tsx`（首屏/会话内 Prompt Tab 卡片网格）、`select.tsx`（自绘下拉）、`panel-entry.tsx`（主区域页面 + 侧栏图标）、`styles.ts` |
 | `src/{skills,mcp,quick-messages,overrides,imports}/` | 各域宿主实现（配置读写、CRUD、挂载、探测、声明文件）；`skills/session.ts` = 会话级 Skills 开关（agent 作用域同名 runtime shadow，按会话落盘 + 项目默认投影） |
+| `src/prompt/` | **Prompt 域（v23）**：`paths.ts`（宿主语义 home / `.git` 项目根 / 目录链 / 候选）、`store.ts`（`prompt-policy.json` + 冻结清单 `prompt-manifests.json`，0600 + 原子写 + 锁）、`host.ts`（`loader.import` 取宿主 `dsh-agent-instructions`；虚拟 fs 只暴露允许集合 → 拼接/去重/预算/framing 全由宿主完成）、`manager.ts`（列表/读写/策略/冻结清单）、`inject.ts`（root `agent/pre-step` + `prepend`：首轮用宿主渲染结果替换 baseline 正文，之后丢弃增量并清 inbox；resume/compaction 按冻结正文重放；fail-open） |
 | `src/session-state.ts` | 会话级开关持久化（`<dshHome>/dsh-capability-settings/session-capabilities.json`：原子写 + 文件锁 + 懒加载 + 两阶段对账；Skills / MCP / Tools / 派生继承共用一个实例） |
 | `src/derive/manager.ts` | 派生继承（spawn-time snapshot）：`agent/created` 且 `source=startup` 时按父会话 `deriveMode` 把三域显式覆盖复制到 child 记录（或只写工作区快照）；早于三个域注册 |
 | `src/session-state-reconcile.ts` | 孤儿记录对账调度（启动后 / 每 24h 存在性校验；`session/disposed` 只标记不删；持久化服务缺失/抛错一律保留） |
@@ -229,6 +230,17 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
   `sidebar.panellist` list 槽（`id: "capability-panel"`）必须同时注册——外壳对
   「选择未注册 main 的 id」会抛错。注册都要包在 `ctx.slots.inject(...)` 里，disposer
   收进 `disposers`。
+- **Prompt 注入接管（v23）**：`src/prompt/inject.ts` 在 root ctx 以
+  `ctx.on("agent/pre-step", handler, { prepend: true })` 注册（`next()` 返回后处理宿主
+  post-processing 后的 decision）。四条硬边界：① **不自行渲染/拼接/去重/算预算**——调用
+  宿主导出的 `loadBaselineInstructions(options, virtualFs)`，虚拟 fs 对未启用文件 `stat`
+  返回 absent；② 首轮把宿主 baseline 正文替换为宿主渲染结果（保留 `source` /
+  `baselineIdentity`，宿主走 `keepVisibleBaseline` 便宜路径），之后每个 pre-step 丢弃
+  `source.kind="agent-instructions"` 的增量并清 `agent.inbox`；③ resume / compaction 后宿主
+  重建 baseline 时，用 `prompt-manifests.json` 里的冻结正文重放（不能丢弃）；④ 宿主渲染器
+  不可用 / 渲染失败 → **fail-open 原样放行**，绝不拖垮对话，面板显示「开关暂不生效」。
+  宿主模块必须经 `ctx.get("loader").import("@deepseek-ai/dsh-agent-instructions")` 取（与宿主
+  注入器同一实例）；**不要**在插件内复刻渲染逻辑或另装一份宿主包。
 - **composer 槽是 session 作用域**：`conversation.input.left` / `conversation.input.overlay`
   的 standardProps 直接提供 `sessionId`；composer 的 api 必须用
   `composerApiFor(props.sessionId)`（项目作用域只跟随所在会话，禁止掺入面板钉选或退回
@@ -259,6 +271,12 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
     行尾开关可写 `190:7` / 工作区视图 · 继承·已覆盖全局默认 `190:79` / 优先级与落点
     规范 `190:153`）。对应实现：MCP 全局默认层（`capability-global-overrides.json` 的
     `mcp` 名单 + 项目 `enabledMcp` 三态）。
+  - `Capability Panel · Prompt 指令域 v23（草案，已落代码 Unreleased）`（page `207:2`）：7 帧
+  （`209:743` 面板全局 / `209:837` 面板项目链 / `207:214` 编辑态 / `207:289` 可见范围弹层 /
+  `210:946` 首屏 Prompt Tab / `210:1071` 会话内只读 / `207:632` 规范）。语义：全局与项目
+  **叠加注入**（不是覆盖）、每个文件独立开关、首屏默认全选、会话开始后冻结只读、不进入
+  Jev/批量三域。预览图 `docs/figma/preview/v23-01..07-*.png`；对应实现 `src/prompt/*` +
+  `src/client/prompt-panel.tsx` / `prompt-tab.tsx`。
   - `Capability Panel · 详情页内容优先 v22 草案`（page `201:2`）：**详情页布局基线（已落代码）**——
     头部压缩为「标题行 / 状态条 / 内容工具条」三段 + 长元数据收进可展开面板；MCP 用
     方案 B 主从分栏（左 262px 工具列表 + 右常驻参数详情），Skills **目录树常驻**（单文件也显示）。

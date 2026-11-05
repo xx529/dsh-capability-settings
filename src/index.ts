@@ -45,6 +45,9 @@ import { createToolsManager } from "./tools/manager.js";
 import { createAttributionResolver } from "./tools/attribution/resolver.js";
 import type { ToolsManager } from "./tools/manager.js";
 import { createToolsGlobalStore } from "./tools/global-state.js";
+import { createPromptHost } from "./prompt/host.js";
+import { createPromptManager } from "./prompt/manager.js";
+import { installPromptInjection } from "./prompt/inject.js";
 import { createSessionBulk } from "./session-bulk.js";
 import type { SessionBulk } from "./session-bulk.js";
 import { annotateSkillDefaults } from "./shared/skill-defaults.js";
@@ -111,6 +114,8 @@ export type SkillsService = ReturnType<typeof createService> & {
 export interface CapabilityPanelService {
   skills: SkillsService;
   mcp: ReturnType<typeof createMcpManager>;
+  /** Prompt 域：首轮注入的指令文件（策略 / 编辑 / 冻结清单，见 `prompt/manager.ts`）。 */
+  prompt: ReturnType<typeof createPromptManager>;
   overrides: ReturnType<typeof createOverridesManager>;
   /** Jev 能力决策（配置 / 打分 / 应用；见 `jev/manager.ts`）。 */
   jev: ReturnType<typeof createJevManager>;
@@ -379,6 +384,14 @@ export function apply(ctx: any, config: Config = {}) {
     service: () => serviceRef.current,
     logger: ctx.logger,
   });
+  const promptHost = createPromptHost(ctx);
+  const prompt = createPromptManager({
+    ctx,
+    host: promptHost,
+    dshHome: config.dshHome,
+    agentsHome: config.agentsHome,
+    logger: ctx.logger,
+  });
   const service: CapabilityPanelService = {
     // 用对象展开装配（不原地改 skillsBase）：三个覆盖方法都基于 `diskList`
     // 这一份原始磁盘 list，避免装配顺序造成的自引用/无限递归。
@@ -411,6 +424,7 @@ export function apply(ctx: any, config: Config = {}) {
       imports,
     ),
     overrides,
+    prompt,
     jev,
     tools,
     session: {
@@ -483,6 +497,7 @@ export function apply(ctx: any, config: Config = {}) {
   // 会话级开关记录的孤儿对账（见 session-state-reconcile.ts）：宿主没有"会话
   // 删除"事件，靠"存在性校验 + 24h 两阶段"清理；disposed 只触发"标记"核对
   // （关机时会对所有 live 会话成批发 disposed，不能当删除信号）。
+  const disposePromptInjection = installPromptInjection(ctx, { manager: prompt, logger: ctx.logger });
   const reconciler = createSessionStateReconciler(ctx, sessionState, { logger: ctx.logger });
   reconciler.start();
   const offSessionDisposed =
@@ -500,6 +515,7 @@ export function apply(ctx: any, config: Config = {}) {
 
   const disposers: Array<() => void> = [
     disposeUsageGuard,
+    () => disposePromptInjection(),
     () => deriveInheritance.dispose(),
     () => skillsRegistry.dispose(),
     () => skillSessions.dispose(),

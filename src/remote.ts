@@ -22,6 +22,7 @@
 
 import { CHANNEL } from "./channel.js";
 import type { JevManager } from "./jev/manager.js";
+import type { PromptManager } from "./prompt/manager.js";
 
 export { CHANNEL };
 
@@ -162,6 +163,8 @@ export interface PanelRpcService {
      */
     visibilityConflicts(input: unknown): Promise<unknown>;
   };
+  /** Prompt 域：首轮注入的指令文件（只读列表 / 编辑 / 可见范围 / 项目默认 / 会话冻结清单）。 */
+  prompt: PromptManager;
   /**
    * Tools 域（插件级会话开关，v13）：只读枚举 + 批量写会话开关。
    *
@@ -278,6 +281,23 @@ export async function handleEndpoint(service: PanelRpcService, endpoint: string,
         // 探测自身把失败收进业务信封（value.ok=false），这里保持同一形状：
         // 客户端适配器解出 { ok:false, errors } 后由面板展示。
         return { ok: true, value: await service.mcp.test(p) };
+      case "prompt.list":
+        return {
+          ok: true,
+          value: await service.prompt.list({ ...(cwd !== undefined ? { cwd } : {}), ...(sessionId !== undefined ? { sessionId } : {}) }),
+        };
+      case "prompt.read":
+        return { ok: true, value: await service.prompt.read(p) };
+      case "prompt.save":
+        return { ok: true, value: await service.prompt.save(p) };
+      case "prompt.setVisibility":
+        return { ok: true, value: await service.prompt.setVisibility(p) };
+      case "prompt.setProjectDefault":
+        return { ok: true, value: await service.prompt.setProjectDefault(p) };
+      case "prompt.setSessionSelection":
+        return { ok: true, value: await service.prompt.setSessionSelection(p) };
+      case "prompt.manifest":
+        return { ok: true, value: await service.prompt.manifest(p) };
       case "overrides.get":
         return { ok: true, value: await service.overrides.get(cwd) };
       case "overrides.toggle":

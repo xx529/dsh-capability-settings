@@ -11,7 +11,7 @@
  * 随之删除。
  *
  * **v20.1 信息架构（能力中心）**：只保留两条轴 + 一个解释层。
- *   1. 类型 = Tab（Skills / MCP / Tools，Jev 用分隔线单独成组）；
+ *   1. 类型 = Tab（Skills / MCP / Tools / Prompt，Jev 用分隔线单独成组）；
  *   2. 作用域 = 头部常驻分段控件（全局 / 工作区 ▾，工作区下拉列出全部
  *      工作区）——**面板与当前对话所在工作区完全解耦，默认进入全局**；
  *      `src/client.ts` 的面板 api `currentWorkspaceCwd = () => selection.cwd`
@@ -49,6 +49,7 @@ import type {
 } from "./api.js";
 import { McpView } from "./mcp-panel.js";
 import { ToolsView } from "./tools-panel.js";
+import { PromptView } from "./prompt-panel.js";
 import { JevPanel } from "./jev-panel.js";
 import { Modal } from "./modal.js";
 import { ScopeChain } from "./scope-chain.js";
@@ -87,12 +88,13 @@ import { unzip } from "./unzip.js";
 import { base64ToBytes, buildZip, downloadBytes } from "./zip.js";
 
 /**
- * 域 Tab 的取值（v13：Skills / MCP / Tools / Jev 模型四域）。
+ * 域 Tab 的取值（v23：Skills / MCP / Tools / Prompt / Jev 模型五域）。
  * `jev` 是配置页而不是条目域：无计数、无搜索、无左导航（见 UX v1.8 §7.1）；
- * `tools` 是全局工具注册：无项目 / 工作区维度、无左导航（见 UX v1.8 §2.5）。
+ * `tools` 是全局工具注册：无项目 / 工作区维度、无左导航（见 UX v1.8 §2.5）；
+ * `prompt` 是首轮注入的指令文件域（v23）：全局 / 项目链两段叠加注入。
  * 导出给 client.ts 的 `openCapabilityPanel(domain?)` 复用。
  */
-export type DomainTab = "skills" | "mcp" | "tools" | "jev";
+export type DomainTab = "skills" | "mcp" | "tools" | "prompt" | "jev";
 
 /** 外部（client.ts）请求面板切域时派发的 window 自定义事件名。 */
 const PANEL_DOMAIN_EVENT = "capability-panel:set-domain";
@@ -131,10 +133,11 @@ const DOMAIN_LABEL: Record<DomainTab, string> = {
   skills: "Skills",
   mcp: "MCP",
   tools: "Tools",
+  prompt: "Prompt",
   jev: "Jev 模型",
 };
 
-const DOMAIN_ORDER: DomainTab[] = ["skills", "mcp", "tools", "jev"];
+const DOMAIN_ORDER: DomainTab[] = ["skills", "mcp", "tools", "prompt", "jev"];
 
 /**
  * 各域的搜索占位符（搜索框在根组件头部，切换域时切换文案）。
@@ -144,6 +147,7 @@ const DOMAIN_SEARCH_PLACEHOLDER: Record<Exclude<DomainTab, "jev">, string> = {
   skills: "搜索 Skills…",
   mcp: "搜索 MCP…",
   tools: "搜索插件或工具…",
+  prompt: "搜索 prompt 文件…",
 };
 
 /**
@@ -171,6 +175,7 @@ export function CapabilityPanel({ api }: { api: CapabilityPanelApi }) {
   const [skillsCount, setSkillsCount] = useState<number | undefined>(undefined);
   const [mcpCount, setMcpCount] = useState<number | undefined>(undefined);
   const [toolsCount, setToolsCount] = useState<number | undefined>(undefined);
+  const [promptCount, setPromptCount] = useState<number | undefined>(undefined);
   /**
    * Jev 配置页在首次进入该 Tab 时挂载，之后**常驻**（用 active 控制显隐）：
    * 这样在同一面板会话内切到技能/MCP 再切回来，未保存的表单草稿仍在
@@ -186,7 +191,7 @@ export function CapabilityPanel({ api }: { api: CapabilityPanelApi }) {
     const onSetDomain = (event: Event) => {
       pendingPanelDomain = undefined;
       const detail = (event as CustomEvent<unknown>).detail;
-      if (detail !== "skills" && detail !== "mcp" && detail !== "tools" && detail !== "jev") return;
+      if (detail !== "skills" && detail !== "mcp" && detail !== "tools" && detail !== "prompt" && detail !== "jev") return;
       setDomain(detail);
       setQuery("");
       if (detail === "jev") setJevMounted(true);
@@ -219,6 +224,7 @@ export function CapabilityPanel({ api }: { api: CapabilityPanelApi }) {
     skills: skillsCount,
     mcp: mcpCount,
     tools: toolsCount,
+    prompt: promptCount,
     jev: undefined,
   };
 
@@ -340,6 +346,8 @@ export function CapabilityPanel({ api }: { api: CapabilityPanelApi }) {
 
       {jevActive ? null : domain === "tools" ? (
         <ToolsView api={api} workspace={pinned} projects={projects} query={query} onCount={setToolsCount} />
+      ) : domain === "prompt" ? (
+        <PromptView api={api} workspace={pinned} projects={projects} query={query} onCount={setPromptCount} />
       ) : domain === "skills" ? (
         <SkillsView
           api={api}

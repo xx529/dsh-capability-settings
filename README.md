@@ -1,8 +1,8 @@
 # dsh-capability-settings
 
 一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）插件：
-在 Web GUI 里**可视化管理项目的全部能力**——Skills、MCP 与插件工具（**Tools**），
-覆盖**全局级 / 项目级（逐工作区）**双作用域。安装、启停、内容浏览与分发都能
+在 Web GUI 里**可视化管理项目的全部能力**——Skills、MCP、插件工具（**Tools**）与
+首轮注入的 **Prompt** 指令文件，覆盖**全局级 / 项目级（逐工作区）**双作用域。安装、启停、内容浏览与分发都能
 **不离开浏览器**完成。
 
 面板还内置 TypeSafe Jev「能力决策」：按当前输入草稿为**本会话**预选
@@ -41,6 +41,7 @@ Skills / MCP / Tools（Tools 以插件为单元），一次请求批量打 0–1
 |---|---|---|---|---|---|---|
 | **Skills** | ✅ 左导航「全局 / 项目」+ 头部搜索 + 项目按工作区下钻 + 详情（目录树 + `SKILL.md` 阅读器，预览/源码） | ✅ 上传 / 宿主路径 / URL 三种来源 | ✅ | ✅ 行尾「启用」开关（项目区启停；全局 = 在本项目禁用/恢复）+ 详情页模型/用户方向独立开关 | ✅ 确认对话框 | ✅ 导入到本项目（物理副本）/ 在本项目禁用（屏蔽占位）/ 下载 zip / 复制到宿主目录 |
 | **MCP** | ✅ 全局（含外部注入第二组）/ 项目按工作区下钻 + 实时挂载状态 + 行尾「默认」开关 + 工具与参数主从分栏（v22） | ✅ 表单新增（stdio/http）+ JSON 导入 | ✅ | ✅ 「默认」开关（**全局** / **工作区** / 外部注入实例均可设：全局默认 < 工作区显式 < 会话显式）+ 当前对话开关（会话能力配置）+ 项目条目详情启停 | ✅ 两击确认 | ✅ 导入到本项目（引用，跟随全局）/ `.mcp.json` 与 Claude Code 格式兼容 |
+| **Prompt**（指令文件，v23） | ✅ 全局（`~/.dsh/AGENTS.md` / `~/.agents/AGENTS.md`）+ 项目链（项目根→cwd 的 `AGENTS.md` / `CLAUDE.md` / `*.local.md`）+ 状态标签（注入 / 关闭 / 不可见 / 重复折叠 / 预算省略 / 超 1MB） | ❌ 文件由用户维护（可新建后刷新出现） | ✅ 详情页 Markdown 预览 + 文本编辑（原子写） | ✅ 全局可见范围（按工作区）+ 每文件项目级默认；全局与项目**叠加注入**，各自独立开关 | ❌ | ❌ |
 | **Tools**（插件工具） | ✅ 插件列表 + 搜索（按插件名 / 工具名 / 工具说明）+ 详情**只读工具清单**（手风琴：参数表 + 原始 JSON，按需懒加载） | ❌ 由插件自带（插件注册即出现） | ❌ 工具清单只读 | ✅ **插件级**「启用」开关：**能力面板 = 全局默认**（所有会话）+ **会话首屏 = 本会话覆盖**；整插件全开 / 全关，无单工具开关 | ❌ | ❌ |
 
 > 上表前两个是**条目域**（Skills / MCP，有配置文件与写入操作）；**Tools 是全局工具
@@ -49,7 +50,9 @@ Skills / MCP / Tools（Tools 以插件为单元），一次请求批量打 0–1
 > 域**，两域互斥、不重复收录。Tools 自己的开关分两层（能力面板 = **全局默认**、
 > 会话首屏 = **本会话覆盖**，见下文）。面板另有第四个域 Tab **「Jev 模型」**：它
 > 不是条目管理，而是 TypeSafe Jev 的全局配置页（无计数、无搜索、无左导航），并
-> 驱动首屏 **「✦ 能力决策」**。详见下文「Tools（插件工具）」与「Jev 能力决策」。
+> 驱动首屏 **「✦ 能力决策」**。v23 起面板新增第 4 个条目域 **「Prompt」**（详见下文
+> 「Prompt 指令域」）：它只读/编辑文件、写策略层，**不参与** Jev 能力决策与三域批量动作。
+> 详见下文「Tools（插件工具）」「Prompt 指令域」与「Jev 能力决策」。
 >
 > 表中「编辑 / 删除 / 导入」等写操作只作用于本插件**受管磁盘目录**下的技能；由宿主
 > registry 注入的技能（DSH 内置 / 插件运行时 / Agent 预设渠道）**内容只读**，只能
@@ -67,6 +70,8 @@ Skills / MCP / Tools（Tools 以插件为单元），一次请求批量打 0–1
 | 项目级「默认关闭」声明（MCP 面板的「默认」开关 + Skills / Tools 工作区开关；B2 增 `enabledSkills`、v20.2 增 `enabledMcp`、v21 增 `tools`/`enabledTools`） | `<dshHome>/dsh-capability-settings/capability-overrides.json`（一个文件按**工作区目录**分 key：`projects.<工作区>...` / `.skills` / `.tools`（禁用）/ `.enabledSkills` / `.enabledMcp` / `.enabledTools`（重新打开）） | 旧项目内 `.agents/capability-overrides.json`（兼容 `.dsh` → `.claude`）：只读兼容，首次写入时把内容并入统一存储并删除旧文件 |
 | 项目级「全局能力引用」声明（MCP 的「导入到本项目」） | `<工作区>/.agents/capability-imports.json` | — |
 | 会话级能力开关（Skills / MCP / Tools 三域 + 派生继承设置，按 sessionId） | `<dshHome>/dsh-capability-settings/session-capabilities.json`（`version: 1`，记录内 `skills` / `mcp` / `tools` / `deriveMode` / `derivedMode` / `derivedFrom` / `derivedAt`） | — |
+| **Prompt** 策略层（v23：全局可见范围 + 每工作区默认 + 项目级默认 + 会话首屏显式选择） | `<dshHome>/dsh-capability-settings/prompt-policy.json`（`{"version":1,"visibility":{"user-global|agents-global":{...}},"projects":{"<项目根>":{"defaults":{"<文件绝对路径>":false}}},"sessions":{"<sessionId>":{"selected":[…],"cwd"}}}`；目录 `700` / 文件 `600`、原子写 + 文件锁；损坏降级为空策略） | — |
+| **Prompt** 会话冻结清单（首轮注入后只读） | `<dshHome>/dsh-capability-settings/prompt-manifests.json`（`{version,sessions:{<sessionId>:{at,cwd,files[{path,displayPath,order,bytes,digest}],omitted,truncated,text}}}`；会话首轮写一次，之后不再变化） | — |
 | Tools 归属扫描缓存（自动发现） | `<dshHome>/dsh-capability-settings/tool-attribution.json`（`version: 1`；包名+version+mtime+宿主版本失效；目录 `700` / 文件 `600`、原子写 + 锁；损坏自动重建） | — |
 | Tools **全局默认**（能力面板 Tools 页开关；所有会话 / 新会话） | 新写入：`capability-global-overrides.json` 的 `tools` 名单（v21）；旧文件 `<dshHome>/dsh-capability-settings/tools-global.json`（`{"version":1,"disabled":["<unit>",…]}`）**只读合并**，缺省 = 全部启用 | — |
 | 全局 MCP 服务器 | `~/.agents/mcp.json` | `~/.dsh` → `~/.claude` |
@@ -295,6 +300,43 @@ v2 把手写文字按钮全部收进详情，**列表每行右端只有一个开
 ![MCP 详情（v22）：工具主从分栏 + 压缩头部](docs/figma/preview/v22-03-mcp-master-detail.png)
 
 ![Skills 详情（v22）：目录树常驻 + 元数据面板](docs/figma/preview/v22-05-skill-multi-metadata.png)
+
+### 🧾 Prompt 指令域（v23）：首轮注入的指令文件，可编辑、可冻结
+
+**Prompt 是第 4 个能力域**：DSH 在会话首个 `agent/pre-step` 会把「与 `AGENTS.md` 兼容的
+指令文件」注入上下文。本插件把它们列出来、允许编辑、并让用户决定**把哪些文件交给 DSH**。
+
+- **候选与顺序**（与宿主 `@deepseek-ai/dsh-agent-instructions` 完全一致）：`$DSH_HOME/AGENTS.md`
+  → `$DSH_AGENTS_HOME/AGENTS.md` → 项目根（向上找 `.git`）到会话 cwd 的每一级目录里的
+  `AGENTS.md` / `CLAUDE.md`，再是 `AGENTS.local.md` / `CLAUDE.local.md`。**全局与项目是叠加
+  注入，不是覆盖**：每个文件独立启用，全部按顺序交给 DSH。
+- **渲染/去重/预算不由本插件实现**：插件掌握「允许集合」后，把它作为虚拟 fs 交给宿主导出的
+  `loadBaselineInstructions`；拼接、trim 内容去重、`maxBytes` 预算截断、`<system-reminder>`
+  framing 全由 DSH 自己完成。宿主模块经 `loader.import` 取（与宿主注入器同一份实例）。
+- **三处 UI**：
+  1. 能力面板「Prompt」域：全局 / 项目分区列表 + 详情预览 + 编辑保存；全局视图无行内开关
+     （可见范围在弹层里按工作区配），工作区视图行尾开关 = 该文件的本工作区默认；
+  2. 会话首屏 Prompt Tab：卡片开关决定**本会话首轮**注入哪些文件（默认全选 = DSH 原生行为）；
+  3. 会话内「能力」Tab 的 Prompt 子 Tab：**只读冻结**——展示首轮实际注入的文件、顺序、字节、
+     被预算省略/截断的项与正文预览，不能修改或开关。
+- **冻结语义**：本会话首轮注入后，插件丢弃之后所有宿主增量消息（文件改动、面板编辑、开关
+  都不影响当前会话上下文）；如需调整，新开会话。编辑保存只对新会话生效。
+- **降级**：宿主渲染器不可用（`loader.import` 失败 / 暴露缺失）时整个接管层 no-op，注入仍走
+  宿主默认行为，面板/首屏顶部提示「开关暂不生效」。
+- **边界**：Prompt 不进入 Jev 能力描述符 / 三域批量动作（`BULK_DOMAINS` 仍为三域），也不写入
+  `capability-global-overrides.json` 的 `visibility` 三域；Prompt 使用独立的两个文件（见上表）。
+  项目级默认按**宿主语义的项目根**（`.git` 向上）分键，不同于本插件 Skills/MCP 的「工作区目录本身」归属。
+- **只展示存在的文件**：面板与对话页都只列已存在、且被 DSH 读取的文件；`未创建` / 未识别的
+  其它 agent 规范（`GEMINI.md`、`~/.claude/CLAUDE.md` 等）不在本域展示（后续版本再扩充）。
+
+设计稿：Figma `Capability Panel · Prompt 指令域 v23 草案`（page `207:2`），预览
+`docs/figma/preview/v23-01…07-*.png`。
+
+![Prompt 面板 · 工作区（叠加注入 + 行尾独立默认开关）](docs/figma/preview/v23-02-panel-project.png)
+
+![会话首屏 Prompt Tab（卡片开关 = 本会话注入）](docs/figma/preview/v23-05-hero-prompt-tab.png)
+
+![会话内 Prompt（只读冻结）](docs/figma/preview/v23-06-session-readonly.png)
 
 ### 🗃 Skills：全局 / 项目分离，项目级控制落实为真实文件
 

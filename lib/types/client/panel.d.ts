@@ -11,7 +11,7 @@
  * 随之删除。
  *
  * **v20.1 信息架构（能力中心）**：只保留两条轴 + 一个解释层。
- *   1. 类型 = Tab（Skills / MCP / Tools，Jev 用分隔线单独成组）；
+ *   1. 类型 = Tab（Skills / MCP / Tools / Prompt，Jev 用分隔线单独成组）；
  *   2. 作用域 = 头部常驻分段控件（全局 / 工作区 ▾，工作区下拉列出全部
  *      工作区）——**面板与当前对话所在工作区完全解耦，默认进入全局**；
  *      `src/client.ts` 的面板 api `currentWorkspaceCwd = () => selection.cwd`
@@ -37,12 +37,13 @@
  */
 import type { CapabilityPanelApi } from "./api.js";
 /**
- * 域 Tab 的取值（v13：Skills / MCP / Tools / Jev 模型四域）。
+ * 域 Tab 的取值（v23：Skills / MCP / Tools / Prompt / Jev 模型五域）。
  * `jev` 是配置页而不是条目域：无计数、无搜索、无左导航（见 UX v1.8 §7.1）；
- * `tools` 是全局工具注册：无项目 / 工作区维度、无左导航（见 UX v1.8 §2.5）。
+ * `tools` 是全局工具注册：无项目 / 工作区维度、无左导航（见 UX v1.8 §2.5）；
+ * `prompt` 是首轮注入的指令文件域（v23）：全局 / 项目链两段叠加注入。
  * 导出给 client.ts 的 `openCapabilityPanel(domain?)` 复用。
  */
-export type DomainTab = "skills" | "mcp" | "tools" | "jev";
+export type DomainTab = "skills" | "mcp" | "tools" | "prompt" | "jev";
 /**
  * 请求能力面板切到指定域（由 client.ts 的 `openCapabilityPanel(domain?)` 在
  * `layout.selectPanel("capability-panel")` 之前调用）。

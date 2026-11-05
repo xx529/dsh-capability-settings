@@ -28,6 +28,7 @@ import { createMcpManager } from "./mcp/manager.js";
 import { createOverridesManager } from "./overrides/manager.js";
 import { createJevManager } from "./jev/manager.js";
 import type { ToolsManager } from "./tools/manager.js";
+import { createPromptManager } from "./prompt/manager.js";
 /** Cordis 插件名（对应 cordis.patch.yml 里的插件 id）。 */
 export declare const name = "capability-panel";
 /** 宿主插件强依赖的服务（connection/webServer 是惰性解析的，不在这里声明）。 */
@@ -88,6 +89,8 @@ export type SkillsService = ReturnType<typeof createService> & {
 export interface CapabilityPanelService {
     skills: SkillsService;
     mcp: ReturnType<typeof createMcpManager>;
+    /** Prompt 域：首轮注入的指令文件（策略 / 编辑 / 冻结清单，见 `prompt/manager.ts`）。 */
+    prompt: ReturnType<typeof createPromptManager>;
     overrides: ReturnType<typeof createOverridesManager>;
     /** Jev 能力决策（配置 / 打分 / 应用；见 `jev/manager.ts`）。 */
     jev: ReturnType<typeof createJevManager>;

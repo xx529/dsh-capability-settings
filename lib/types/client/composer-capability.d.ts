@@ -149,7 +149,13 @@ export declare function CapabilityCard({ row, busy, onToggle }: {
     busy: boolean;
     onToggle: () => void;
 }): import("react").JSX.Element;
-type TabId = "skills" | "mcp" | "tools";
+/**
+ * 会话能力弹层的四个域 Tab。
+ *
+ * `prompt`（v23）：首轮注入的指令文件；首屏可开关、会话内只读。
+ * **不参与** Jev 能力决策，也不参与三域批量动作（`BULK_DOMAINS` 保持三域）。
+ */
+type TabId = "skills" | "mcp" | "tools" | "prompt";
 /** 行 3 控制条的批量态（idle / 执行中 / 部分失败）。 */
 export interface BulkState {
     phase: "idle" | "running" | "partial";

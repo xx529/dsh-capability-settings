@@ -3,6 +3,45 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 新增
+
+- **Prompt 能力域（v23）：首轮注入的指令文件**——第 4 个条目域，覆盖
+  `$DSH_HOME/AGENTS.md`、`$DSH_AGENTS_HOME/AGENTS.md` 与项目根（`.git` 向上）→ cwd 每层的
+  `AGENTS.md` / `CLAUDE.md` / `AGENTS.local.md` / `CLAUDE.local.md`：
+  - **能力面板**新增「Prompt」Tab：全局 / 项目分区列表（状态：注入 / 关闭 / 不可见 / 重复折叠 /
+    预算省略 / 超 1MB）、详情 Markdown 预览 + 文本编辑（原子写）、全局可见范围弹层（按工作区
+    `visible` / `defaultEnabled`）、工作区视图行尾独立默认开关；
+  - **会话首屏**新增 Prompt Tab（卡片开关）：决定本会话首轮把哪些文件交给 DSH；默认全选
+    （= DSH 原生行为），开关只写本会话选择；
+  - **会话内「能力」Tab** 新增 Prompt 子 Tab：只读冻结，展示首轮实际注入的文件、顺序、字节、
+    被预算省略/截断项与正文预览；不渲染任何开关与编辑；
+  - 全局与项目 prompt **叠加注入**（不是覆盖）：每个文件独立启用，全部按顺序交给 DSH；只有同
+    候选组内容重复时由宿主去重；
+  - Prompt **不参与** Jev 能力决策与三域批量动作（`BULK_DOMAINS` 仍三域），也不写入
+    `capability-global-overrides.json` 的 `visibility` 三域；
+  - 降级：宿主渲染器不可用（`loader.import` 失败 / 导出缺失）时接管层整体 no-op，注入保持宿主
+    默认行为，面板/首屏显示「开关暂不生效」提示。
+- RPC：`prompt.list` / `prompt.read` / `prompt.save` / `prompt.setVisibility` /
+  `prompt.setProjectDefault` / `prompt.setSessionSelection` / `prompt.manifest`；客户端
+  `CapabilityPanelApi.prompt` 同步新增。
+- 存储（均在 `<dshHome>/dsh-capability-settings/`，目录 `700` / 文件 `600`、原子写 + 文件锁）：
+  - `prompt-policy.json`：全局可见范围 + 每工作区默认 + 按宿主项目根的每文件默认 + 会话首屏显式选择；
+  - `prompt-manifests.json`：会话首轮冻结清单（文件顺序/字节/SHA-1、omitted、truncated、正文）。
+
+### 内部
+
+- 新增 `src/prompt/`：`paths.ts`（宿主语义 home/项目根/目录链）、`store.ts`（策略 + 冻结清单）、
+  `host.ts`（`loader.import` 取宿主 `@deepseek-ai/dsh-agent-instructions`，虚拟 fs 只暴露允许集合，
+  拼接/去重/预算/framing 全由宿主完成）、`manager.ts`（列表/读写/策略/冻结）、`inject.ts`
+  （root ctx `agent/pre-step` + `{prepend:true}`：首轮用宿主渲染结果替换 baseline 正文，之后丢弃
+  增量并清 inbox；resume/compaction 后按冻结正文重放；全程 fail-open）。
+- 新增验证 `notes/verify/v25-prompt.mjs`（26/26：路径语义 / 策略 / 存储 / 列表 / 读写 / 冻结清单 /
+  RPC 信封 / 注入决策形状 / fail-open）。
+- Figma：新增 `Capability Panel · Prompt 指令域 v23 草案`（page `207:2`，7 帧）+ 预览
+  `docs/figma/preview/v23-01…07-*.png`，`docs/figma/README.md` 已同步。
+
 ## [1.13.1] - 2026-11-04
 
 ### 修复

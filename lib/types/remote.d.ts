@@ -21,6 +21,7 @@
  */
 import { CHANNEL } from "./channel.js";
 import type { JevManager } from "./jev/manager.js";
+import type { PromptManager } from "./prompt/manager.js";
 export { CHANNEL };
 /**
  * RPC 通道的业务信封。
@@ -158,6 +159,8 @@ export interface PanelRpcService {
          */
         visibilityConflicts(input: unknown): Promise<unknown>;
     };
+    /** Prompt 域：首轮注入的指令文件（只读列表 / 编辑 / 可见范围 / 项目默认 / 会话冻结清单）。 */
+    prompt: PromptManager;
     /**
      * Tools 域（插件级会话开关，v13）：只读枚举 + 批量写会话开关。
      *

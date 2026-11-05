@@ -44,6 +44,7 @@ import type {
 import { useWorkspaceLabel } from "./composer-common.js";
 import { JEV_CONFIG_CHANGED_EVENT } from "./jev-panel.js";
 import { aggregateMounts, MOUNT_LABEL, type MountInfo } from "./mcp-common.js";
+import { PromptTab, usePromptTabData } from "./prompt-tab.js";
 
 // ---------------------------------------------------------------------------
 // 图标（内联 SVG，颜色走 currentColor）
@@ -2044,7 +2045,13 @@ function ToolIcon() {
   );
 }
 
-type TabId = "skills" | "mcp" | "tools";
+/**
+ * 会话能力弹层的四个域 Tab。
+ *
+ * `prompt`（v23）：首轮注入的指令文件；首屏可开关、会话内只读。
+ * **不参与** Jev 能力决策，也不参与三域批量动作（`BULK_DOMAINS` 保持三域）。
+ */
+type TabId = "skills" | "mcp" | "tools" | "prompt";
 
 /** 批量动作的三域执行顺序（与宿主 §6.2-6 一致：skills → mcp → tools）。 */
 const BULK_DOMAINS: SessionBulkDomain[] = ["skills", "mcp", "tools"];
@@ -2119,6 +2126,8 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
     initialTab,
     onTabChange,
   } = props;
+  /** 旧宿主 / 测试桩没有 `api.prompt`：不渲染 Prompt Tab，保持三域行为不变。 */
+  const promptSupported = typeof api?.prompt?.list === "function";
   const [tab, setTabState] = useState<TabId>(initialTab ?? "skills");
   /** v21：三域因可见性被隐藏的条目总数（弹窗提示；全局视图的可见范围控制）。 */
   const hiddenTotal =
@@ -2129,17 +2138,23 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
     setTabState(next);
     onTabChange?.(next);
   };
+  useEffect(() => {
+    if (!promptSupported && tab === "prompt") setTabState("skills");
+  }, [promptSupported, tab]);
   const [query, setQuery] = useState("");
   const [resetBusy, setResetBusy] = useState(false);
   // 派生继承：主对话显示下拉；派生会话只读展示创建时的模式。
   const derive = useDeriveMode(api, mode === "view" || mode === "modal");
+  // Prompt 域（v23）：面板挂载时拉一次；`view` 为只读页（数据以 list().frozen 为准）。
+  const prompt = usePromptTabData(api, mode === "view");
+  const readOnlyPrompt = mode === "view";
 
   const skillsOn = skillRows.filter((row) => row.enabled).length;
   const mcpOn = mcpRows.filter((row) => row.enabled).length;
   const toolsOn = toolRows.filter((row) => row.enabled).length;
   // 已启用的注入技能数（来源为插件 / DSH 内置 / Agent 预设），用于底栏统计文案。
   const injectedOn = skillRows.filter((row) => row.injected === true && row.enabled).length;
-  const rows: Row[] = tab === "skills" ? skillRows : tab === "mcp" ? mcpRows : toolRows;
+  const rows: Row[] = tab === "skills" ? skillRows : tab === "mcp" ? mcpRows : tab === "tools" ? toolRows : [];
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (q === "") return rows;
@@ -2257,8 +2272,37 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
               {toolsOn} / {toolRows.length}
             </span>
           </button>
+          {promptSupported && (
+          <>
+                    {/*
+            Prompt（v23）：首轮注入的指令文件。计数口径按视图区分——
+            首屏 = 本会话会注入的已启用数 / 文件数；只读页 = 冻结清单里已注入数 / 文件数。
+          */}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "prompt"}
+            className={`skp-dock-tab${tab === "prompt" ? " skp-dock-tab-active" : ""}`}
+            title="首轮注入的指令文件（AGENTS.md / CLAUDE.md 等）· 首屏可开关，会话开始后只读冻结"
+            onClick={() => setTab("prompt")}
+          >
+            Prompt
+            <span className="skp-dock-tab-count">
+              {readOnlyPrompt ? `${prompt.injectedCount} / ${prompt.fileCount}` : `${prompt.enabledCount} / ${prompt.fileCount}`}
+            </span>
+          </button>
+          </>
+          )}
         </div>
         <span className="skp-dock-spacer" />
+        {promptSupported && tab === "prompt" && (
+          <span
+            className="skp-dock-tag skp-dock-tag-preset"
+            title="Prompt 只决定把哪些指令文件交给 DSH；Jev 能力决策与三域批量开关只处理 Skills / MCP / Tools"
+          >
+            不参与 Jev 能力决策
+          </span>
+        )}
         {onManage !== undefined && (
           <button type="button" className="skp-dock-link" onClick={onManage}>
             管理全部 ↗
@@ -2269,7 +2313,10 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
       {/*
         行 3：本会话控制条（R1）。左批量 + 计数 + 范围说明；右侧 R2 派生继承控件
         **本批不实现**（为零代码的提案），这里留空位、不渲染任何继承控件或弱提示。
+        Prompt Tab 不参与三域批量动作（`BULK_DOMAINS` 保持三域），切到 Prompt 时整条隐藏，
+        由 Prompt 自己的汇总行 / 冻结 banner 取代。
       */}
+      {tab !== "prompt" && (
       <div className="skp-dock-rail" role="group" aria-label="本会话全局开关">
         <button
           type="button"
@@ -2320,6 +2367,7 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
           />
         )}
       </div>
+      )}
 
       {error !== undefined && (
         <div className="skp-dock-banner" role="alert">
@@ -2332,58 +2380,75 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
         </div>
       )}
 
-      {/* 卡片网格 */}
-      <div className="skp-dock-grid" role="tabpanel">
-        {tab === "tools" && props.snapshot.attributionSettling && (
-          <div className="skp-dock-grid-note">来源解析中…</div>
-        )}
-        {loading && filtered.length === 0 ? (
-          <div className="skp-dock-empty">加载中…</div>
-        ) : filtered.length === 0 ? (
-          <div className="skp-dock-empty">
-            {query.trim() !== ""
-              ? `没有匹配「${query.trim()}」的能力`
-              : tab === "skills"
-                ? "本会话暂无可配置的 Skills"
-                : tab === "mcp"
-                  ? "本会话暂无可配置的 MCP"
-                  : "本会话暂无可配置的 Tools"}
-            {query.trim() !== "" && (
-              <button type="button" className="skp-dock-link" onClick={() => setQuery("")}>
-                清空搜索
-              </button>
-            )}
-          </div>
-        ) : (
-          filtered.map((row) => (
-            <CapabilityCard key={row.id} row={row} busy={bulkRunning || busy[row.id] === true} onToggle={() => onToggle(row)} />
-          ))
-        )}
-      </div>
+      {/* 卡片网格：Prompt 用独立网格（首屏可开关 / 会话内只读），其余三域沿用原网格 */}
+      {tab === "prompt" ? (
+        <PromptTab data={prompt} readOnly={readOnlyPrompt} query={query} onClearQuery={() => setQuery("")} />
+      ) : (
+        <div className="skp-dock-grid" role="tabpanel">
+          {tab === "tools" && props.snapshot.attributionSettling && (
+            <div className="skp-dock-grid-note">来源解析中…</div>
+          )}
+          {loading && filtered.length === 0 ? (
+            <div className="skp-dock-empty">加载中…</div>
+          ) : filtered.length === 0 ? (
+            <div className="skp-dock-empty">
+              {query.trim() !== ""
+                ? `没有匹配「${query.trim()}」的能力`
+                : tab === "skills"
+                  ? "本会话暂无可配置的 Skills"
+                  : tab === "mcp"
+                    ? "本会话暂无可配置的 MCP"
+                    : "本会话暂无可配置的 Tools"}
+              {query.trim() !== "" && (
+                <button type="button" className="skp-dock-link" onClick={() => setQuery("")}>
+                  清空搜索
+                </button>
+              )}
+            </div>
+          ) : (
+            filtered.map((row) => (
+              <CapabilityCard key={row.id} row={row} busy={bulkRunning || busy[row.id] === true} onToggle={() => onToggle(row)} />
+            ))
+          )}
+        </div>
+      )}
 
       {/* 底栏 */}
       <div className="skp-dock-foot">
         <span className="skp-dock-foot-note">
-          {totalOn} / {total} 项已启用{injectedOn > 0 ? ` · 其中 ${injectedOn} 项来自插件 / DSH 内置 / Agent 预设` : ""} · 开关只作用于当前对话
-          {hiddenTotal > 0 && (
-            <span className="skp-vis-summary" title="能力可见性由全局「可见范围」按工作区控制；不可见能力不出现在本会话，也不能在这里打开">
-              {" "}
-              · 能力可见性由全局控制 · 不可见 {hiddenTotal} 项已隐藏
-            </span>
+          {tab === "prompt" ? (
+            readOnlyPrompt ? (
+              "只展示本会话首轮注入结果 · 不参与 Jev 能力决策 · 不参与三域批量开关"
+            ) : (
+              `默认全选（与 DSH 一致）· 将注入 ${prompt.enabledCount} / ${prompt.fileCount} 个文件 · 不参与 Jev 能力决策`
+            )
+          ) : (
+            <>
+              {totalOn} / {total} 项已启用{injectedOn > 0 ? ` · 其中 ${injectedOn} 项来自插件 / DSH 内置 / Agent 预设` : ""} · 开关只作用于当前对话
+              {hiddenTotal > 0 && (
+                <span className="skp-vis-summary" title="能力可见性由全局「可见范围」按工作区控制；不可见能力不出现在本会话，也不能在这里打开">
+                  {" "}
+                  · 能力可见性由全局控制 · 不可见 {hiddenTotal} 项已隐藏
+                </span>
+              )}
+            </>
           )}
         </span>
-        <button
-          type="button"
-          className="skp-dock-btn"
-          disabled={resetBusy || bulkRunning}
-          title="清除本会话的显式开关，恢复默认（Skills / MCP / Tools 三域；Tools 回落到全局默认）"
-          onClick={() => {
-            setResetBusy(true);
-            Promise.resolve(onReset()).finally(() => setResetBusy(false));
-          }}
-        >
-          恢复默认
-        </button>
+        {/* 「恢复默认」只清三域会话覆盖；Prompt 有独立的会话选择，不在这里重置。 */}
+        {tab !== "prompt" && (
+          <button
+            type="button"
+            className="skp-dock-btn"
+            disabled={resetBusy || bulkRunning}
+            title="清除本会话的显式开关，恢复默认（Skills / MCP / Tools 三域；Tools 回落到全局默认）"
+            onClick={() => {
+              setResetBusy(true);
+              Promise.resolve(onReset()).finally(() => setResetBusy(false));
+            }}
+          >
+            恢复默认
+          </button>
+        )}
         {mode !== "view" && (
           <button type="button" className="skp-dock-btn skp-dock-btn-primary" onClick={onCollapse}>
             完成

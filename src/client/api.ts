@@ -1284,6 +1284,123 @@ export interface JevApi {
 }
 
 // ---------------------------------------------------------------------------
+// Prompt 域（v23）：首轮注入的指令文件
+//
+// 与宿主 `src/prompt/types.ts` 同构（传输边界两侧各镜像一份）。语义：
+//   - 全局与项目 prompt **叠加注入**（不是覆盖），每个文件独立启用；
+//   - 渲染/去重/预算由宿主完成；客户端只展示与写策略。
+// ---------------------------------------------------------------------------
+
+/** 一个 prompt 文件的作用域。 */
+export type ClientPromptScope = "user-global" | "agents-global" | "project";
+
+/** 一个 prompt 文件在列表里的状态。 */
+export type ClientPromptState =
+  | "injected"
+  | "truncated"
+  | "omitted"
+  | "disabled"
+  | "invisible"
+  | "duplicate"
+  | "too-large"
+  | "unreadable";
+
+/** 面板/首屏看到的一个 prompt 文件。 */
+export interface ClientPromptFile {
+  id: string;
+  name: string;
+  path: string;
+  displayPath: string;
+  scope: ClientPromptScope;
+  kind: "base" | "local";
+  directory: string;
+  size: number;
+  mtimeMs: number;
+  enabled: boolean;
+  defaultEnabled: boolean;
+  projectDefault?: boolean;
+  sessionExplicit?: boolean;
+  visibility?: { mode: ClientVisibilityMode; visible: boolean; defaultEnabled: boolean };
+  state: ClientPromptState;
+  duplicateOf?: string;
+  order?: number;
+}
+
+/** 本会话冻结清单里的一个文件。 */
+export interface ClientPromptManifestFile {
+  id: string;
+  path: string;
+  displayPath: string;
+  scope: ClientPromptScope;
+  order: number;
+  bytes: number;
+  digest: string;
+}
+
+/** 本会话冻结清单（会话开始后只读）。 */
+export interface ClientPromptManifest {
+  sessionId: string;
+  cwd: string;
+  at: number;
+  renderer: "host";
+  files: ClientPromptManifestFile[];
+  omitted: Array<{ displayPath: string }>;
+  truncated: Array<{ displayPath: string; originalBytes: number; includedBytes: number }>;
+  text?: string;
+}
+
+/** `prompt.list` 的返回。 */
+export interface ClientPromptList {
+  files: ClientPromptFile[];
+  cwd: string;
+  projectRoot: string;
+  sessionId?: string;
+  sessionSelected?: string[];
+  frozen?: ClientPromptManifest;
+  budget: { maxBytes: number; maxSourceBytes: number };
+  /** 宿主渲染管线是否可用（false = 开关暂不生效，UI 提示降级）。 */
+  engineAvailable: boolean;
+  /** 全局 prompt 的完整可见性映射（用于整份写回 `setVisibility`）。 */
+  visibility: Record<
+    string,
+    { mode: ClientVisibilityMode; workspaces: Record<string, ClientWorkspaceVisibility> }
+  >;
+  errors: string[];
+}
+
+/** `prompt.read` 的成功返回。 */
+export interface ClientPromptRead {
+  ok: true;
+  id: string;
+  path: string;
+  size: number;
+  content: string;
+  truncated: boolean;
+}
+
+/** Prompt 域的面板/首屏 API。 */
+export interface PromptApi {
+  /** 列表：全局 + 项目候选（只含已存在文件）、策略默认、会话显式选择、冻结清单。 */
+  list(input?: { cwd?: string; sessionId?: string }): Promise<ClientPromptList>;
+  /** 读取正文（仅已识别候选；超限/不存在时抛错）。 */
+  read(input: { path: string }): Promise<ClientPromptRead>;
+  /** 保存正文（原子写；仅已识别候选、≤ 1 MiB）。 */
+  save(input: { path: string; content: string }): Promise<void>;
+  /** 写全局 prompt 的可见范围（整份替换）。 */
+  setVisibility(input: {
+    scope: "user-global" | "agents-global";
+    mode: ClientVisibilityMode;
+    workspaces?: Record<string, ClientWorkspaceVisibility>;
+  }): Promise<void>;
+  /** 写项目级默认（enabled=null = 删除覆盖、回到默认启用）。 */
+  setProjectDefault(input: { cwd?: string; projectRoot?: string; path: string; enabled: boolean | null }): Promise<void>;
+  /** 写会话首屏显式选择（null = 清除、跟随默认层 = 全选）。 */
+  setSessionSelection(input: { sessionId?: string; selected: string[] | null; cwd?: string }): Promise<void>;
+  /** 读会话冻结清单（会话页只读）。 */
+  manifest(input: { sessionId: string }): Promise<ClientPromptManifest | undefined>;
+}
+
+// ---------------------------------------------------------------------------
 // 面板根（跨域公共部分）
 // ---------------------------------------------------------------------------
 
@@ -1300,6 +1417,8 @@ export interface CapabilityPanelApi {
   mcp: McpApi;
   /** Tools 域（v13）：插件单元列表 + 按会话开关。 */
   tools: ToolsApi;
+  /** Prompt 域（v23）：首轮注入的指令文件。 */
+  prompt: PromptApi;
   /** 会话级批量开关（v13 R1：`session.setBulk`）。 */
   session: SessionApi;
   /** 派生继承（spawn-time snapshot）：会话级模式 + 派生快照读取。 */

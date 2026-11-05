@@ -1,4 +1,4 @@
-# Figma 原型（Dock v5 · 能力面板 v6–v8 · Jev/能力决策 v9–v11 · Skill 来源 v12 · 首屏入口 v14–v17 过程稿 / v18 实现基线 · 派生继承 v19 实现定稿 · 详情页内容优先 v22 草案）
+# Figma 原型（Dock v5 · 能力面板 v6–v8 · Jev/能力决策 v9–v11 · Skill 来源 v12 · 首屏入口 v14–v17 过程稿 / v18 实现基线 · 派生继承 v19 实现定稿 · 详情页内容优先 v22 草案 · Prompt 指令域 v23 草案）
 
 本目录是能力面板相关 UI 的 Figma 设计源，供人工查看 / 未来智能体继续改原型：
 
@@ -64,6 +64,33 @@
   `src/client/detail-shell.tsx`（新增共享外壳）+ `mcp-panel.tsx` / `panel.tsx` /
   `skill-content.tsx` / `styles.ts`；验证 `notes/verify/v22-detail-layout.mjs` 9/9、
   `notes/verify/v22-visual.mjs` 真机渲染截图。
+- **Capability Panel · Prompt 指令域 v23（草案，待确认）**（page `207:2`）：**第 4 个能力域 Prompt 的设计稿**——
+  展示「首轮注入」的指令文件：`~/.dsh/AGENTS.md`、`~/.agents/AGENTS.md`、项目根→cwd 的
+  `AGENTS.md` / `CLAUDE.md` / `*.local.md`；允许编辑内容；全局有可见范围 + 默认启用，
+  全局与项目 prompt 各有独立的项目级默认开关；二者**叠加注入**（不是覆盖，仅内容重复去重）；
+  首屏 Prompt Tab 按会话开关注入；会话开始后只读冻结。
+  2026-11-05 确认：**首屏默认全选**（与 DSH 自身一致）；**编辑保存只对新会话生效**；
+  **方案 1**（全局 / 项目各自有独立默认开关，二者叠加注入、不是覆盖）；
+  **面板与对话页都不再展示「未识别」分组**（后续版本再扩充）。
+  **启用按钮位置与现网 Skills / MCP 一致**：面板列表只在「工作区视图」有行尾开关（项目条目
+  无「跟随全局」文案，全局继承条目显示「默认 · 跟随全局」；全局视图行内无单开关，默认在
+  「可见范围」弹层里按工作区配）；首屏与会话内是卡片网格，开关（只读页为状态标签）在卡片
+  标题行右端，与 Skills / MCP / Tools 卡片同位置。
+  7 帧：01 `209:743` 面板 · Prompt 全局（行内无单开关 + 「可见：全部 ▾」+ 默认与可见说明 + 注入规则卡）、
+  02 `209:837` 面板 · Prompt 项目链（全局 prompt 行尾独立默认开关、无「跟随全局」覆盖文案；项目 prompt 行尾本项目默认开关；叠加注入说明）、
+  03 `207:214` 详情页 · 编辑（行号编辑器 + 保存后仅新会话生效提示）、
+  04 `207:289` 全局可见范围弹层（mode + 每工作区可见/默认）、
+  05 `210:946` 对话首屏 · Prompt 注入选择（卡片网格，开关在卡片标题行右端；**只列已存在且被 DSH 识别的 prompt**，未创建 / 未识别不出现；Tab 标「不参与 Jev 能力决策」）、
+  06 `210:1071` 会话内「能力」Tab · Prompt 只读（卡片网格，开关位置替换为「已注入 / 未注入」状态 + 只读预览；同样只列已存在且被读取的 prompt）、
+  07 `207:632` 交互与语义规范（优先级链 / 生效时机 / 接管与降级 / Jev 边界 / 状态字典 / 存储 / 待确认）。
+  预览图 `preview/v23-01..07`。**已落代码（Unreleased）**：按 P1 注入接管实现——root ctx `{prepend:true}`
+  挂 `agent/pre-step`；**不自行渲染/拼接**，而是 `loader.import` 取宿主 `@deepseek-ai/dsh-agent-instructions`
+  的 `discoverBaselineInstructionFiles` / `loadBaselineInstructions`，传入「只暴露已启用文件」的虚拟
+  fs，由 DSH 自己完成拼接 / 去重 / 预算截断 / framing；首轮用其结果替换宿主 baseline 正文，
+  之后丢弃增量消息 + 清 inbox（冻结）；P2 面板 Prompt 域、P3 首屏 / 会话内 Tab、注入层均见
+  `src/prompt/*` 与 `src/client/prompt-panel.tsx` / `prompt-tab.tsx`；验证 `notes/verify/v25-prompt.mjs`。
+  scene JSON 未导出（草案阶段与 v19/v21/v22 同口径，确认后按 `tools/export-scene.js` 补）。
+
 - **Capability Panel · 能力决策 v11**（page `56:7043`）：**能力决策基线**——统一命名「能力决策」、
   自动触发默认关闭、双门槛（最少触发字数 10 / 最少修改间隔字符数 4）、密钥路径
   `~/.dsh/dsh-capability-settings/jev.json`（目录 700 / 文件 600）。5 帧：01 `56:7046`、02 `56:7257`、
