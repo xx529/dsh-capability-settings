@@ -41,6 +41,21 @@
     2/2（三项下拉 / 阈值 0.55 只读行 / set(dynamic)；派生页成功「选出 7 项」+ 回退
     「timeout」banner / chip）。
 
+### 修复
+
+- **动态选择回退后「父 agent 0 项 / 子 agent 3 项」**（用户反馈 `session-8dd9ed78…`：
+  父会话 0/192，三个 teammate 的能力页各显示 3/192）：回退「派生继承会话」时技能
+  投影只遍历 **child 当时可见的技能名**，而 `visibleSkillNames` 会排除
+  `disable-model-invocation: true` 的 user-only 技能（本机 `grill-me` /
+  `grill-with-docs` / `i-have-adhd`）；父级显式关闭但没有出现在 child 可见集合里的
+  名字因此漏写，child 落回工作区默认（开启）。修复：
+  - `sessionTogglesFor` 投影时补上父级**显式 false 且 child 缺失**的技能名；
+  - 新增 `repairDynamicFallbackSkillProjection`（启动时幂等对账）：对已存在的
+    `derivedMode=dynamic && derivedDynamic.status=fallback` 记录补齐缺失的父级显式
+    false 键；只动动态回退，不动 session / workspace / 动态成功快照。
+  验证：`notes/verify/v24-dynamic-derive.mjs` 9/9（新增“父级显式关闭但不在 child
+  目录的技能”投影、回退快照对账幂等两组断言）。
+
 ## [1.14.1] - 2026-11-05
 
 ### 修复

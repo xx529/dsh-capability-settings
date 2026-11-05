@@ -68,3 +68,17 @@ export interface DeriveInheritance {
  * warn 并按 `workspace` 语义降级（子 agent 仍可创建）。
  */
 export declare function createDeriveInheritance(ctx: any, deps: DeriveInheritanceDeps): DeriveInheritance;
+/**
+ * 修复 v24 动态选择回退快照的技能投影缺口（一次性对账，幂等）。
+ *
+ * 背景：失败回退时按「父级可见 ∩ child 可见」投影；父级显式关闭但不在 child
+ * 当时可见集合里的名字（典型：`disable-model-invocation: true` 的 user-only
+ * 技能，或 agent/created 时 child 技能目录尚未就绪）会漏掉，child 落回工作区
+ * 默认（开启），出现「父 0 / 子 3」。这里只补 **动态回退** 记录：父级显式
+ * `false` 且 child 记录里缺失的名字 → 写 `false`。已在 `sessionTogglesFor`
+ * 修复新 child；本函数负责修复已存在的回退快照。
+ *
+ * 只处理 `derivedMode === "dynamic" && derivedDynamic.status === "fallback"`，
+ * 不动 `session` / `workspace` / 动态成功（成功是按工作区选的，不沿用父级）。
+ */
+export declare function repairDynamicFallbackSkillProjection(state: SessionStateStore, logger?: DeriveInheritanceLogger): Promise<number>;

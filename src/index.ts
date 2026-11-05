@@ -40,7 +40,7 @@ import { createImportsManager } from "./imports/manager.js";
 import { createJevManager } from "./jev/manager.js";
 import { createSessionState } from "./session-state.js";
 import { createSessionStateReconciler } from "./session-state-reconcile.js";
-import { createDeriveInheritance } from "./derive/manager.js";
+import { createDeriveInheritance, repairDynamicFallbackSkillProjection } from "./derive/manager.js";
 import { createDeriveAutoSelect } from "./derive/auto-select.js";
 import type { DeriveAutoSelect } from "./derive/auto-select.js";
 import { createToolsManager } from "./tools/manager.js";
@@ -510,6 +510,10 @@ export function apply(ctx: any, config: Config = {}) {
   });
   deriveDynamicRef.current = deriveAutoSelect;
   deriveAutoSelect.installApply();
+  // v24 修复：补写已存在的「动态回退」快照里漏掉的父级显式关闭技能（幂等、异步）。
+  void repairDynamicFallbackSkillProjection(sessionState, ctx.logger).catch((error: unknown) => {
+    ctx.logger?.warn?.(`capability-panel: 动态回退技能投影对账失败：${String(error)}`);
+  });
   // 会话级开关记录的孤儿对账（见 session-state-reconcile.ts）：宿主没有"会话
   // 删除"事件，靠"存在性校验 + 24h 两阶段"清理；disposed 只触发"标记"核对
   // （关机时会对所有 live 会话成批发 disposed，不能当删除信号）。

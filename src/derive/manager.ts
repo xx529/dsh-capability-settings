@@ -182,6 +182,15 @@ async function sessionTogglesFor(input: {
     if (parentNames !== undefined && childNames !== undefined) {
       const projected: Record<string, boolean> = {};
       for (const name of childNames) projected[name] = parentNames.has(name);
+      /**
+       * 父会话里被显式关闭、但**不在 child 当时可见集合**里的名字（典型：
+       * user-invocable-only 技能、或 agent/created 时 child 技能目录尚未就绪）
+       * 不能漏掉：否则 child 会落回工作区默认（开启），出现「父 0 / 子 3」。
+       * 这里只补父级显式 false 的缺失名字（不把父级 true 投影成 ghost）。
+       */
+      for (const [name, enabled] of Object.entries(input.state.skills(input.parentId))) {
+        if (enabled === false && projected[name] === undefined) projected[name] = false;
+      }
       toggles = { ...toggles, skills: projected };
     } else {
       input.logger?.warn?.("capability-panel: 派生继承读取技能目录失败，回落到复制父级显式开关");
@@ -392,4 +401,57 @@ export function createDeriveInheritance(ctx: any, deps: DeriveInheritanceDeps): 
       if (typeof off === "function") off();
     },
   };
+}
+
+/**
+ * 修复 v24 动态选择回退快照的技能投影缺口（一次性对账，幂等）。
+ *
+ * 背景：失败回退时按「父级可见 ∩ child 可见」投影；父级显式关闭但不在 child
+ * 当时可见集合里的名字（典型：`disable-model-invocation: true` 的 user-only
+ * 技能，或 agent/created 时 child 技能目录尚未就绪）会漏掉，child 落回工作区
+ * 默认（开启），出现「父 0 / 子 3」。这里只补 **动态回退** 记录：父级显式
+ * `false` 且 child 记录里缺失的名字 → 写 `false`。已在 `sessionTogglesFor`
+ * 修复新 child；本函数负责修复已存在的回退快照。
+ *
+ * 只处理 `derivedMode === "dynamic" && derivedDynamic.status === "fallback"`，
+ * 不动 `session` / `workspace` / 动态成功（成功是按工作区选的，不沿用父级）。
+ */
+export async function repairDynamicFallbackSkillProjection(
+  state: SessionStateStore,
+  logger?: DeriveInheritanceLogger,
+): Promise<number> {
+  await state.ready();
+  const entries = state.entries();
+  const writes: Array<{ childId: string; name: string; cwd?: string; headerCreatedAt?: number }> = [];
+  for (const [childId, entry] of Object.entries(entries)) {
+    if (entry.derivedMode !== "dynamic" || entry.derivedDynamic?.status !== "fallback") continue;
+    if (entry.derivedFrom === undefined) continue;
+    const parent = entries[entry.derivedFrom];
+    if (parent === undefined) continue;
+    for (const [name, enabled] of Object.entries(parent.skills ?? {})) {
+      if (enabled !== false) continue;
+      if (entry.skills?.[name] !== undefined) continue;
+      writes.push({
+        childId,
+        name,
+        ...(entry.cwd !== undefined ? { cwd: entry.cwd } : {}),
+        ...(entry.headerCreatedAt !== undefined ? { headerCreatedAt: entry.headerCreatedAt } : {}),
+      });
+    }
+  }
+  for (const write of writes) {
+    await state.setSkill(
+      write.childId,
+      write.name,
+      false,
+      {
+        ...(write.cwd !== undefined ? { cwd: write.cwd } : {}),
+        ...(write.headerCreatedAt !== undefined ? { headerCreatedAt: write.headerCreatedAt } : {}),
+      },
+    );
+  }
+  if (writes.length > 0) {
+    logger?.info?.(`capability-panel: 动态回退技能投影补齐 ${writes.length} 个键`);
+  }
+  return writes.length;
 }
