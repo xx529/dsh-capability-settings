@@ -3,12 +3,16 @@
  *
  * 设计要点：
  *
- *   - **一次 POST** `{baseURL}/v1/systemone`，state + questions 一次带全；
- *     不分片、不发 long-context / 实验性 header；
- *   - `state = { request, guidance }`（**能力不再进 state**）；每个能力一条
- *     `noul` question，`instructions` 是**结构化对象**并内嵌该能力定义
- *     （kind/name/description/whenToUse/tools），保证每题唯一、模型能看到
- *     「这一题在问哪个能力」；共享判据只放 `state.guidance` 一次，控制 token；
+ *   - **三维判据**：每个能力最多 3 条 `noul` question（`~role` / `~task` /
+ *     `~operation`），每题只判一层，能力得分取三维 **max**——角色职责、当前
+ *     任务、当前操作指令任一需要即算相关（宁可冗余、不收窄）；
+ *   - **按体积分片**：单请求超过 {@link REQUEST_SOFT_LIMIT_CHARS} 时按能力
+ *     二分拆成多片（{@link buildSystemOneRequests}），每片仍走原来的 4 档
+ *     降级；对外仍是一次 `jev.rank`；
+ *   - `state = { request, guidance }`（**能力不再进 state**）；`instructions`
+ *     是**结构化对象**并内嵌该能力定义（kind/name/description/whenToUse/tools），
+ *     保证每题唯一、模型能看到「这一题在问哪个能力」；共享判据只放
+ *     `state.guidance` 一次，控制 token；
  *   - 错误映射见 {@link mapHttpStatus}：只有 429 / 529 重试（退避 500ms → 1000ms，
  *     最多 2 次），任何 4xx 不重试；
  *   - 所有错误文本在这里就完成脱敏，绝不把请求头/完整 URL 带进错误信息。
@@ -58,6 +62,27 @@ export declare const SYSTEM_ONE_CRITERIA: {
     readonly true: "Using this capability can materially help perform or complete the request, even if the request does not name it.";
     readonly false: "The capability is unrelated to the request, or cannot help perform or complete it (topical overlap alone is not enough).";
 };
+/**
+ * 判据维度：同一能力最多三道题，各判一层，取 max。
+ *
+ * - `role`：角色定义的长期职责是否需要它（适合 spawn / 首屏角色预置）；
+ * - `task`：当前任务是否需要它；
+ * - `operation`：当前操作指令（含待命、禁止）是否要求它的动作。
+ *
+ * **不做 veto**：显式禁止不在这里扣分，需要时由调用方在应用层处理（v24 决策）。
+ */
+export type RankDimension = "role" | "task" | "operation";
+/** 三维顺序（稳定，决定 questions 里题目的出现顺序）。 */
+export declare const RANK_DIMENSIONS: readonly RankDimension[];
+/** 维度题面的 `instructions.task`（每题只问一层）。 */
+export declare const RANK_DIMENSION_TASKS: Record<RankDimension, string>;
+/** 维度题面的 `criteria`（true/false 与题面同义）。 */
+export declare const RANK_DIMENSION_CRITERIA: Record<RankDimension, {
+    true: string;
+    false: string;
+}>;
+/** 某能力某维度的 question id：`cap_<hex>~<dimension>`。 */
+export declare function rankQuestionId(capabilityId: string, dimension: RankDimension): string;
 /** 重试退避（指数、无抖动，便于测试）。 */
 export declare const RETRY_DELAYS_MS: readonly [500, 1000];
 /** question 里的一条 MCP 工具（已截断）。 */
@@ -153,17 +178,41 @@ export declare function buildQuestionMoreTools(tools: readonly {
     description?: string;
 }[] | undefined, extraLimit?: number): string[] | undefined;
 /**
- * 由能力集合与草稿构造一次批量请求。
+ * 由能力集合与草稿构造**单个**请求（不分片）。
  *
  * **全局预算**：超过 {@link REQUEST_SOFT_LIMIT_CHARS} 时按 4 档降级
  * （24 名额 → 8 名额 → 只留带描述的 8 条 → 只留 8 个名称 → 完全不带工具），
  * 优先保住「每条能力仍有描述」，而不是让整个请求撞上下文上限。
+ *
+ * `jev.rank` 实际使用 {@link buildSystemOneRequests}（先分片、再降级）；
+ * 本函数保留给探针 / 测试 / 单请求调用方。
  *
  * @param options.maxChars 覆盖软上限（测试/诊断用）。
  */
 export declare function buildSystemOneRequest(config: Pick<JevConfig, "model">, capabilities: readonly JevCapability[], draft: string, options?: {
     maxChars?: number;
 }): SystemOneRequest;
+/** 分片结果（一次 `jev.rank` 内部的全部请求）。 */
+export interface SystemOneRequestPlan {
+    /** 按能力原顺序的分片请求；无需分片时长度为 1。 */
+    requests: SystemOneRequest[];
+    /** 片数（= `requests.length`）。 */
+    batches: number;
+}
+/**
+ * 构造一次 `jev.rank` 需要的全部请求：**先按体积分片、再对单片降级**。
+ *
+ * 三维判据让单请求体积约为原来的 2.3×；152 条能力（约 108 KB/单维）会超过
+ * {@link REQUEST_SOFT_LIMIT_CHARS}。这里按能力二分（保持原顺序），每片分别
+ * 走 {@link buildSystemOneRequest} 的 4 档降级，直到每片 ≤ 软上限；这样不会
+ * 为了压体积而丢掉工具清单（工具是 MCP 判断的主信号）。
+ *
+ * 单片能力数极少时（1 条）仍可能超过自定义的极小 `maxChars`（测试场景），
+ * 此时返回降级后的最后一份，由调用方决定是否接受。
+ */
+export declare function buildSystemOneRequests(config: Pick<JevConfig, "model">, capabilities: readonly JevCapability[], draft: string, options?: {
+    maxChars?: number;
+}): SystemOneRequestPlan;
 /** `jev.test` 的探针能力 id（hash namespace 与真实能力不同，不会冲突）。 */
 export declare function probeCapabilityId(): string;
 /** `jev.test` 的最小成本探针请求。 */
@@ -176,6 +225,17 @@ export declare function buildProbeRequest(config: Pick<JevConfig, "model">): {
  * 缺失或不可解析返回 null（调用方记 score=0 + reason no-answer）。
  */
 export declare function parseNoul(json: unknown, id: string): number | null;
+/**
+ * 解析某能力的三维分数（`~role` / `~task` / `~operation`）。
+ *
+ * 缺失 / 不可解析的维度为 `null`（不参与 max）；整题缺失不影响其它维度。
+ */
+export declare function parseDimensionScores(json: unknown, capabilityId: string): Record<RankDimension, number | null>;
+/**
+ * 能力最终得分：三维 **max**（任何一层高分即取该值）；三维全缺失 → null
+ * （调用方记 score=0 + reason `no-answer`）。
+ */
+export declare function parseRankScore(json: unknown, capabilityId: string): number | null;
 /** 响应里的 model；缺失回退配置值。 */
 export declare function pickModel(json: unknown, fallback: string): string;
 /** 响应里的 usage；缺失记 0。 */

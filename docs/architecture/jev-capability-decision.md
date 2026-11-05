@@ -43,7 +43,7 @@ A11Y 8 / NAR 6 / REG 5）。实现与验收**以仓库当前 spec 为准**；本
 | 1 | **配置** | `resolveDshHome(override)` + `dsh-capability-settings/jev.json`；目录 `0700`/文件 `0600`；`readJsonDocument` 读、`withFileLock` 包读写、`atomicWriteText(..., {mode:0o600})` 写；非法/损坏读回默认，`setConfig` 校验失败返回 `{ok:false, code:"invalid-config", errors, issues}`。 |
 | 2 | **密钥** | `getConfig` 只回 `hasApiKey/apiKeySource/apiKeyLast4`，无明文；key 解析优先级 **env（`apiKeyEnv`，默认 `TYPESAFE_API_KEY`）> 文件 `apiKey`**；`test`/`rank` 在**宿主进程** fetch；所有错误/日志经脱敏（隐去 Bearer/Authorization/key 原文）。 |
 | 3 | **RPC** | 在 `PanelRpcService.jev` 增加 `getConfig/setConfig/test/rank/apply`，`handleEndpoint` 加 5 个 `case "jev.*"`；传输信封恒 `{ok:true,value}`，业务失败一律 `value:{ok:false,...}`（见 §5）。 |
-| 4 | **rank** | 一次 `POST {baseURL}/v1/systemone`：`state={request,guidance}`（**能力不进 state**）；每能力一条 `noul` question，`instructions` 为**结构化对象**并内嵌 `capability{kind,name,description,whenToUse?,tools?}`（MCP 带工具清单，题目逐能力唯一）；共享判据只在 `state.guidance` 出现一次；`score=noul`；排序 desc → 技能先于 MCP → 名称；错误映射 9 码；429/529 最多重试 2 次（退避 500/1000ms），4xx 不重试；不发 long-context header；不分片（v1.1 请求形状变更，原因见 §6.0）。 |
+| 4 | **rank** | 一次 `POST {baseURL}/v1/systemone`：`state={request,guidance}`（**能力不进 state**）；每能力最多 3 条 `noul` question（`~role` / `~task` / `~operation`，取 **max**；v1.2 见 §6.10），`instructions` 为**结构化对象**并内嵌 `capability{kind,name,description,whenToUse?,tools?}`（MCP 带工具清单，题目逐能力唯一）；共享判据只在 `state.guidance` 出现一次；`score=max(三维)`；排序 desc → 技能先于 MCP → 名称；错误映射 9 码；429/529 最多重试 2 次（退避 500/1000ms），4xx 不重试；不发 long-context header；三维按体积分片（v1.2，≤150KB/片）。 |
 | 5 | **apply** | 宿主按 `id` 重解析 → **筛选语义**（plan = 已勾选集合：选中启用、未选关闭，只改会话开关；**空 plan 合法 = 关闭本会话全部可应用能力**）→ 只留状态不一致项 → **enable→disable 两阶段批量写**（skills 同一 tick 全部发起 + `allSettled`，宿主注册表 effect 合并刷新；MCP 并发 4）→ 任一失败逆序批量回滚 → 返回 `applied/enabled/disabled/skipped/pending`（成功支 additive `elapsedMs`）；冷会话入队完整目标集合并用同一执行器重放（见 §7、§8，v1.2/v1.3）。 |
 
 ### 1.2 冷会话结论（最高风险项）
@@ -649,7 +649,7 @@ interface SystemOneCapability {
 }
 
 interface SystemOneInstructions {
-  task: string;                  // 逐题相同（§6.5）
+  task: string;                  // 逐维度不同：role/task/operation 三套（§6.10）
   capability: SystemOneCapability;
   rules?: string[];              // 可选，当前未使用
 }
@@ -663,7 +663,7 @@ interface SystemOneQuestion {
 interface SystemOneRequest {
   model: string;
   state: { request: string; guidance: string };   // 能力不进 state
-  questions: Record<string, SystemOneQuestion>;   // key = cap_<36hex>
+  questions: Record<string, SystemOneQuestion>;   // key = cap_<36hex>~<role|task|operation>
 }
 ```
 
@@ -706,8 +706,7 @@ interface SystemOneRequest {
 | 152 条能力（当前常见规模） | ≈108 KB | ≈27–31k | < 64k 上下文，安全 |
 | 最坏 155 条 | ≈137 KB | ≈34–39k | < 64k，仍单请求 |
 
-- 仍**不分片**；若服务端仍判超上下文（400 `max_tokens_exceeded`）→ 按 §6.9 映射
-  `context-too-long`，**不自动缩减能力重试**；
+- v1.2 起**按体积分片**（§6.10）：三维请求体积约为单维 2.4–2.9×，152 条能力约 110 KB → ≈300 KB，会拆成 2–3 片；单片仍超限才会走到 `context-too-long`，**不自动缩减能力重试**；
 - 估算按 JSON 混合文本 ~4 字符/token 粗算，仅用于容量判断，不作为计费依据；
 - `state.guidance` 全篇只出现一次（约 0.5 KB），不随能力数线性增长。
 
@@ -765,7 +764,7 @@ Authorization: Bearer <resolvedKey>
 - **questions 的 key 与评分集合的 id 一一对应**，数量恒等（tester 断言）；
 - `instructions` 是**结构化对象**（`task` + `capability`[+ 可选 `rules?`]），**不是字符串**；
 - `baseURL` 规范化后拼接：`new URL(baseURL.replace(/\/+$/, "") + "/v1/systemone")`；
-- 不发送任何 long-context / 实验性 header；不分片（一次请求就是全部能力）；
+- 不发送任何 long-context / 实验性 header；v1.2 起按体积分片（每片 ≤150KB，见 §6.10）；
 - 请求体不包含 `cwd`、`sessionId`、能力文件路径等本地信息（隐私最小化）。
 
 ### 6.3 能力定义进 question（含 MCP 工具）与截断
@@ -855,8 +854,8 @@ const SYSTEM_ONE_CRITERIA = {
 };
 ```
 
-- **题目唯一性来自 `instructions.capability`**；`task`/`criteria` 逐题相同是刻意的——
-  判据复用，模型只需按「这题问的能力」判分；
+- **题目唯一性来自 `instructions.capability` + 维度后缀**；同一维度的 `task`/`criteria` 相同是刻意的——
+  判据复用，模型只需按「这题问的是哪个能力的哪一层」判分；
 - `[研究]` Jev 以英文为主、中文草稿可判（英文判据 + 中文 `state.request` 是研究推荐用法）；
 - `type: "noul"` ⇒ 答案即 0–1 概率，不需要 confidence；
 - v1.0 的「所有题共用同一份字符串 instructions」已废弃（原因见 §6.0），本文其它章节
@@ -896,10 +895,10 @@ function noulOf(id: string): number | null {
 ### 6.8 `requestCount` / `capabilitiesTotal` / `usage`
 
 - `requestCount: 1` = **逻辑批量请求数**（一次 rank 就是一次批量请求，不是「每个能力一次」）。
-  物理 HTTP 次数在 429/529 重试时可能为 2–3；tester 应断言「正常场景假服务收到 1 次」、
-  「429 场景收到 3 次（1+2 重试）」。若未来需要暴露物理次数，加 additive 字段，不改本字段语义。
+  物理 HTTP 次数在 429/529 重试时可能为 2–3，三维分片后还会 × 片数；tester 应断言「正常场景假服务收到 = 片数」、
+  「429 场景收到 = 片数 × 3」。若未来需要暴露物理次数，加 additive 字段，不改本字段语义。
 - `capabilitiesTotal` = 本次进入评分的条数（= `items.length`）；用于前端「N 个能力」文案与
-  「questions 数 = 能力数」断言。
+  「questions 数 = 能力数 × 3（跨分片合并）」断言。
 - `usage` 取服务端返回值；缺失记 0（不伪造估算）。
 
 ### 6.9 错误映射与重试（唯一权威表）
@@ -922,16 +921,34 @@ function noulOf(id: string): number | null {
 - 退避：`500ms` → `1000ms`（指数，无抖动 `[架构决定]`：便于测试；生产抖动收益小于可预测性）；
 - 只对 `rate-limit` / `overloaded` 重试；**任何 4xx 不重试**；
 - 每次尝试独立 `timeoutMs`；最多 3 次尝试；总耗时最坏 ≈ `3 * timeoutMs + 1.5s`；
-- 重试时**同一请求体**，不缩减能力数（不分片、不降级）；
+- 重试时**同一请求体**，不缩减能力数（分片是 rank 级决策，不因重试改变）；
 - `errors` 内容：`"[<code>] HTTP <status>: <脱敏后的响应摘要>"`，无响应体时 `"[<code>] <脱敏异常信息>"`。
 
-### 6.10 不分片、不发 long-context
+### 6.10 三维判据与按体积分片（v1.2）
 
-`[研究]` 结论：一次请求放多个问题是官方推荐用法；超上下文时服务端返回
-`max_tokens_exceeded`。本架构**不实现分片**，也不发送扩展 long-context header：
+**三维判据**：每个能力最多 3 道题，id 为 `<capId>~role` / `~task` / `~operation`：
 
-- 超出 → `context-too-long` → 前端「内容过长」态（提示精简草稿/减少能力）；
-- 不自动重试「少放几个能力」的降级请求（会产生「评分不全但假装成功」的语义风险）。
+| 维度 | 题面（`instructions.task`） | 用途 |
+|---|---|---|
+| `role` | Judge only the ROLE part: do the role's standing responsibilities materially need this capability? | 角色定义的长期职责（首屏 / spawn 预置的主要信号） |
+| `task` | 沿用 v1.1 的 `SYSTEM_ONE_TASK`（当前请求是否需要） | 常规首屏评分 |
+| `operation` | Judge only the OPERATION part: does the current operation instruction ask for an action this capability can perform? | 当前操作指令是否要求执行（含待命/禁止语境） |
+
+- 每题只判一层，`score = max(role, task, operation)`（全缺失 → `null` → `no-answer`）；
+- **不做 veto**：显式禁止不在评分里扣分；若需要"禁止即排除"，由应用层另行处理；
+- 三个维度都带工具清单——实测 role 题去掉 tools 后区分度明显退化（需要项 0.72–0.79、
+  无关项被抬到 0.35–0.38；带 tools 时为 0.88–0.94 vs 0.04–0.10）。
+
+**按体积分片**：三维请求体积约为单维的 2.4–2.9×，152 条能力 ≈300 KB，超过
+`REQUEST_SOFT_LIMIT_CHARS`（150 KB）：
+
+1. `buildSystemOneRequests` 按能力**二分**（保持原顺序），每片单独构造成 1 个请求；
+2. 每片内部仍走原有 4 档降级（moreTools → 工具描述 → 仅名称 → 无工具）；
+3. `jev.rank` / 动态选择**串行**发送各片、合并 `answers` 后统一打分；
+4. 对外仍是一次调用：`requestCount` 保持逻辑值 1，`usage` 为各片累加；
+5. 任一片失败 → 整体按对应错误码失败（不返回半份结果，避免"评分不全但假装成功"）。
+
+**超上下文**仍按 §6.9 映射 `context-too-long`；不发送扩展 long-context header。
 
 ### 6.11 `rank` 伪代码
 
@@ -952,12 +969,18 @@ async function rank(input: unknown, signal?: AbortSignal): Promise<JevRankResult
 
   const started = performance.now();
   try {
-    // §6.2：state={request,guidance}；每能力一条 question，能力定义内嵌 instructions.capability
-    const request = buildSystemOneRequest(config, caps, draft);
-    const json = await postSystemOne(systemOneURL(config.baseURL), request, key.value, {
-      timeoutMs: config.timeoutMs, ...(signal !== undefined ? { signal } : {}), secrets,
-    });
-    const items = caps.map((cap) => toRankItem(cap, noulOf(json, cap.id)));  // §6.6
+    // §6.2/§6.10：state={request,guidance}；每能力最多 3 题（role/task/operation，取 max）；
+    // 三维按体积分片，串行发送后合并 answers。
+    const plan = buildSystemOneRequests(config, caps, draft);
+    const answers = {};
+    for (const request of plan.requests) {
+      const json = await postSystemOne(systemOneURL(config.baseURL), request, key.value, {
+        timeoutMs: config.timeoutMs, ...(signal !== undefined ? { signal } : {}), secrets,
+      });
+      Object.assign(answers, json.answers ?? {});
+    }
+    const mergedJson = { answers };
+    const items = caps.map((cap) => toRankItem(cap, parseRankScore(mergedJson, cap.id)));  // §6.6 → max(三维)
     items.sort(compareRankItems);                                  // §6.7
     const pendingOutcome = consumePendingOutcome(sessionId);       // §8.5
     return {

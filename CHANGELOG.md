@@ -5,8 +5,33 @@
 
 ## [Unreleased]
 
+（暂无）
+
+## [1.15.0] - 2026-11-06
+
 ### 新增
 
+- **Jev 三维判据（角色 / 任务 / 操作指令，取 max）**：`jev.rank` 与派生「动态选择」
+  对每个能力最多发 3 道 `noul` 题——`<capId>~role`（角色定义的长期职责是否需要）、
+  `<capId>~task`（当前任务是否需要）、`<capId>~operation`（当前操作指令是否要求该动作）；
+  每题只判一层，能力得分取三维 **max**（任一需要即启用，宁可冗余、不收窄）。首屏评分与
+  spawn 旁路打分共用同一实现，行为一致。
+  - `src/jev/rank.ts`：新增 `RankDimension` / `RANK_DIMENSIONS` /
+    `RANK_DIMENSION_TASKS` / `RANK_DIMENSION_CRITERIA` / `rankQuestionId` /
+    `parseDimensionScores` / `parseRankScore`；`state.guidance` 改为分层判据
+    （明确「每题只判一层、能力相关度取 max」）；三维都带工具清单（实测 role 维度去掉
+    tools 后区分度退化：需要项 0.72–0.79、无关项被抬到 0.35–0.38）。
+  - **按体积分片**：三维请求体积约为单维 2.4–2.9×，152 条能力会超过 150KB 软上限 →
+    新增 `buildSystemOneRequests`（按能力二分、保持原顺序），每片仍走原 4 档降级；
+    `jev.rank` 串行发送并合并 `answers`，对外仍是一次调用（`requestCount` 语义不变 = 1）。
+  - `src/jev/manager.ts` / `src/derive/auto-select.ts`：改用 `buildSystemOneRequests` +
+    `parseRankScore`；动态选择多片共享 8s 总预算（`AbortController`）。
+  - 实测（8 个真实 MCP，`notes/verify/jev-bench/`）：常规任务三维 max 与旧单维分数差
+    ≤0.1；teammate 就位 prompt（角色+待命）从「全部 0.03–0.04」变为按角色
+    role=0.82–0.90（task/op≈0.03），可正常预置检索能力；8 能力请求 11.4KB →
+    32.6KB、input tokens 3.2k → 8.6k。
+  - 验证：`pnpm typecheck` / `pnpm build`；`host-rank` 132/132（新增 H15 三维取 max、
+    H14 152 能力分片断言）。
 - **「Jev 模型」配置页可配置能力决策的初始相关度阈值**（用户反馈：首屏「✦ 能力决策」
   结果面板的阈值初值固定 `0.50`，希望能在配置里改）：`jev.json` 新增 additive 字段
   `decisionThreshold`（`0–1`，默认 `0.50`），宿主读取 / `setConfig` 校验（越界返回

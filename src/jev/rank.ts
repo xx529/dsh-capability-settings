@@ -3,12 +3,16 @@
  *
  * 设计要点：
  *
- *   - **一次 POST** `{baseURL}/v1/systemone`，state + questions 一次带全；
- *     不分片、不发 long-context / 实验性 header；
- *   - `state = { request, guidance }`（**能力不再进 state**）；每个能力一条
- *     `noul` question，`instructions` 是**结构化对象**并内嵌该能力定义
- *     （kind/name/description/whenToUse/tools），保证每题唯一、模型能看到
- *     「这一题在问哪个能力」；共享判据只放 `state.guidance` 一次，控制 token；
+ *   - **三维判据**：每个能力最多 3 条 `noul` question（`~role` / `~task` /
+ *     `~operation`），每题只判一层，能力得分取三维 **max**——角色职责、当前
+ *     任务、当前操作指令任一需要即算相关（宁可冗余、不收窄）；
+ *   - **按体积分片**：单请求超过 {@link REQUEST_SOFT_LIMIT_CHARS} 时按能力
+ *     二分拆成多片（{@link buildSystemOneRequests}），每片仍走原来的 4 档
+ *     降级；对外仍是一次 `jev.rank`；
+ *   - `state = { request, guidance }`（**能力不再进 state**）；`instructions`
+ *     是**结构化对象**并内嵌该能力定义（kind/name/description/whenToUse/tools），
+ *     保证每题唯一、模型能看到「这一题在问哪个能力」；共享判据只放
+ *     `state.guidance` 一次，控制 token；
  *   - 错误映射见 {@link mapHttpStatus}：只有 429 / 529 重试（退避 500ms → 1000ms，
  *     最多 2 次），任何 4xx 不重试；
  *   - 所有错误文本在这里就完成脱敏，绝不把请求头/完整 URL 带进错误信息。
@@ -71,7 +75,9 @@ export const REQUEST_SOFT_LIMIT_CHARS = 150_000;
  */
 export const SYSTEM_ONE_GUIDANCE = [
   "You are selecting which capabilities to make available for the user's current request.",
-  "For each question below you judge exactly one capability, described inside that question.",
+  "The request below may contain up to three parts: ROLE (the role's standing responsibilities), TASK (what is asked now), and OPERATION (how to behave right now, including standby or prohibitions).",
+  "Each capability appears in up to three questions, one per part. Judge each question independently on its own part only; do not let one part influence another.",
+  "A capability's relevance is the maximum of its three judgments: if any one part needs it, it is relevant.",
   "Judge by the request's intent and the actions it needs, not by loose topic overlap.",
   "A capability that can directly perform an action the request asks for is highly relevant, even if the request does not name it.",
   "A capability that is only topically related but cannot execute the request is not relevant.",
@@ -79,7 +85,7 @@ export const SYSTEM_ONE_GUIDANCE = [
   'For plugin tool groups (kind "tool"), use the listed tools to judge what the plugin can actually do; a plugin is enabled or disabled as a whole.',
   'A capability may also list "moreTools": additional tool names of the same capability. Treat every tool name as evidence of what it can do.',
   "If a capability lists no tools, judge from its description and name.",
-  "Answer with a probability from 0 to 1: 1 = definitely useful now, 0 = definitely not.",
+  "Answer with a probability from 0 to 1: 1 = definitely needed by at least one part, 0 = definitely not.",
 ].join(" ");
 
 /** 每题 `instructions.task`：判断该能力对当前请求是否直接有用。 */
@@ -91,6 +97,50 @@ export const SYSTEM_ONE_CRITERIA = {
   true: "Using this capability can materially help perform or complete the request, even if the request does not name it.",
   false: "The capability is unrelated to the request, or cannot help perform or complete it (topical overlap alone is not enough).",
 } as const;
+
+// ---------------------------------------------------------------------------
+// 三维判据（role / task / operation）
+// ---------------------------------------------------------------------------
+
+/**
+ * 判据维度：同一能力最多三道题，各判一层，取 max。
+ *
+ * - `role`：角色定义的长期职责是否需要它（适合 spawn / 首屏角色预置）；
+ * - `task`：当前任务是否需要它；
+ * - `operation`：当前操作指令（含待命、禁止）是否要求它的动作。
+ *
+ * **不做 veto**：显式禁止不在这里扣分，需要时由调用方在应用层处理（v24 决策）。
+ */
+export type RankDimension = "role" | "task" | "operation";
+
+/** 三维顺序（稳定，决定 questions 里题目的出现顺序）。 */
+export const RANK_DIMENSIONS: readonly RankDimension[] = ["role", "task", "operation"] as const;
+
+/** 维度题面的 `instructions.task`（每题只问一层）。 */
+export const RANK_DIMENSION_TASKS: Record<RankDimension, string> = {
+  role: "Judge only the ROLE part: do the role's standing responsibilities materially need this capability?",
+  task: SYSTEM_ONE_TASK,
+  operation:
+    "Judge only the OPERATION part: does the current operation instruction ask for an action this capability can perform? Answer low when it orders standby or no work.",
+};
+
+/** 维度题面的 `criteria`（true/false 与题面同义）。 */
+export const RANK_DIMENSION_CRITERIA: Record<RankDimension, { true: string; false: string }> = {
+  role: {
+    true: "The role's standing responsibilities materially need this capability.",
+    false: "The role's standing responsibilities do not need this capability.",
+  },
+  task: SYSTEM_ONE_CRITERIA,
+  operation: {
+    true: "The current operation instruction asks for an action this capability can perform.",
+    false: "The current operation instruction does not ask for this capability (standby / no work).",
+  },
+};
+
+/** 某能力某维度的 question id：`cap_<hex>~<dimension>`。 */
+export function rankQuestionId(capabilityId: string, dimension: RankDimension): string {
+  return `${capabilityId}~${dimension}`;
+}
 
 /** 重试退避（指数、无抖动，便于测试）。 */
 export const RETRY_DELAYS_MS = [500, 1000] as const;
@@ -282,8 +332,19 @@ export function buildQuestionMoreTools(
   return packTools(tools, { extraLimit }).moreTools;
 }
 
-/** 构造一道题的 instructions（内嵌该能力定义，题目因此唯一）。 */
-function buildQuestionInstructions(capability: JevCapability, level: ToolPackLevel): SystemOneInstructions {
+/**
+ * 构造一道题的 instructions（内嵌该能力定义，题目因此唯一）。
+ *
+ * 三个维度都带工具清单：实测 role 题去掉 tools 后区分度明显退化
+ * （真正需要的 server 0.72–0.79，而 context7 / deepwiki 这类无关项被抬到
+ * 0.35–0.38；带 tools 时是 0.88–0.94 vs 0.04–0.10）——工具表是 MCP 判断的
+ * 主信号，role 维度也一样。体积代价由 `buildSystemOneRequests` 的分片承担。
+ */
+function buildQuestionInstructions(
+  capability: JevCapability,
+  level: ToolPackLevel,
+  dimension: RankDimension,
+): SystemOneInstructions {
   const spec: SystemOneCapability = {
     kind: capability.kind,
     name: truncateCodepoints(capability.name, NAME_LIMIT),
@@ -299,10 +360,10 @@ function buildQuestionInstructions(capability: JevCapability, level: ToolPackLev
     if (packed.tools !== undefined) spec.tools = packed.tools;
     if (packed.moreTools !== undefined) spec.moreTools = packed.moreTools;
   }
-  return { task: SYSTEM_ONE_TASK, capability: spec };
+  return { task: RANK_DIMENSION_TASKS[dimension], capability: spec };
 }
 
-/** 按指定降级档位构造完整请求。 */
+/** 按指定降级档位构造完整请求（三维：每能力最多 3 题）。 */
 function buildRequestAtLevel(
   config: Pick<JevConfig, "model">,
   capabilities: readonly JevCapability[],
@@ -311,22 +372,39 @@ function buildRequestAtLevel(
 ): SystemOneRequest {
   const questions: Record<string, SystemOneQuestion> = {};
   for (const capability of capabilities) {
-    questions[capability.id] = {
-      type: "noul",
-      instructions: buildQuestionInstructions(capability, level),
-      criteria: { true: SYSTEM_ONE_CRITERIA.true, false: SYSTEM_ONE_CRITERIA.false },
-    };
+    for (const dimension of RANK_DIMENSIONS) {
+      questions[rankQuestionId(capability.id, dimension)] = {
+        type: "noul",
+        instructions: buildQuestionInstructions(capability, level, dimension),
+        criteria: { ...RANK_DIMENSION_CRITERIA[dimension] },
+      };
+    }
   }
   // 能力不进 state：state 只放用户请求与共享判据，避免 155 份重复与干扰。
   return { model: config.model, state: { request: draft, guidance: SYSTEM_ONE_GUIDANCE }, questions };
 }
 
+/** 解析请求体积软上限（`options.maxChars` 覆盖，测试/诊断用）。 */
+function resolveMaxChars(options: { maxChars?: number } = {}): number {
+  return typeof options.maxChars === "number" && Number.isFinite(options.maxChars) && options.maxChars > 0
+    ? options.maxChars
+    : REQUEST_SOFT_LIMIT_CHARS;
+}
+
+/** 请求体字符数（`JSON.stringify` 结果长度，与软上限同口径）。 */
+function requestSize(request: SystemOneRequest): number {
+  return JSON.stringify(request).length;
+}
+
 /**
- * 由能力集合与草稿构造一次批量请求。
+ * 由能力集合与草稿构造**单个**请求（不分片）。
  *
  * **全局预算**：超过 {@link REQUEST_SOFT_LIMIT_CHARS} 时按 4 档降级
  * （24 名额 → 8 名额 → 只留带描述的 8 条 → 只留 8 个名称 → 完全不带工具），
  * 优先保住「每条能力仍有描述」，而不是让整个请求撞上下文上限。
+ *
+ * `jev.rank` 实际使用 {@link buildSystemOneRequests}（先分片、再降级）；
+ * 本函数保留给探针 / 测试 / 单请求调用方。
  *
  * @param options.maxChars 覆盖软上限（测试/诊断用）。
  */
@@ -336,16 +414,56 @@ export function buildSystemOneRequest(
   draft: string,
   options: { maxChars?: number } = {},
 ): SystemOneRequest {
-  const maxChars =
-    typeof options.maxChars === "number" && Number.isFinite(options.maxChars) && options.maxChars > 0
-      ? options.maxChars
-      : REQUEST_SOFT_LIMIT_CHARS;
+  const maxChars = resolveMaxChars(options);
   let request = buildRequestAtLevel(config, capabilities, draft, 0);
   for (const level of [1, 2, 3, 4] as const) {
-    if (JSON.stringify(request).length <= maxChars) return request;
+    if (requestSize(request) <= maxChars) return request;
     request = buildRequestAtLevel(config, capabilities, draft, level);
   }
   return request;
+}
+
+/** 分片结果（一次 `jev.rank` 内部的全部请求）。 */
+export interface SystemOneRequestPlan {
+  /** 按能力原顺序的分片请求；无需分片时长度为 1。 */
+  requests: SystemOneRequest[];
+  /** 片数（= `requests.length`）。 */
+  batches: number;
+}
+
+/**
+ * 构造一次 `jev.rank` 需要的全部请求：**先按体积分片、再对单片降级**。
+ *
+ * 三维判据让单请求体积约为原来的 2.3×；152 条能力（约 108 KB/单维）会超过
+ * {@link REQUEST_SOFT_LIMIT_CHARS}。这里按能力二分（保持原顺序），每片分别
+ * 走 {@link buildSystemOneRequest} 的 4 档降级，直到每片 ≤ 软上限；这样不会
+ * 为了压体积而丢掉工具清单（工具是 MCP 判断的主信号）。
+ *
+ * 单片能力数极少时（1 条）仍可能超过自定义的极小 `maxChars`（测试场景），
+ * 此时返回降级后的最后一份，由调用方决定是否接受。
+ */
+export function buildSystemOneRequests(
+  config: Pick<JevConfig, "model">,
+  capabilities: readonly JevCapability[],
+  draft: string,
+  options: { maxChars?: number } = {},
+): SystemOneRequestPlan {
+  const maxChars = resolveMaxChars(options);
+  const requests: SystemOneRequest[] = [];
+  const pending: JevCapability[][] = [capabilities.slice()];
+  while (pending.length > 0) {
+    const chunk = pending.shift();
+    if (chunk === undefined || chunk.length === 0) continue;
+    const request = buildRequestAtLevel(config, chunk, draft, 0);
+    if (requestSize(request) <= maxChars || chunk.length === 1) {
+      // 单片仍超限时按 4 档降级（与旧行为一致，避免无限二分）。
+      requests.push(chunk.length === 1 ? buildSystemOneRequest(config, chunk, draft, { maxChars }) : request);
+      continue;
+    }
+    const mid = Math.ceil(chunk.length / 2);
+    pending.unshift(chunk.slice(0, mid), chunk.slice(mid));
+  }
+  return { requests, batches: requests.length };
 }
 
 /** `jev.test` 的探针能力 id（hash namespace 与真实能力不同，不会冲突）。 */
@@ -401,6 +519,34 @@ export function parseNoul(json: unknown, id: string): number | null {
     if (Number.isFinite(value)) return clamp01(value);
   }
   return null;
+}
+
+/**
+ * 解析某能力的三维分数（`~role` / `~task` / `~operation`）。
+ *
+ * 缺失 / 不可解析的维度为 `null`（不参与 max）；整题缺失不影响其它维度。
+ */
+export function parseDimensionScores(
+  json: unknown,
+  capabilityId: string,
+): Record<RankDimension, number | null> {
+  const scores = {} as Record<RankDimension, number | null>;
+  for (const dimension of RANK_DIMENSIONS) {
+    scores[dimension] = parseNoul(json, rankQuestionId(capabilityId, dimension));
+  }
+  return scores;
+}
+
+/**
+ * 能力最终得分：三维 **max**（任何一层高分即取该值）；三维全缺失 → null
+ * （调用方记 score=0 + reason `no-answer`）。
+ */
+export function parseRankScore(json: unknown, capabilityId: string): number | null {
+  const values = RANK_DIMENSIONS.map((dimension) => parseNoul(json, rankQuestionId(capabilityId, dimension))).filter(
+    (value): value is number => value !== null,
+  );
+  if (values.length === 0) return null;
+  return Math.max(...values);
 }
 
 /** 响应里的 model；缺失回退配置值。 */

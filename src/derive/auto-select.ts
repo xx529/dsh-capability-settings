@@ -24,7 +24,7 @@ import { isAbsolute, resolve as resolvePath } from "node:path";
 import { enumerateCapabilities } from "../jev/apply.js";
 import type { JevCapabilityService } from "../jev/apply.js";
 import { collectJevSecrets, readJevConfig, resolveJevKey } from "../jev/config-file.js";
-import { buildSystemOneRequest, parseNoul, postSystemOne, systemOneURL } from "../jev/rank.js";
+import { buildSystemOneRequests, parseRankScore, postSystemOne, systemOneURL } from "../jev/rank.js";
 import type { JevCapability, JevConfig } from "../jev/types.js";
 import { errMessage } from "../shared/errors.js";
 import type { DerivedDynamicInfo, SessionStateStore } from "../session-state.js";
@@ -413,23 +413,34 @@ export function createDeriveAutoSelect(ctx: any, deps: DeriveAutoSelectDeps): De
     }
     const secrets = collectJevSecrets(config, process.env);
     const draft = Array.from(input.prompt).slice(0, 8000).join("");
-    const request = buildSystemOneRequest(config, candidates, draft);
-    let response: Awaited<ReturnType<typeof postSystemOne>>;
+    // 三维判据 + 体积分片：多片共享一个 8s 总预算（spawn 同步等待，不能逐片各等 8s）。
+    const plan = buildSystemOneRequests(config, candidates, draft);
+    const answers: Record<string, unknown> = {};
+    const controller = new AbortController();
+    const timeoutMs = Math.min(config.timeoutMs, DYNAMIC_RANK_TIMEOUT_CAP_MS);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      response = await postSystemOne(systemOneURL(config.baseURL), request, key.value, {
-        ...(deps.fetchImpl !== undefined ? { fetchImpl: deps.fetchImpl } : {}),
-        ...(deps.sleep !== undefined ? { sleep: deps.sleep } : {}),
-        timeoutMs: Math.min(config.timeoutMs, DYNAMIC_RANK_TIMEOUT_CAP_MS),
-        secrets,
-      });
+      for (const request of plan.requests) {
+        const response = await postSystemOne(systemOneURL(config.baseURL), request, key.value, {
+          ...(deps.fetchImpl !== undefined ? { fetchImpl: deps.fetchImpl } : {}),
+          ...(deps.sleep !== undefined ? { sleep: deps.sleep } : {}),
+          timeoutMs,
+          signal: controller.signal,
+          secrets,
+        });
+        const partial = (response.json as { answers?: Record<string, unknown> }).answers;
+        if (partial !== null && typeof partial === "object") Object.assign(answers, partial);
+      }
     } catch (error) {
       const code = (error as { code?: unknown })?.code;
       const reason = typeof code === "string" && code.length > 0 ? code : "error";
       logger?.warn?.(`capability-panel: 动态选择打分失败，回退继承（${reason}: ${errMessage(error)}）`);
       return fallbackPlan({ ...base, reason, threshold, total: candidates.length });
+    } finally {
+      clearTimeout(timer);
     }
     const scores = new Map<string, number>();
-    for (const capability of candidates) scores.set(capability.id, parseNoul(response.json, capability.id) ?? 0);
+    for (const capability of candidates) scores.set(capability.id, parseRankScore({ answers }, capability.id) ?? 0);
     return buildDynamicPlan({
       parentSessionId: input.parentSessionId,
       ...(input.label !== undefined ? { label: input.label } : {}),
