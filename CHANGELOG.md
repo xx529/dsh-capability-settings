@@ -3,6 +3,27 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 修复
+
+- **磁盘技能目录名 / 文件名与 frontmatter `name` 不一致时，详情页「文件列表读取失败」
+  （用户反馈：`.agents/skills/ht-order-center-skill/SKILL.md` 的 frontmatter 是
+  `name: htdot-order-supply`，面板能列出技能但打开报
+  `skill "htdot-order-supply" not found`）**：宿主 `skill-filesystem` 以 frontmatter
+  `name` 注册、目录名只是存放位置，而面板所有「按名称拼磁盘路径」的入口都直接用
+  frontmatter name 定位 `<root>/<name>`，名称不一致即找不到；registry fallback 也救不了
+  面板（`skill-filesystem` 挂在 agent preset 作用域，root 的同名行 `disabled: true`，
+  无 agent scope 的 `snapshot({cwd})` 只能看到 global 层的 runtime 注入条目）。
+  新增 `resolveSkillEntry`（`src/skills/disk.ts`，与 `list()` 同一套发现口径：先走
+  `<name>.md` / `<name>/SKILL.md` 快路径，未命中再扫描根目录按 frontmatter name 匹配），
+  并统一接入详情 / 导出（文件清单、导出到宿主目录）/ 编辑 / 删除 / 调用方向开关 /
+  创建冲突 / 克隆 / 导入到本项目：写操作写回**原磁盘条目**，不会新造一个
+  frontmatter 名目录。验证：真实宿主 RPC（隔离实例）`skills.read` /
+  `skills.export` 由 `not found` 变为返回正文 + 9 个文件；新增
+  `notes/verify/skill-sources/host-disk-name-mismatch.test.mjs` 28/28
+  （含 flat 布局、覆盖创建、导出路径、删除无连带、未知名称仍 not found）。
+
 ## [1.14.0] - 2026-11-05
 
 ### 新增

@@ -6,6 +6,9 @@
  * @module dsh-capability-settings/skills/crud
  */
 import type { SkillFormat, SkillSpec } from "./types.js";
+/** 兼容旧调用方：磁盘条目枚举的实现已下沉到 disk.ts（与 resolveSkillEntry 同源）。 */
+export { listSkillEntries } from "./disk.js";
+export type { SkillEntry } from "./disk.js";
 /** 创建 skill 的入参。 */
 export interface CreateOptions {
     /** 已解析到具体 skills 根的目标目录。 */
@@ -129,19 +132,6 @@ export declare function readSkillDetail(root: string, name: string): Promise<Rea
  * 根目录不存在视为空列表。
  */
 export declare function listSkillNames(root: string): Promise<string[]>;
-/** 一次 readdir（withFileTypes）同时得出每个 skill 的名称与磁盘布局。 */
-export interface SkillEntry {
-    name: string;
-    format: SkillFormat;
-}
-/**
- * 单趟扫描磁盘列出技能：用 `withFileTypes` 区分文件/目录，省掉
- * `detectFormat` 对每个名字的多次 stat。
- *
- * 与 {@link detectFormat} 的判定口径一致：`<name>.md` 文件优先（flat），
- * 其次 `<name>/SKILL.md` 目录（directory）；同名两者并存时 flat 优先。
- */
-export declare function listSkillEntries(root: string): Promise<SkillEntry[]>;
 /** 克隆操作的结果。 */
 export interface CloneResult {
     ok: boolean;

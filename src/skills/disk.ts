@@ -14,6 +14,7 @@
  */
 
 import { readFile, readdir, rm, stat } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
@@ -205,6 +206,77 @@ export async function detectFormat(root: string, name: string): Promise<SkillFor
   if (await isFile(flatPath)) return "flat";
   if (await isDir(dirPath)) {
     if (await isFile(join(dirPath, "SKILL.md"))) return "directory";
+  }
+  return undefined;
+}
+
+/** 一次 readdir（withFileTypes）同时得出每个 skill 的名称与磁盘布局。 */
+export interface SkillEntry {
+  name: string;
+  format: SkillFormat;
+}
+
+/**
+ * 单趟扫描磁盘列出技能：用 `withFileTypes` 区分文件/目录，省掉
+ * `detectFormat` 对每个名字的多次 stat。
+ *
+ * 与 {@link detectFormat} 的判定口径一致：`<name>.md` 文件优先（flat），
+ * 其次 `<name>/SKILL.md` 目录（directory）；同名两者并存时 flat 优先。
+ */
+export async function listSkillEntries(root: string): Promise<SkillEntry[]> {
+  let dirents: Dirent[];
+  try {
+    dirents = await readdir(root, { withFileTypes: true, encoding: "utf8" });
+  } catch {
+    return [];
+  }
+  const byName = new Map<string, SkillFormat>();
+  for (const dirent of dirents) {
+    if (dirent.name.endsWith(".md")) {
+      if (dirent.isFile()) byName.set(dirent.name.slice(0, -".md".length), "flat");
+    } else if (dirent.isDirectory() && (await isFile(join(root, dirent.name, "SKILL.md")))) {
+      // flat 优先：同名目录型条目只在尚无 flat 记录时登记。
+      if (!byName.has(dirent.name)) byName.set(dirent.name, "directory");
+    }
+  }
+  return [...byName.entries()]
+    .map(([name, format]) => ({ name, format }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** frontmatter 名称到磁盘条目的解析结果。 */
+export interface ResolvedSkillEntry {
+  /** 磁盘条目名（flat 为 `<entryName>.md`，directory 为 `<entryName>/`）。 */
+  entryName: string;
+  format: SkillFormat;
+}
+
+/**
+ * 把 skill 的 **frontmatter 名称**解析成磁盘条目。
+ *
+ * 受管布局以 `<name>.md` / `<name>/SKILL.md` 为约定，但宿主注册技能时以
+ * frontmatter `name` 为权威名称，目录/文件名可以不同（`skill-filesystem`
+ * 的发现口径）。面板列表用 frontmatter 名称展示，因此所有「按名称找磁盘
+ * 路径」的读写入口都必须先过这里，否则名称与条目名不一致时会误报 not
+ * found（宿主 fallback 在无 agent 作用域的面板里看不到磁盘技能）。
+ *
+ * 快路径：名称即条目名（常规布局，行为与 detectFormat 一致）。
+ * 慢路径：扫描根目录，按 SKILL.md / `<file>.md` 的 frontmatter name 匹配，
+ * 与 {@link listSkillEntries} + 解析的口径一致。
+ *
+ * @param root 受管 skills 根目录
+ * @param name frontmatter 名称
+ * @returns 条目名与布局；根下没有该技能返回 undefined
+ */
+export async function resolveSkillEntry(root: string, name: string): Promise<ResolvedSkillEntry | undefined> {
+  const direct = await detectFormat(root, name);
+  if (direct !== undefined) return { entryName: name, format: direct };
+  // ponytail: 未命中才扫描整根（读每个候选文件的 frontmatter）；受管根通常只有
+  // 几十~几百条、SKILL.md 很小，够用。将来若面板列表热点暴露，可在 list 阶段
+  // 顺带缓存 name → entryName 映射，或让 RPC 直接回传 summary.path。
+  for (const entry of await listSkillEntries(root)) {
+    const parsed = await readSkill(root, entry.name, entry.format);
+    if (parsed?.spec.name === name) return { entryName: entry.name, format: entry.format };
   }
   return undefined;
 }

@@ -6,21 +6,24 @@
  * @module dsh-capability-settings/skills/crud
  */
 
-import { readdir, stat } from "node:fs/promises";
-import type { Dirent } from "node:fs";
 import { join } from "node:path";
 
 import {
   deleteSkill,
-  detectFormat,
   listResources,
+  listSkillEntries,
   readSkill,
+  resolveSkillEntry,
   resourceDirectory,
   skillFilePath,
   writeSkill,
 } from "./disk.js";
 import { isSkillName, validateSpec } from "./validate.js";
 import type { SkillFormat, SkillSpec } from "./types.js";
+
+/** 兼容旧调用方：磁盘条目枚举的实现已下沉到 disk.ts（与 resolveSkillEntry 同源）。 */
+export { listSkillEntries } from "./disk.js";
+export type { SkillEntry } from "./disk.js";
 
 /**
  * 校验一个将被拼进文件路径的 skill 名。
@@ -69,17 +72,19 @@ export async function createSkill(options: CreateOptions): Promise<CreateResult>
   const validation = validateSpec(options.spec);
   if (!validation.ok) return { ok: false, errors: validation.errors };
 
-  const existing = await detectFormat(options.root, options.spec.name);
-  if (existing !== undefined && existing !== options.format) {
+  const existing = await resolveSkillEntry(options.root, options.spec.name);
+  if (existing !== undefined && existing.format !== options.format) {
     return {
       ok: false,
-      errors: [`skill "${options.spec.name}" already exists in a different format (${existing})`],
+      errors: [`skill "${options.spec.name}" already exists in a different format (${existing.format})`],
     };
   }
   if (existing !== undefined && options.overwrite !== true) {
     return { ok: false, errors: [`skill "${options.spec.name}" already exists`], existed: true };
   }
-  const path = await writeSkill(options.root, options.spec.name, options.format, options.spec, options.body);
+  // 覆盖时写回原磁盘条目（目录名可能与 frontmatter 名不同），避免留下两个同名条目。
+  const entryName = existing?.entryName ?? options.spec.name;
+  const path = await writeSkill(options.root, entryName, options.format, options.spec, options.body);
   return { ok: true, path, existed: existing !== undefined };
 }
 
@@ -100,13 +105,10 @@ export async function updateSkill(options: UpdateOptions): Promise<CreateResult>
   const validation = validateSpec(options.spec);
   if (!validation.ok) return { ok: false, errors: validation.errors };
 
-  let format = options.format;
-  if (format === undefined) {
-    const detected = await detectFormat(options.root, options.name);
-    if (detected === undefined) return { ok: false, errors: [`skill "${options.name}" not found`] };
-    format = detected;
-  }
-  const path = await writeSkill(options.root, options.name, format, options.spec, options.body);
+  const entry = await resolveSkillEntry(options.root, options.name);
+  if (entry === undefined) return { ok: false, errors: [`skill "${options.name}" not found`] };
+  const format = options.format ?? entry.format;
+  const path = await writeSkill(options.root, entry.entryName, format, options.spec, options.body);
   return { ok: true, path };
 }
 
@@ -114,9 +116,9 @@ export async function updateSkill(options: UpdateOptions): Promise<CreateResult>
 export async function removeSkill(root: string, name: string): Promise<{ ok: boolean; errors?: string[] }> {
   const rejected = nameGuard(name, "remove");
   if (rejected !== undefined) return rejected;
-  const format = await detectFormat(root, name);
-  if (format === undefined) return { ok: false, errors: [`skill "${name}" not found`] };
-  await deleteSkill(root, name, format);
+  const entry = await resolveSkillEntry(root, name);
+  if (entry === undefined) return { ok: false, errors: [`skill "${name}" not found`] };
+  await deleteSkill(root, entry.entryName, entry.format);
   return { ok: true };
 }
 
@@ -159,15 +161,15 @@ export interface SetInvocationOptions {
 export async function setSkillInvocation(options: SetInvocationOptions): Promise<{ ok: boolean; errors?: string[] }> {
   const rejected = nameGuard(options.name, "setInvocation");
   if (rejected !== undefined) return rejected;
-  const format = await detectFormat(options.root, options.name);
-  if (format === undefined) return { ok: false, errors: [`skill "${options.name}" not found`] };
-  const parsed = await readSkill(options.root, options.name, format);
+  const entry = await resolveSkillEntry(options.root, options.name);
+  if (entry === undefined) return { ok: false, errors: [`skill "${options.name}" not found`] };
+  const parsed = await readSkill(options.root, entry.entryName, entry.format);
   if (parsed === undefined) return { ok: false, errors: [`skill "${options.name}" could not be parsed`] };
   const invocation = {
     ...(options.modelInvocable === true ? {} : { "disable-model-invocation": true }),
     ...(options.userInvocable === true ? {} : { "user-invocable": false }),
   };
-  await writeSkill(options.root, options.name, format, { ...parsed.spec, invocation }, parsed.body);
+  await writeSkill(options.root, entry.entryName, entry.format, { ...parsed.spec, invocation }, parsed.body);
   return { ok: true };
 }
 
@@ -213,12 +215,12 @@ export interface ReadResult {
 export async function readSkillDetail(root: string, name: string): Promise<ReadResult> {
   const rejected = nameGuard<ReadResult>(name, "read");
   if (rejected !== undefined) return rejected;
-  const format = await detectFormat(root, name);
-  if (format === undefined) return { ok: false, errors: [`skill "${name}" not found`] };
-  const parsed = await readSkill(root, name, format);
+  const entry = await resolveSkillEntry(root, name);
+  if (entry === undefined) return { ok: false, errors: [`skill "${name}" not found`] };
+  const parsed = await readSkill(root, entry.entryName, entry.format);
   if (parsed === undefined) return { ok: false, errors: [`skill "${name}" could not be parsed`] };
-  const resources = format === "directory" ? await listResources(root, name) : [];
-  return { ok: true, spec: parsed.spec, body: parsed.body, format, resources };
+  const resources = entry.format === "directory" ? await listResources(root, entry.entryName) : [];
+  return { ok: true, spec: parsed.spec, body: parsed.body, format: entry.format, resources };
 }
 
 /**
@@ -229,49 +231,6 @@ export async function readSkillDetail(root: string, name: string): Promise<ReadR
 export async function listSkillNames(root: string): Promise<string[]> {
   const entries = await listSkillEntries(root);
   return entries.map((entry) => entry.name);
-}
-
-/** 一次 readdir（withFileTypes）同时得出每个 skill 的名称与磁盘布局。 */
-export interface SkillEntry {
-  name: string;
-  format: SkillFormat;
-}
-
-/**
- * 单趟扫描磁盘列出技能：用 `withFileTypes` 区分文件/目录，省掉
- * `detectFormat` 对每个名字的多次 stat。
- *
- * 与 {@link detectFormat} 的判定口径一致：`<name>.md` 文件优先（flat），
- * 其次 `<name>/SKILL.md` 目录（directory）；同名两者并存时 flat 优先。
- */
-export async function listSkillEntries(root: string): Promise<SkillEntry[]> {
-  let dirents: Dirent[];
-  try {
-    dirents = await readdir(root, { withFileTypes: true, encoding: "utf8" });
-  } catch {
-    return [];
-  }
-  const byName = new Map<string, SkillFormat>();
-  for (const dirent of dirents) {
-    if (dirent.name.endsWith(".md")) {
-      if (dirent.isFile()) byName.set(dirent.name.slice(0, -".md".length), "flat");
-    } else if (dirent.isDirectory() && (await isFile(join(root, dirent.name, "SKILL.md")))) {
-      // flat 优先：同名目录型条目只在尚无 flat 记录时登记。
-      if (!byName.has(dirent.name)) byName.set(dirent.name, "directory");
-    }
-  }
-  return [...byName.entries()]
-    .map(([name, format]) => ({ name, format }))
-    .sort((a, b) => a.name.localeCompare(b.name));
-}
-
-/** 判断路径是否为普通文件（错误一律视为否）。 */
-async function isFile(path: string): Promise<boolean> {
-  try {
-    return (await stat(path)).isFile();
-  } catch {
-    return false;
-  }
 }
 
 /** 克隆操作的结果。 */
@@ -289,24 +248,24 @@ export interface CloneResult {
 export async function cloneSkill(fromRoot: string, toRoot: string, name: string, newName?: string): Promise<CloneResult> {
   const rejected = nameGuard<CloneResult>(name, "clone") ?? (newName !== undefined ? nameGuard<CloneResult>(newName, "clone") : undefined);
   if (rejected !== undefined) return rejected;
-  const format = await detectFormat(fromRoot, name);
-  if (format === undefined) return { ok: false, errors: [`skill "${name}" not found`] };
-  const parsed = await readSkill(fromRoot, name, format);
+  const entry = await resolveSkillEntry(fromRoot, name);
+  if (entry === undefined) return { ok: false, errors: [`skill "${name}" not found`] };
+  const parsed = await readSkill(fromRoot, entry.entryName, entry.format);
   if (parsed === undefined) return { ok: false, errors: [`skill "${name}" could not be parsed`] };
 
   const targetName = newName ?? name;
   const spec: SkillSpec = { ...parsed.spec, name: targetName };
-  await writeSkill(toRoot, targetName, format, spec, parsed.body);
+  await writeSkill(toRoot, targetName, entry.format, spec, parsed.body);
 
   // 复制 directory 布局下的兄弟资源文件。
-  if (format === "directory") {
+  if (entry.format === "directory") {
     const { copyFile } = await import("node:fs/promises");
-    const sourceDir = resourceDirectory(fromRoot, name);
+    const sourceDir = resourceDirectory(fromRoot, entry.entryName);
     const targetDir = resourceDirectory(toRoot, targetName);
-    const resources = await listResources(fromRoot, name);
+    const resources = await listResources(fromRoot, entry.entryName);
     for (const resource of resources) {
       await copyFile(join(sourceDir, resource), join(targetDir, resource));
     }
   }
-  return { ok: true, path: skillFilePath(toRoot, targetName, format) };
+  return { ok: true, path: skillFilePath(toRoot, targetName, entry.format) };
 }

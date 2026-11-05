@@ -16,7 +16,7 @@
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { deleteSkill, detectFormat, parseSkill, skillFilePath } from "./disk.js";
+import { deleteSkill, parseSkill, resolveSkillEntry, skillFilePath } from "./disk.js";
 import { isSkillName } from "./validate.js";
 import type { SkillFormat } from "./types.js";
 
@@ -207,10 +207,10 @@ export async function exportToPath(options: ExportToPathOptions): Promise<Transf
   if (!isSkillName(options.name)) {
     return { ok: false, errors: [`invalid skill name "${options.name}"`] };
   }
-  const format = await detectFormat(options.root, options.name);
-  if (format === undefined) return { ok: false, errors: [`skill "${options.name}" not found`] };
+  const entry = await resolveSkillEntry(options.root, options.name);
+  if (entry === undefined) return { ok: false, errors: [`skill "${options.name}" not found`] };
 
-  const target = format === "flat" ? join(options.destDir, `${options.name}.md`) : join(options.destDir, options.name);
+  const target = entry.format === "flat" ? join(options.destDir, `${options.name}.md`) : join(options.destDir, options.name);
   if ((await statKind(target)) !== undefined) {
     if (options.overwrite !== true) {
       return { ok: false, errors: [`"${target}" already exists`], name: options.name, existed: true };
@@ -219,12 +219,12 @@ export async function exportToPath(options: ExportToPathOptions): Promise<Transf
   }
 
   await mkdir(options.destDir, { recursive: true });
-  if (format === "flat") {
-    await cp(skillFilePath(options.root, options.name, format), target);
+  if (entry.format === "flat") {
+    await cp(skillFilePath(options.root, entry.entryName, entry.format), target);
   } else {
-    await cp(join(options.root, options.name), target, { recursive: true });
+    await cp(join(options.root, entry.entryName), target, { recursive: true });
   }
-  return { ok: true, name: options.name, path: target, format };
+  return { ok: true, name: options.name, path: target, format: entry.format };
 }
 
 /**
@@ -236,18 +236,18 @@ export async function exportSkillFiles(root: string, name: string): Promise<Tran
   if (!isSkillName(name)) {
     return { ok: false, errors: [`invalid skill name "${name}"`] };
   }
-  const format = await detectFormat(root, name);
-  if (format === undefined) return { ok: false, errors: [`skill "${name}" not found`] };
+  const entry = await resolveSkillEntry(root, name);
+  if (entry === undefined) return { ok: false, errors: [`skill "${name}" not found`] };
 
-  if (format === "flat") {
-    const data = await readFile(skillFilePath(root, name, format));
-    return { ok: true, name, format, files: [{ path: `${name}.md`, content: data.toString("base64") }] };
+  if (entry.format === "flat") {
+    const data = await readFile(skillFilePath(root, entry.entryName, entry.format));
+    return { ok: true, name, format: entry.format, files: [{ path: `${entry.entryName}.md`, content: data.toString("base64") }] };
   }
 
-  const baseDir = join(root, name);
+  const baseDir = join(root, entry.entryName);
   const files: TransferFile[] = [];
   await collectFiles(baseDir, baseDir, files);
-  return { ok: true, name, format, files };
+  return { ok: true, name, format: entry.format, files };
 }
 
 /** 递归收集目录下的所有普通文件（相对路径用 `/` 分隔）。 */
@@ -270,10 +270,10 @@ async function collectFiles(baseDir: string, dir: string, out: TransferFile[]): 
  * 要求覆盖 ⇒ 先按旧布局删除（避免 flat/directory 两种形态残留并存）。
  */
 async function resolveConflict(root: string, name: string, overwrite: boolean | undefined): Promise<{ errors?: string[]; existed: boolean }> {
-  const existing = await detectFormat(root, name);
+  const existing = await resolveSkillEntry(root, name);
   if (existing === undefined) return { existed: false };
   if (overwrite !== true) return { errors: [`skill "${name}" already exists`], existed: true };
-  await deleteSkill(root, name, existing);
+  await deleteSkill(root, existing.entryName, existing.format);
   return { existed: true };
 }
 

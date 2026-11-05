@@ -72,6 +72,43 @@ export declare function deleteSkill(root: string, name: string, format: SkillFor
  * 都不存在则返回 undefined。
  */
 export declare function detectFormat(root: string, name: string): Promise<SkillFormat | undefined>;
+/** 一次 readdir（withFileTypes）同时得出每个 skill 的名称与磁盘布局。 */
+export interface SkillEntry {
+    name: string;
+    format: SkillFormat;
+}
+/**
+ * 单趟扫描磁盘列出技能：用 `withFileTypes` 区分文件/目录，省掉
+ * `detectFormat` 对每个名字的多次 stat。
+ *
+ * 与 {@link detectFormat} 的判定口径一致：`<name>.md` 文件优先（flat），
+ * 其次 `<name>/SKILL.md` 目录（directory）；同名两者并存时 flat 优先。
+ */
+export declare function listSkillEntries(root: string): Promise<SkillEntry[]>;
+/** frontmatter 名称到磁盘条目的解析结果。 */
+export interface ResolvedSkillEntry {
+    /** 磁盘条目名（flat 为 `<entryName>.md`，directory 为 `<entryName>/`）。 */
+    entryName: string;
+    format: SkillFormat;
+}
+/**
+ * 把 skill 的 **frontmatter 名称**解析成磁盘条目。
+ *
+ * 受管布局以 `<name>.md` / `<name>/SKILL.md` 为约定，但宿主注册技能时以
+ * frontmatter `name` 为权威名称，目录/文件名可以不同（`skill-filesystem`
+ * 的发现口径）。面板列表用 frontmatter 名称展示，因此所有「按名称找磁盘
+ * 路径」的读写入口都必须先过这里，否则名称与条目名不一致时会误报 not
+ * found（宿主 fallback 在无 agent 作用域的面板里看不到磁盘技能）。
+ *
+ * 快路径：名称即条目名（常规布局，行为与 detectFormat 一致）。
+ * 慢路径：扫描根目录，按 SKILL.md / `<file>.md` 的 frontmatter name 匹配，
+ * 与 {@link listSkillEntries} + 解析的口径一致。
+ *
+ * @param root 受管 skills 根目录
+ * @param name frontmatter 名称
+ * @returns 条目名与布局；根下没有该技能返回 undefined
+ */
+export declare function resolveSkillEntry(root: string, name: string): Promise<ResolvedSkillEntry | undefined>;
 /**
  * 列出 directory 布局 skill 下的兄弟资源文件（排除 SKILL.md 本身）。
  * 目录缺失或不可读时返回空数组。

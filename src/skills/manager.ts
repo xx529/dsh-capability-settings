@@ -18,7 +18,7 @@ import { findProjectRoot } from "../shared/project-root.js";
 import { atomicWriteText } from "../shared/atomic-write.js";
 import { isGlobalSkillSource, isProjectSkillSource } from "../shared/skill-sources.js";
 import { globalSkillsDir, projectSkillsDir, userAgentsSkillsDir, userClaudeSkillsDir } from "./roots.js";
-import { detectFormat, readSkill, resourceDirectory, skillFilePath } from "./disk.js";
+import { readSkill, resolveSkillEntry, resourceDirectory, skillFilePath } from "./disk.js";
 import { cloneSkill, createSkill, updateSkill, removeSkill, setSkillEnabled, setSkillInvocation, readSkillDetail, listSkillEntries } from "./crud.js";
 import type { ReadResult } from "./crud.js";
 import { installFromUrl } from "./download.js";
@@ -340,11 +340,11 @@ export function createService(ctx: any, config: ManagerDeps = {}) {
       if (blocked !== undefined) return blocked;
       const fromRoot = typeof input.fromRoot === "string" && input.fromRoot.length > 0 ? input.fromRoot : resolveRoot("global", undefined, undefined);
       // 被复制的全局条目必须存在（fromRoot 是全局面板行携带的全局根）。
-      if ((await detectFormat(fromRoot, input.name)) === undefined) {
+      if ((await resolveSkillEntry(fromRoot, input.name)) === undefined) {
         return { ok: false as const, errors: [`no global skill named "${input.name}"`] };
       }
       const toRoot = resolveRoot("project", input.cwd, ".agents");
-      const existing = await detectFormat(toRoot, input.name);
+      const existing = await resolveSkillEntry(toRoot, input.name);
       if (existing !== undefined && input.overwrite !== true) {
         return { ok: false as const, errors: [`项目内已有同名技能 "${input.name}"`], existed: true };
       }
@@ -352,7 +352,7 @@ export function createService(ctx: any, config: ManagerDeps = {}) {
       // 宿主按 rank 遮蔽（project-dsh 100 < project-agents 200），报硬错误
       // 而非制造一个看不到效果的副本。
       for (const target of [".dsh", ".claude"] as const) {
-        if ((await detectFormat(projectSkillsDir(input.cwd, target), input.name)) !== undefined) {
+        if ((await resolveSkillEntry(projectSkillsDir(input.cwd, target), input.name)) !== undefined) {
           return { ok: false as const, errors: [`项目内已有同名原生技能 "${input.name}"（${target}），导入的副本不会生效`] };
         }
       }
@@ -360,7 +360,7 @@ export function createService(ctx: any, config: ManagerDeps = {}) {
       // 只删探测到的那种布局，另一种形态显式再清一次）。
       if (existing !== undefined) {
         await removeSkill(toRoot, input.name);
-        const leftover = await detectFormat(toRoot, input.name);
+        const leftover = await resolveSkillEntry(toRoot, input.name);
         if (leftover !== undefined) await removeSkill(toRoot, input.name);
       }
       return cloneSkill(fromRoot, toRoot, input.name);
