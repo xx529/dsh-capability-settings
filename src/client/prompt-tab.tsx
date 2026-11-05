@@ -530,7 +530,7 @@ export function PromptTab({
         </div>
       )}
 
-      <div className="skp-dock-grid" role="tabpanel">
+      <div className="skp-dock-grid skp-dock-grid-prompt" role="tabpanel">
         {data.loading && data.files.length === 0 ? (
           <div className="skp-dock-empty">加载中…</div>
         ) : filtered.length === 0 ? (
@@ -557,11 +557,6 @@ export function PromptTab({
         <FrozenPreview text={data.frozen.text} fileCount={data.frozen.files.length} />
       )}
 
-      <p className="skp-dock-grid-note">
-        {readOnly
-          ? "只展示首轮已注入 / 未注入结果；未创建 / 未识别项不在此列出（在能力面板里管理）。"
-          : "默认全选（与 DSH 一致）· 只列已存在且被 DSH 读取的 prompt：未创建 / 未识别项在能力面板里管理。"}
-      </p>
     </>
   );
 }

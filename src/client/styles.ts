@@ -478,6 +478,8 @@ export const SKP_CSS = `
 /* FINDING-02：会话「能力」Tab 1080 容器内宽 990 → 4 列需要 min ≤ (990-3×12)/4 = 238.5。
    卡片最小宽 240→228，1fr 拉伸后实际 ≈238（帧 05 的 4 列）；hero 模式仍是固定 4 列，不受影响。 */
 .skp-dock-panel-view .skp-dock-grid{max-height:none;overflow:visible;grid-template-columns:repeat(auto-fill,minmax(228px,1fr));gap:12px;padding:0;}
+/* Prompt 网格：不参与 flex 分配，只读页的「已注入内容预览」紧跟卡片下一行。 */
+.skp-dock-grid-prompt{flex:0 0 auto;min-height:0;}
 .skp-dock-panel-view .skp-dock-card{min-height:100px;padding:10px 12px;border-radius:12px;}
 .skp-dock-panel-view .skp-dock-card-name{font-size:12.5px;}
 .skp-dock-panel-view .skp-dock-card-desc{min-height:32px;font-size:11px;line-height:16px;}

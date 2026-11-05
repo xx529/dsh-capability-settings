@@ -2437,13 +2437,7 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
       {/* 底栏 */}
       <div className="skp-dock-foot">
         <span className="skp-dock-foot-note">
-          {tab === "prompt" ? (
-            readOnlyPrompt ? (
-              "只展示本会话首轮注入结果 · 不参与 Jev 能力决策 · 不参与三域批量开关"
-            ) : (
-              `默认全选（与 DSH 一致）· 将注入 ${prompt.enabledCount} / ${prompt.fileCount} 个文件 · 不参与 Jev 能力决策`
-            )
-          ) : (
+          {tab === "prompt" ? null : (
             <>
               {totalOn} / {total} 项已启用{injectedOn > 0 ? ` · 其中 ${injectedOn} 项来自插件 / DSH 内置 / Agent 预设` : ""} · 开关只作用于当前对话
               {hiddenTotal > 0 && (
