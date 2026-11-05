@@ -17,6 +17,29 @@
   验证：`pnpm typecheck` / `pnpm build`；本地 Jev 套件 `host-config` 82/82、
   `client-adapter` 21/21、新增 `client-threshold` 9/9（配置页回显 / 保存载荷 /
   首屏初值取自配置 / 旧宿主兜底）。
+- **派生第三种模式「动态选择」（v24）**：`派生继承会话 / 派生继承工作区` 下拉新增
+  `动态选择`。spawn 时用子 agent 首条任务（`subagent` 的 `prompt`、
+  `spawn_teammate` 的 `prompt`）在**工作区默认能力**（Skills / MCP / Tools）上逐项
+  跑 Jev 相关度，`score ≥ 阈值` 才启用；阈值取「Jev 模型」配置页的
+  `decisionThreshold`（默认 `0.50`，菜单 / 派生页只读展示）。
+  - 宿主新增 `src/derive/auto-select.ts`：`tools/pre-execute`（被 await 的 waterfall）
+    抓 spawn 首条任务并打分 → pending；`agent/created` 早期 seed child 会话记录，
+    晚期（skills / mcp / tools 之后）await 三域 `setSessionEnabled*` 收敛，保证
+    首轮即按选择生效；打分上限 8s，失败绝不阻塞 spawn。
+  - 空集 / Jev 未配置 / 超时 / 异常 → 回退「派生继承会话」（复制父会话显式快照；
+    跨项目根回退工作区默认）；`ralph` / `workflow` 的逐 child 任务文本拿不到，按
+    回退处理；覆盖 `subagent`（spawn / fork）与 `spawn_teammate` 两条路径。
+  - `session-capabilities.json` 的派生快照新增 additive 字段 `derivedDynamic`
+    （`status` / `reason` / `threshold` / `selected` / `total` / `counts` /
+    `fallback`）；`DeriveMode` 增加 `"dynamic"`，旧版本读到会忽略该字段（降级为
+    默认 `session`）。
+  - UI：下拉第三项 + 底部只读阈值（来源「Jev 模型」配置，配置保存事件后刷新）；
+    派生会话页成功显示蓝色快照条 + `动态` chip，回退显示琥珀色提示 + `已回退` chip。
+  - 验证：`pnpm typecheck` / `pnpm build`；本地 `notes/verify/v24-dynamic-derive.mjs`
+    7/7（plan 阈值 / 三域 toggles / 空集回退 / session-state 落盘重载 /
+    pre-execute 打分 / 晚期应用 / derive 顺序）；`notes/verify/v24-dynamic-derive-ui.mjs`
+    2/2（三项下拉 / 阈值 0.55 只读行 / set(dynamic)；派生页成功「选出 7 项」+ 回退
+    「timeout」banner / chip）。
 
 ## [1.14.1] - 2026-11-05
 

@@ -41,6 +41,8 @@ import { createJevManager } from "./jev/manager.js";
 import { createSessionState } from "./session-state.js";
 import { createSessionStateReconciler } from "./session-state-reconcile.js";
 import { createDeriveInheritance } from "./derive/manager.js";
+import { createDeriveAutoSelect } from "./derive/auto-select.js";
+import type { DeriveAutoSelect } from "./derive/auto-select.js";
 import { createToolsManager } from "./tools/manager.js";
 import { createAttributionResolver } from "./tools/attribution/resolver.js";
 import type { ToolsManager } from "./tools/manager.js";
@@ -202,10 +204,12 @@ export function apply(ctx: any, config: Config = {}) {
       }): Promise<{ ok: boolean; errors: string[] }>;
     };
   } = {};
+  const deriveDynamicRef: { current?: DeriveAutoSelect } = {};
   const deriveInheritance = createDeriveInheritance(ctx, {
     state: sessionState,
     logger: ctx.logger,
     getSkillSessions: () => deriveSkillSessionsRef.current,
+    dynamic: () => deriveDynamicRef.current,
   });
   // Tools 域（v13）：枚举全局工具注册表 → 按插件聚合成开关单元 → 按会话
   // restrict 该插件全部可继承工具。与会话存储共用同一实例（`tools` 域）。
@@ -460,8 +464,8 @@ export function apply(ctx: any, config: Config = {}) {
         const payload = input !== null && typeof input === "object" ? (input as Record<string, unknown>) : {};
         const sessionId = typeof payload.sessionId === "string" ? payload.sessionId.trim() : "";
         if (sessionId.length === 0) return { ok: false, errors: ["sessionId is required"] };
-        if (payload.mode !== "session" && payload.mode !== "workspace") {
-          return { ok: false, errors: ['mode must be "session" or "workspace"'] };
+        if (payload.mode !== "session" && payload.mode !== "workspace" && payload.mode !== "dynamic") {
+          return { ok: false, errors: ['mode must be "session" / "workspace" / "dynamic"'] };
         }
         await sessionState.ready();
         await sessionState.setDeriveMode(sessionId, payload.mode);
@@ -494,6 +498,18 @@ export function apply(ctx: any, config: Config = {}) {
   // 回填给 jev 的延迟访问器：此后 apply/rank 才能枚举能力。
   serviceRef.current = service;
   ctx.provide("capabilityPanel", () => service);
+  // v24 派生「动态选择」：spawn 前在 `tools/pre-execute` 抓首条任务并打分；
+  // 必须在 tools / mcp / skills 之后构造，这样 `installApply()` 注册的
+  // `agent/created` 监听器排在三个域之后，可 await 三域 remount / restrict 收敛。
+  const deriveAutoSelect = createDeriveAutoSelect(ctx, {
+    ctx,
+    state: sessionState,
+    ...(config.dshHome !== undefined ? { dshHome: config.dshHome } : {}),
+    service: () => serviceRef.current,
+    logger: ctx.logger,
+  });
+  deriveDynamicRef.current = deriveAutoSelect;
+  deriveAutoSelect.installApply();
   // 会话级开关记录的孤儿对账（见 session-state-reconcile.ts）：宿主没有"会话
   // 删除"事件，靠"存在性校验 + 24h 两阶段"清理；disposed 只触发"标记"核对
   // （关机时会对所有 live 会话成批发 disposed，不能当删除信号）。
@@ -517,6 +533,7 @@ export function apply(ctx: any, config: Config = {}) {
     disposeUsageGuard,
     () => disposePromptInjection(),
     () => deriveInheritance.dispose(),
+    () => deriveAutoSelect.dispose(),
     () => skillsRegistry.dispose(),
     () => skillSessions.dispose(),
     () => tools.dispose(),

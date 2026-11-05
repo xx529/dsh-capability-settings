@@ -102,8 +102,9 @@ danger-full-access 审批重试同一条命令即可。手动兜底通道仍是 
 | `src/client/*.tsx` | UI：`panel.tsx`（skills/quick 共用列表/详情）、`mcp-panel.tsx`、`quick-messages-panel.tsx`、`detail-shell.tsx`（v22 详情页共用外壳：`DetailPage` 固定头部三段 / `DetailTitleBar` / `DetailStrip` / `ToggleSwitch` / `MoreMenu` / `MetaPanel`）、`composer-*.tsx`、`composer-capability.tsx`（会话能力：首屏 `conversation.hero.options` 行内入口 + 背景模糊配置弹窗 + 顶部「能力」Tab 整页；Tab 打开时隐藏输入框）、`prompt-panel.tsx`（Prompt 域列表/详情/编辑器/可见范围弹层）、`prompt-tab.tsx`（首屏/会话内 Prompt Tab 卡片网格）、`select.tsx`（自绘下拉）、`panel-entry.tsx`（主区域页面 + 侧栏图标）、`styles.ts` |
 | `src/{skills,mcp,quick-messages,overrides,imports}/` | 各域宿主实现（配置读写、CRUD、挂载、探测、声明文件）；`skills/session.ts` = 会话级 Skills 开关（agent 作用域同名 runtime shadow，按会话落盘 + 项目默认投影） |
 | `src/prompt/` | **Prompt 域（v23）**：`paths.ts`（宿主语义 home / `.git` 项目根 / 目录链 / 候选）、`store.ts`（`prompt-policy.json` + 冻结清单 `prompt-manifests.json`，0600 + 原子写 + 锁）、`host.ts`（`loader.import` 取宿主 `dsh-agent-instructions`；虚拟 fs 只暴露允许集合 → 拼接/去重/预算/framing 全由宿主完成）、`manager.ts`（列表/读写/策略/冻结清单）、`inject.ts`（root `agent/pre-step` + `prepend`：首轮用宿主渲染结果替换 baseline 正文，之后丢弃增量并清 inbox；resume/compaction 按冻结正文重放；fail-open） |
-| `src/session-state.ts` | 会话级开关持久化（`<dshHome>/dsh-capability-settings/session-capabilities.json`：原子写 + 文件锁 + 懒加载 + 两阶段对账；Skills / MCP / Tools / 派生继承共用一个实例） |
-| `src/derive/manager.ts` | 派生继承（spawn-time snapshot）：`agent/created` 且 `source=startup` 时按父会话 `deriveMode` 把三域显式覆盖复制到 child 记录（或只写工作区快照）；早于三个域注册 |
+| `src/session-state.ts` | 会话级开关持久化（`<dshHome>/dsh-capability-settings/session-capabilities.json`：原子写 + 文件锁 + 懒加载 + 两阶段对账；Skills / MCP / Tools / 派生继承（含 `derivedDynamic`）共用一个实例） |
+| `src/derive/manager.ts` | 派生继承（spawn-time snapshot）：`agent/created` 且 `source=startup` 时按父会话 `deriveMode`（`session` / `workspace` / `dynamic`）把三域显式覆盖写入 child 记录；动态模式的打分在 `auto-select.ts`，这里消费结果并在失败/空集时回退 `session`；早于三个域注册 |
+| `src/derive/auto-select.ts` | **派生动态选择（v24）**：`tools/pre-execute`（被 await）抓 spawn 首条任务 → 工作区基线枚举 + Jev 打分 → pending；`agent/created` 晚期（三域之后）await `setSessionEnabled*` 收敛；失败 fail-open，不阻塞 spawn |
 | `src/session-state-reconcile.ts` | 孤儿记录对账调度（启动后 / 每 24h 存在性校验；`session/disposed` 只标记不删；持久化服务缺失/抛错一律保留） |
 | `src/shared/` | 通用：原子写、文件锁、工作区根（= 项目根）解析、agents home、JSON 配置、skill 定位/来源；`visibility.ts` = 能力可见性/每工作区默认纯计算（v21） |
 
@@ -297,6 +298,13 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
     （`派生继承会话` 默认 / `派生继承工作区`）+ 派生会话只读页；首屏 `158:14971` /
     `158:15092` / `158:15213`，能力页 `158:13729` / `158:13847`，派生页 `158:13965`，
     状态板 `158:15383`；预览图 `docs/figma/preview/v19-*`。
+  - `Capability Panel · 派生动态选择 v24（草案，已落代码 Unreleased）`（page `225:2`）：第三种派生模式
+    「动态选择」——spawn 时用首条任务在**工作区默认能力**上逐项打分，≥ 阈值才启用；空集 /
+    Jev 不可用 / 超时回退「派生继承会话」（复制父会话显式能力）。6 帧（含规范板）：首屏下拉三项
+    `225:3` / 菜单收起 `225:134` / 派生会话成功 `225:257` / 回退 `225:374` / 能力页 rail
+    `225:562` / 规范板 `225:504`；预览图 `docs/figma/preview/v24-*`。实现：
+    `src/derive/auto-select.ts` + `src/derive/manager.ts` + `src/session-state.ts`（`derivedDynamic`）
+    + `src/client/composer-capability.tsx`。
   - `Capability Dock · 首屏入口 v14`（page `134:8699`）：**旧实现基线**（工具行 icon+计数胶囊）：
     4 帧 `134:8700` / `134:8942` / `134:9184` / `134:9426`；预览图 `docs/figma/preview/v14-*`；
     4 帧 scene JSON 已导出（`docs/figma/scenes/v14-*.scene.json`，97/283/205/97 节点，

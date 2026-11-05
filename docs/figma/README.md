@@ -1,4 +1,4 @@
-# Figma 原型（Dock v5 · 能力面板 v6–v8 · Jev/能力决策 v9–v11 · Skill 来源 v12 · 首屏入口 v14–v17 过程稿 / v18 实现基线 · 派生继承 v19 实现定稿 · 详情页内容优先 v22 草案 · Prompt 指令域 v23 草案）
+# Figma 原型（Dock v5 · 能力面板 v6–v8 · Jev/能力决策 v9–v11 · Skill 来源 v12 · 首屏入口 v14–v17 过程稿 / v18 实现基线 · 派生继承 v19 实现定稿 · 详情页内容优先 v22 草案 · Prompt 指令域 v23 草案 · 派生动态选择 v24 草案）
 
 本目录是能力面板相关 UI 的 Figma 设计源，供人工查看 / 未来智能体继续改原型：
 
@@ -90,6 +90,20 @@
   之后丢弃增量消息 + 清 inbox（冻结）；P2 面板 Prompt 域、P3 首屏 / 会话内 Tab、注入层均见
   `src/prompt/*` 与 `src/client/prompt-panel.tsx` / `prompt-tab.tsx`；验证 `notes/verify/v25-prompt.mjs`。
   scene JSON 未导出（草案阶段与 v19/v21/v22 同口径，确认后按 `tools/export-scene.js` 补）。
+- **Capability Panel · 派生动态选择 v24（草案，已落代码 Unreleased）**（page `225:2`）：**第三种派生模式**——
+  在现有「派生继承会话 / 派生继承工作区」下拉里新增「动态选择」：spawn 时用子 agent 首条任务
+  （`spawn_teammate` / `subagent` 的 `prompt`）在**工作区默认能力**（Skills / MCP / Tools）上逐项
+  打分，score ≥ 阈值才启用；阈值取「Jev 模型」配置页的相关度阈值（默认 0.50，菜单 / 派生页只读
+  展示）；空集 / Jev 未配置 / 超时 / 异常 → **回退「派生继承会话」**（复制父会话显式能力快照）；
+  `ralph` / `workflow` 的逐 child 任务文本拿不到，按回退处理。打分在 spawn 时冻结，子 agent 后续
+  消息不重算、不重复计费；首轮创建会等待打分（用户已接受）。
+  5 个 1440×900 交互帧（含能力页 rail）+ 1 个规范板：首屏下拉三项 `225:3`、菜单收起 `225:134`、
+  派生会话成功 `225:257`、回退 `225:374`、能力页 rail `225:562`、规范板 `225:504`。
+  预览图 `preview/v24-01..06`。scene JSON 未导出（草案阶段同 v19/v21/v22 口径，确认后按
+  `tools/export-scene.js` 补）。**已落代码（Unreleased）**：宿主 `src/derive/auto-select.ts` +
+  `src/derive/manager.ts` + `src/session-state.ts`（`derivedDynamic`）；客户端
+  `src/client/composer-capability.tsx`（三项下拉 + 阈值只读行 + 动态/回退 banner）；
+  验证 `notes/verify/v24-dynamic-derive.mjs` 7/7。
 
 - **Capability Panel · 能力决策 v11**（page `56:7043`）：**能力决策基线**——统一命名「能力决策」、
   自动触发默认关闭、双门槛（最少触发字数 10 / 最少修改间隔字符数 4）、密钥路径

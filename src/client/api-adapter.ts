@@ -39,6 +39,7 @@ import type {
   ClientVisibilityMode,
   CreateSkillInput,
   DeriveGetResult,
+  DerivedInfo,
   DeriveMode,
   InstallResult,
   JevApplyResult,
@@ -707,16 +708,46 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
         const result = await rpc("session.deriveGet", { sessionId: deps.sessionId });
         if (!result.ok) throw new Error(result.errors.join("; "));
         const raw = unwrap(result) as Record<string, unknown>;
-        const mode: DeriveMode = raw.mode === "workspace" ? "workspace" : "session";
+        const toMode = (value: unknown): DeriveMode =>
+          value === "workspace" ? "workspace" : value === "dynamic" ? "dynamic" : "session";
+        const toDynamic = (value: unknown): DerivedInfo["dynamic"] => {
+          if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+          const source = value as Record<string, unknown>;
+          if (source.status !== "ok" && source.status !== "fallback") return undefined;
+          if (typeof source.threshold !== "number" || !Number.isFinite(source.threshold)) return undefined;
+          if (source.threshold < 0 || source.threshold > 1) return undefined;
+          const countsRaw =
+            source.counts !== null && typeof source.counts === "object" && !Array.isArray(source.counts)
+              ? (source.counts as Record<string, unknown>)
+              : {};
+          const countOf = (key: string): number => {
+            const count = countsRaw[key];
+            return typeof count === "number" && Number.isFinite(count) && count >= 0 ? Math.trunc(count) : 0;
+          };
+          const selected = typeof source.selected === "number" && Number.isFinite(source.selected) ? Math.trunc(source.selected) : 0;
+          const total = typeof source.total === "number" && Number.isFinite(source.total) ? Math.trunc(source.total) : 0;
+          return {
+            status: source.status,
+            ...(typeof source.reason === "string" && source.reason.length > 0 ? { reason: source.reason } : {}),
+            threshold: source.threshold,
+            selected: selected >= 0 ? selected : 0,
+            total: total >= 0 ? total : 0,
+            counts: { skills: countOf("skills"), mcp: countOf("mcp"), tools: countOf("tools") },
+            ...(source.fallback === "session" || source.fallback === "workspace" ? { fallback: source.fallback } : {}),
+            at: typeof source.at === "number" && Number.isFinite(source.at) ? source.at : 0,
+          };
+        };
+        const mode: DeriveMode = toMode(raw.mode);
         const derivedRaw =
           raw.derived !== null && typeof raw.derived === "object" ? (raw.derived as Record<string, unknown>) : undefined;
         const derived =
           derivedRaw === undefined
             ? undefined
             : {
-                mode: (derivedRaw.mode === "workspace" ? "workspace" : "session") as DeriveMode,
+                mode: toMode(derivedRaw.mode),
                 ...(typeof derivedRaw.from === "string" && derivedRaw.from.length > 0 ? { from: derivedRaw.from } : {}),
                 ...(typeof derivedRaw.at === "number" && Number.isFinite(derivedRaw.at) ? { at: derivedRaw.at } : {}),
+                ...(toDynamic(derivedRaw.dynamic) !== undefined ? { dynamic: toDynamic(derivedRaw.dynamic) } : {}),
               };
         return { mode, ...(derived !== undefined ? { derived } : {}) };
       },

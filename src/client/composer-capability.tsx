@@ -28,6 +28,7 @@ import type {
   ClientSkillSummary,
   ClientToolsUnit,
   DeriveGetResult,
+  DerivedInfo,
   DeriveMode,
   JevApplyPlanItem,
   JevApplyResult,
@@ -359,12 +360,78 @@ const DERIVE_CHANGED_EVENT = "skp-derive-changed";
 const DERIVE_LABEL: Record<DeriveMode, string> = {
   session: "派生继承会话",
   workspace: "派生继承工作区",
+  dynamic: "动态选择",
 };
 
 const DERIVE_DESC: Record<DeriveMode, string> = {
   session: "派生 agent 继承当前会话的能力（默认）",
   workspace: "派生 agent 使用工作区默认能力",
+  dynamic: "按子 agent 首条任务自动选择；未命中回退继承父 agent",
 };
+
+/** 动态选择 fallback 原因 → 中文文案（派生页 banner 用）。 */
+function dynamicReasonText(reason: string | undefined): string {
+  switch (reason) {
+    case "empty":
+      return "没有能力达到阈值";
+    case "no-config":
+    case "no-key":
+      return "Jev 未配置";
+    case "timeout":
+      return "打分超时";
+    case "missing":
+      return "未捕获到首条任务";
+    case "unavailable":
+      return "工作区能力不可用";
+    default:
+      return "打分失败";
+  }
+}
+
+/** 派生会话页 banner 的标题 / 副文案 / chip。 */
+function derivedBanner(info: DerivedInfo): { title: string; desc: string; chip?: string; warn?: boolean } {
+  const dynamic = info.dynamic;
+  if (info.mode === "dynamic") {
+    if (dynamic === undefined || dynamic.status === "ok") {
+      const selected = dynamic?.selected;
+      const threshold = dynamic?.threshold;
+      return {
+        title:
+          selected !== undefined
+            ? `动态选择：按首条任务从工作区默认能力中选出 ${selected} 项`
+            : "动态选择",
+        desc:
+          threshold !== undefined
+            ? `阈值 ${threshold.toFixed(2)} · 创建时快照 · 本页修改只影响本会话，不影响主对话`
+            : "创建时快照 · 本页修改只影响本会话，不影响主对话",
+        chip: "动态",
+      };
+    }
+    return {
+      title: "动态选择未命中，已回退继承父 agent",
+      desc: `${dynamicReasonText(dynamic.reason)} · 阈值 ${dynamic.threshold.toFixed(2)} · 回退快照 · 本页修改只影响本会话`,
+      chip: "已回退",
+      warn: true,
+    };
+  }
+  return {
+    title: DERIVE_LABEL[info.mode],
+    desc: "创建时快照 · 本页修改只影响本会话，不影响主对话",
+  };
+}
+
+/** 派生会话页 rail / 首屏静态标签（无下拉）。 */
+function derivedStaticLabel(info: DerivedInfo): string {
+  if (info.mode === "dynamic" && info.dynamic?.status === "fallback") return "动态选择 · 回退";
+  if (info.mode === "dynamic") return "动态选择 · 创建时快照";
+  return `${DERIVE_LABEL[info.mode]} · 创建时快照`;
+}
+
+/** 只用于首屏 hero 的短标签。 */
+function derivedShortLabel(info: DerivedInfo): string {
+  if (info.mode === "dynamic" && info.dynamic?.status === "fallback") return "动态选择 · 回退";
+  return DERIVE_LABEL[info.mode];
+}
 
 /** 会话级派生模式：读取 + 写入；写入后本地回显，失败留给 UI 提示。 */
 function useDeriveMode(api: CapabilityPanelApi | undefined, enabled = true) {
@@ -373,6 +440,8 @@ function useDeriveMode(api: CapabilityPanelApi | undefined, enabled = true) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const [reloadToken, setReloadToken] = useState(0);
+  /** 「Jev 模型」配置里的相关度阈值（动态选择菜单底部只读展示）。 */
+  const [threshold, setThreshold] = useState<number | undefined>(undefined);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -381,6 +450,34 @@ function useDeriveMode(api: CapabilityPanelApi | undefined, enabled = true) {
       mountedRef.current = false;
     };
   }, []);
+
+  // 阈值来源：Jev 配置页的 `decisionThreshold`；配置保存事件后刷新（与 hero 的
+  // 能力决策面板同一数据源）。失败保持 undefined → 菜单显示「—」。
+  useEffect(() => {
+    if (!enabled || typeof window === "undefined") return;
+    const jev = api?.jev;
+    if (jev === undefined || typeof jev.getConfig !== "function") return;
+    let cancelled = false;
+    const load = () => {
+      jev
+        .getConfig()
+        .then((view) => {
+          if (cancelled || !mountedRef.current) return;
+          const value = view.decisionThreshold;
+          setThreshold(typeof value === "number" && Number.isFinite(value) ? value : 0.5);
+        })
+        .catch(() => {
+          /* 阈值展示失败不阻断派生设置 */
+        });
+    };
+    load();
+    const onChanged = () => load();
+    window.addEventListener(JEV_CONFIG_CHANGED_EVENT, onChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(JEV_CONFIG_CHANGED_EVENT, onChanged);
+    };
+  }, [api, enabled]);
 
   useEffect(() => {
     if (!enabled) {
@@ -444,7 +541,7 @@ function useDeriveMode(api: CapabilityPanelApi | undefined, enabled = true) {
     [api],
   );
 
-  return { info, loading, pending, error, setMode };
+  return { info, loading, pending, error, setMode, threshold };
 }
 
 /**
@@ -461,6 +558,7 @@ function DeriveModeSelect({
   variant = "hero",
   disabled = false,
   title,
+  threshold,
 }: {
   value: DeriveMode;
   loading?: boolean;
@@ -469,6 +567,8 @@ function DeriveModeSelect({
   variant?: "hero" | "rail";
   disabled?: boolean;
   title?: string;
+  /** 当前「Jev 模型」配置的相关度阈值（只读展示；undefined = —）。 */
+  threshold?: number;
 }) {
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState<{ left: number; top: number; width: number } | undefined>(undefined);
@@ -520,7 +620,8 @@ function DeriveModeSelect({
     const vh = typeof window === "undefined" ? 900 : window.innerHeight;
     const left = Math.max(8, Math.min(rect.left, vw - 8 - width));
     const below = rect.bottom + 6;
-    const menuHeight = 152;
+    // 三项 + 底部阈值行（v24）；按最坏情况高估，避免向上弹出时跳动。
+    const menuHeight = 232;
     const top = below + menuHeight <= vh - 8 ? below : Math.max(8, rect.top - 6 - menuHeight);
     setAnchor({ left, top, width });
     setOpen(true);
@@ -575,6 +676,14 @@ function DeriveModeSelect({
               </button>
             );
           })}
+          {/* v24：阈值只读展示（来源「Jev 模型」配置；拖动结果面板滑杆不回写）。 */}
+          <span className="skp-derive-threshold" role="note">
+            <span className="skp-derive-threshold-label">阈值</span>
+            <span className="skp-derive-threshold-value">
+              {threshold !== undefined && Number.isFinite(threshold) ? threshold.toFixed(2) : "—"}
+            </span>
+            <span className="skp-derive-threshold-source">取自「Jev 模型」配置</span>
+          </span>
         </div>
       )}
     </div>
@@ -2166,6 +2275,7 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
   const [resetBusy, setResetBusy] = useState(false);
   // 派生继承：主对话显示下拉；派生会话只读展示创建时的模式。
   const derive = useDeriveMode(api, mode === "view" || mode === "modal");
+  const derivedHead = derive.info?.derived !== undefined ? derivedBanner(derive.info.derived) : undefined;
   // Prompt 域（v23）：面板挂载时拉一次；`view` 为只读页（数据以 list().frozen 为准）。
   const prompt = usePromptTabData(api, mode === "view");
   const readOnlyPrompt = mode === "view";
@@ -2247,10 +2357,20 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
         </div>
       </div>
 
-      {derive.info?.derived !== undefined && (mode === "view" || mode === "modal") && (
-        <div className="skp-derive-banner" role="note">
-          <span className="skp-derive-banner-title">{DERIVE_LABEL[derive.info.derived.mode]}</span>
-          <span className="skp-derive-banner-desc">创建时快照 · 本页修改只影响本会话，不影响主对话</span>
+      {derivedHead !== undefined && (mode === "view" || mode === "modal") && (
+        <div
+          className={`skp-derive-banner${derivedHead.warn === true ? " skp-derive-banner-warn" : ""}`}
+          role="note"
+        >
+          <span className="skp-derive-banner-title">{derivedHead.title}</span>
+          <span className="skp-derive-banner-desc">{derivedHead.desc}</span>
+          {derivedHead.chip !== undefined && (
+            <span
+              className={`skp-derive-banner-chip${derivedHead.warn === true ? " skp-derive-banner-chip-warn" : ""}`}
+            >
+              {derivedHead.chip}
+            </span>
+          )}
         </div>
       )}
 
@@ -2375,7 +2495,7 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
             className="skp-derive-static skp-derive-rail-static"
             title="派生会话：创建时的继承方式已固定；本页修改只影响本会话"
           >
-            {DERIVE_LABEL[derive.info.derived.mode]} · 创建时快照
+            {derivedStaticLabel(derive.info.derived)}
           </span>
         ) : (
           <DeriveModeSelect
@@ -2384,6 +2504,7 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
             loading={derive.loading}
             pending={derive.pending}
             title={derive.error ?? undefined}
+            threshold={derive.threshold}
             onChange={(next) => void derive.setMode(next)}
           />
         )}
@@ -2974,7 +3095,7 @@ function EntryBody({
               className="skp-derive-static skp-derive-static-hero"
               title="派生会话：创建时的继承方式已固定，本页修改只影响本会话"
             >
-              {DERIVE_LABEL[derive.info.derived.mode]}
+              {derivedShortLabel(derive.info.derived)}
             </span>
           ) : (
             <DeriveModeSelect
@@ -2983,6 +3104,7 @@ function EntryBody({
               loading={derive.loading}
               pending={derive.pending}
               title={derive.error ?? undefined}
+              threshold={derive.threshold}
               onChange={(mode) => void derive.setMode(mode)}
             />
           )}

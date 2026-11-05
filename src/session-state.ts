@@ -70,11 +70,37 @@ export const SESSION_STATE_VERSION = 1;
  * 派生继承模式：新派生的 subagent / teammate 在创建那一刻继承什么。
  *
  * - `session`（默认）：复制当前会话的显式能力覆盖（Skills / MCP / Tools）；
- * - `workspace`：不复制，子 agent 使用工作区 / 项目默认能力。
+ * - `workspace`：不复制，子 agent 使用工作区 / 项目默认能力；
+ * - `dynamic`（v24）：按子 agent 首条任务在工作区默认能力上打分，只启用
+ *   `score >= 阈值` 的能力；空集 / Jev 不可用 / 超时时回退 `session`。
  *
  * 只影响创建时刻，已存在的派生 agent 不受影响。
  */
-export type DeriveMode = "session" | "workspace";
+export type DeriveMode = "session" | "workspace" | "dynamic";
+
+/** 动态选择的创建时结果（派生会话页只读展示；不参与后续创建）。 */
+export interface DerivedDynamicInfo {
+  /** `ok` = 按首条任务选出并应用；`fallback` = 已回退继承策略。 */
+  status: "ok" | "fallback";
+  /**
+   * fallback 原因码（诊断 / UI 文案用）：
+   * `no-config` | `no-key` | `timeout` | `error` | `empty` | `missing` |
+   * `unavailable`。
+   */
+  reason?: string;
+  /** 本次使用的相关度阈值（0–1）。 */
+  threshold: number;
+  /** 达到阈值的已启用量。 */
+  selected: number;
+  /** 参与打分的候选总数。 */
+  total: number;
+  /** 三域各自选中数。 */
+  counts: { skills: number; mcp: number; tools: number };
+  /** fallback 时实际回退到的策略（`session` / `workspace`）。 */
+  fallback?: "session" | "workspace";
+  /** 写入时间（毫秒）。 */
+  at: number;
+}
 
 /** 派生继承模式的默认值（与 UI 下拉的默认选中项一致）。 */
 export const DEFAULT_DERIVE_MODE: DeriveMode = "session";
@@ -146,6 +172,8 @@ export interface SessionStateEntry {
   derivedFrom?: string;
   /** 派生快照写入时间（毫秒）。 */
   derivedAt?: number;
+  /** 动态选择的创建时结果（仅 `derivedMode === "dynamic"`；只读展示）。 */
+  derivedDynamic?: DerivedDynamicInfo;
   /** 两阶段对账的"首次发现不存在"时间戳；确认存在后清除。 */
   missingSince?: number;
 }
@@ -213,13 +241,16 @@ export interface SessionStateStore {
   /** 某会话的派生继承模式（缺省 `session`；调用方先 `await ready()`）。 */
   deriveMode(sessionId: string): DeriveMode;
   /** 某会话作为派生会话的创建时信息（无记录 / 非派生会话时返回 undefined）。 */
-  derivedInfo(sessionId: string): { mode: DeriveMode; from?: string; at?: number } | undefined;
+  derivedInfo(
+    sessionId: string,
+  ): { mode: DeriveMode; from?: string; at?: number; dynamic?: DerivedDynamicInfo } | undefined;
   /** 写 / 清除本会话的派生继承模式（`undefined` = 恢复默认 `session`）。 */
   setDeriveMode(sessionId: string, mode: DeriveMode | undefined, meta?: SessionStateMeta): Promise<void>;
   /**
    * 创建派生会话时写入一次性快照（**一次落盘**）：
-   * 记录创建模式 / 来源，并在 `mode === "session"` 时复制父会话的显式覆盖。
-   * 不复制 `deriveMode` 本身（子会话对自己后代的模式仍按默认）。
+   * 记录创建模式 / 来源；`session` 与 `dynamic` 会复制/写入三域开关，
+   * `workspace` 不写开关。不复制 `deriveMode` 本身（子会话对自己后代的模式
+   * 仍按默认）。
    */
   seedDerived(
     sessionId: string,
@@ -231,6 +262,7 @@ export interface SessionStateStore {
       tools?: Readonly<Record<string, boolean>>;
     },
     meta?: SessionStateMeta,
+    dynamic?: DerivedDynamicInfo,
   ): Promise<void>;
   /**
    * 一次性 unit id 迁移（D2）：把 `plugin:<旧 display>` 归一为 `plugin:<包名>`，
@@ -288,6 +320,36 @@ function sanitizeToggles(raw: unknown): Record<string, boolean> | undefined {
   return Object.keys(toggles).length > 0 ? toggles : undefined;
 }
 
+/** 单条动态选择结果清洗：形状不合法整条丢弃（只读展示用，不阻塞派生）。 */
+function sanitizeDynamicInfo(raw: unknown): DerivedDynamicInfo | undefined {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const source = raw as Record<string, unknown>;
+  if (source.status !== "ok" && source.status !== "fallback") return undefined;
+  if (typeof source.threshold !== "number" || !Number.isFinite(source.threshold)) return undefined;
+  if (source.threshold < 0 || source.threshold > 1) return undefined;
+  const selected = typeof source.selected === "number" && Number.isFinite(source.selected) ? source.selected : 0;
+  const total = typeof source.total === "number" && Number.isFinite(source.total) ? source.total : 0;
+  const countsRaw =
+    source.counts !== null && typeof source.counts === "object" && !Array.isArray(source.counts)
+      ? (source.counts as Record<string, unknown>)
+      : {};
+  const countOf = (key: string): number => {
+    const value = countsRaw[key];
+    return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : 0;
+  };
+  const info: DerivedDynamicInfo = {
+    status: source.status,
+    threshold: source.threshold,
+    selected: selected >= 0 ? Math.trunc(selected) : 0,
+    total: total >= 0 ? Math.trunc(total) : 0,
+    counts: { skills: countOf("skills"), mcp: countOf("mcp"), tools: countOf("tools") },
+    at: typeof source.at === "number" && Number.isFinite(source.at) ? source.at : 0,
+  };
+  if (typeof source.reason === "string" && source.reason.length > 0) info.reason = source.reason;
+  if (source.fallback === "session" || source.fallback === "workspace") info.fallback = source.fallback;
+  return info;
+}
+
 /** 单条记录清洗：非法形状丢弃，未知字段忽略。 */
 function sanitizeEntry(raw: unknown): SessionStateEntry | undefined {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
@@ -316,10 +378,14 @@ function sanitizeEntry(raw: unknown): SessionStateEntry | undefined {
     }
     entry.tools = canonicalTools;
   }
-  if (typeof source.deriveMode === "string" && (source.deriveMode === "session" || source.deriveMode === "workspace")) entry.deriveMode = source.deriveMode;
-  if (typeof source.derivedMode === "string" && (source.derivedMode === "session" || source.derivedMode === "workspace")) entry.derivedMode = source.derivedMode;
+  const isDeriveMode = (value: unknown): value is DeriveMode =>
+    value === "session" || value === "workspace" || value === "dynamic";
+  if (isDeriveMode(source.deriveMode)) entry.deriveMode = source.deriveMode;
+  if (isDeriveMode(source.derivedMode)) entry.derivedMode = source.derivedMode;
   if (typeof source.derivedFrom === "string" && source.derivedFrom.length > 0) entry.derivedFrom = source.derivedFrom;
   if (typeof source.derivedAt === "number" && Number.isFinite(source.derivedAt)) entry.derivedAt = source.derivedAt;
+  const dynamic = sanitizeDynamicInfo(source.derivedDynamic);
+  if (dynamic !== undefined) entry.derivedDynamic = dynamic;
   if (typeof source.missingSince === "number" && Number.isFinite(source.missingSince)) entry.missingSince = source.missingSince;
   // 完全空的记录没有保存价值（只有 meta 也不影响语义，但会让文件膨胀）。
   if (
@@ -329,6 +395,7 @@ function sanitizeEntry(raw: unknown): SessionStateEntry | undefined {
     entry.deriveMode === undefined &&
     entry.derivedMode === undefined &&
     entry.derivedFrom === undefined &&
+    entry.derivedDynamic === undefined &&
     entry.missingSince === undefined
   ) {
     return undefined;
@@ -354,7 +421,14 @@ function sanitizeSnapshot(raw: Record<string, unknown>): SessionStateSnapshot {
 /** 记录是否已经没有任何开关（用于"清空后删整条"）。 */
 function isEmptyEntry(entry: SessionStateEntry): boolean {
   if (entry.missingSince !== undefined) return false;
-  if (entry.deriveMode !== undefined || entry.derivedMode !== undefined || entry.derivedFrom !== undefined) return false;
+  if (
+    entry.deriveMode !== undefined ||
+    entry.derivedMode !== undefined ||
+    entry.derivedFrom !== undefined ||
+    entry.derivedDynamic !== undefined
+  ) {
+    return false;
+  }
   return (
     Object.keys(entry.skills ?? {}).length === 0 &&
     Object.keys(entry.mcp ?? {}).length === 0 &&
@@ -522,13 +596,16 @@ export function createSessionState(deps: SessionStateDeps = {}): SessionStateSto
       return image.sessions[sessionId]?.deriveMode ?? DEFAULT_DERIVE_MODE;
     },
 
-    derivedInfo(sessionId: string): { mode: DeriveMode; from?: string; at?: number } | undefined {
+    derivedInfo(
+      sessionId: string,
+    ): { mode: DeriveMode; from?: string; at?: number; dynamic?: DerivedDynamicInfo } | undefined {
       const entry = image.sessions[sessionId];
       if (entry?.derivedMode === undefined) return undefined;
       return {
         mode: entry.derivedMode,
         ...(entry.derivedFrom !== undefined ? { from: entry.derivedFrom } : {}),
         ...(entry.derivedAt !== undefined ? { at: entry.derivedAt } : {}),
+        ...(entry.derivedDynamic !== undefined ? { dynamic: { ...entry.derivedDynamic, counts: { ...entry.derivedDynamic.counts } } } : {}),
       };
     },
 
@@ -544,13 +621,15 @@ export function createSessionState(deps: SessionStateDeps = {}): SessionStateSto
       await persist();
     },
 
-    async seedDerived(sessionId, from, mode, toggles, meta): Promise<void> {
+    async seedDerived(sessionId, from, mode, toggles, meta, dynamic): Promise<void> {
       await ready();
       const entry = ensureEntry(sessionId, meta);
       entry.derivedMode = mode;
       entry.derivedFrom = from;
       entry.derivedAt = now();
-      if (mode === "session") {
+      if (dynamic !== undefined) entry.derivedDynamic = { ...dynamic, counts: { ...dynamic.counts } };
+      else delete entry.derivedDynamic;
+      if (mode !== "workspace") {
         const skills = { ...(toggles.skills ?? {}) };
         const mcp = { ...(toggles.mcp ?? {}) };
         const tools = { ...(toggles.tools ?? {}) };

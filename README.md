@@ -69,7 +69,7 @@ Skills / MCP / Tools（Tools 以插件为单元），一次请求批量打 0–1
 | **能力全局默认 / 可见性**（v20.1 B2 Skills、v20.2 MCP、v21 扩到 Tools 与按工作区可见性） | `<dshHome>/dsh-capability-settings/capability-global-overrides.json`（v2：`{"version":2,"skills":[…],"mcp":[…],"tools":[…],"visibility":{"skills|mcp|tools":{"<name>":{"mode":"all|selected|none","workspaces":{"<workspace path>":{"visible":true,"defaultEnabled":false}}}}}}`；空名单/空 visibility 不落字段；目录 `700` / 文件 `600`、原子写 + 文件锁；v1 文件读取兼容 = 全部可见；不改技能文件 / 不改注入方配置、不卸载实例） | — |
 | 项目级「默认关闭」声明（MCP 面板的「默认」开关 + Skills / Tools 工作区开关；B2 增 `enabledSkills`、v20.2 增 `enabledMcp`、v21 增 `tools`/`enabledTools`） | `<dshHome>/dsh-capability-settings/capability-overrides.json`（一个文件按**工作区目录**分 key：`projects.<工作区>...` / `.skills` / `.tools`（禁用）/ `.enabledSkills` / `.enabledMcp` / `.enabledTools`（重新打开）） | 旧项目内 `.agents/capability-overrides.json`（兼容 `.dsh` → `.claude`）：只读兼容，首次写入时把内容并入统一存储并删除旧文件 |
 | 项目级「全局能力引用」声明（MCP 的「导入到本项目」） | `<工作区>/.agents/capability-imports.json` | — |
-| 会话级能力开关（Skills / MCP / Tools 三域 + 派生继承设置，按 sessionId） | `<dshHome>/dsh-capability-settings/session-capabilities.json`（`version: 1`，记录内 `skills` / `mcp` / `tools` / `deriveMode` / `derivedMode` / `derivedFrom` / `derivedAt`） | — |
+| 会话级能力开关（Skills / MCP / Tools 三域 + 派生继承设置，按 sessionId） | `<dshHome>/dsh-capability-settings/session-capabilities.json`（`version: 1`，记录内 `skills` / `mcp` / `tools` / `deriveMode` / `derivedMode` / `derivedFrom` / `derivedAt` / `derivedDynamic`） | — |
 | **Prompt** 策略层（v23：全局可见范围 + 每工作区默认 + 项目级默认 + 会话首屏显式选择） | `<dshHome>/dsh-capability-settings/prompt-policy.json`（`{"version":1,"visibility":{"user-global|agents-global":{...}},"projects":{"<项目根>":{"defaults":{"<文件绝对路径>":false}}},"sessions":{"<sessionId>":{"selected":[…],"cwd"}}}`；目录 `700` / 文件 `600`、原子写 + 文件锁；损坏降级为空策略） | — |
 | **Prompt** 会话冻结清单（首轮注入后只读） | `<dshHome>/dsh-capability-settings/prompt-manifests.json`（`{version,sessions:{<sessionId>:{at,cwd,files[{path,displayPath,order,bytes,digest}],omitted,truncated,text}}}`；会话首轮写一次，之后不再变化） | — |
 | Tools 归属扫描缓存（自动发现） | `<dshHome>/dsh-capability-settings/tool-attribution.json`（`version: 1`；包名+version+mtime+宿主版本失效；目录 `700` / 文件 `600`、原子写 + 锁；损坏自动重建） | — |
@@ -798,18 +798,28 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   `fork` 出的子会话是新 id；默认的「派生继承会话」会在创建那一刻复制父会话的
   显式覆盖，选择「派生继承工作区」则不复制（见上条派生继承）。
 
-- **派生继承（v19，spawn-time snapshot）**：主对话的「本会话能力」工具行右端与
-  首屏行各有一个下拉，`派生继承会话`（默认）/ `派生继承工作区`。**继承会话** =
-  创建 subagent / teammate 时：Skills 按**父会话此刻模型可见的技能集合**投影到
-  child 自己的目录（父可见 → 子可见，父不可见 → 子关闭），MCP / Tools 复制父会话
-  显式覆盖；**继承工作区** = 不复制，子 agent 使用工作区 / 项目默认能力。
+- **派生继承（v24，spawn-time snapshot）**：主对话的「本会话能力」工具行右端与
+  首屏行各有一个下拉，`派生继承会话`（默认）/ `派生继承工作区` / `动态选择`。
+  **继承会话** = 创建 subagent / `spawn_teammate` 时：Skills 按**父会话此刻模型
+  可见的技能集合**投影到 child 自己的目录（父可见 → 子可见，父不可见 → 子关闭），
+  MCP / Tools 复制父会话显式覆盖；**继承工作区** = 不复制，子 agent 使用工作区 /
+  项目默认能力；**动态选择** = 用 spawn 的第一条任务文本，在工作区默认能力
+  （Skills / MCP / Tools）上逐项跑 Jev 相关度，`score ≥ 阈值` 才启用（阈值取
+  「Jev 模型」配置页的 `decisionThreshold`，默认 `0.50`，菜单 / 派生页只读展示）；
+  空集 / Jev 未配置 / 超时 / 异常时**回退「派生继承会话」**（复制父会话显式快照；
+  跨项目根时回退工作区默认）。`ralph` / `workflow` 的逐 child 任务文本不在工具
+  参数里，按回退处理；覆盖 `subagent`（spawn / fork）与 `spawn_teammate` 两条路径。
   只在子 agent 创建那一刻生效（`agent/created` + `source=startup`）：
   `resume` 不重新继承，已存在的派生 agent 不受影响，切换下拉也只影响之后创建的
-  child。派生会话页只读展示创建时的模式（`派生继承会话 · 创建时快照`），不提供
-  可编辑开关；父 / 子工作区目录不同时自动降级为工作区默认。持久化字段在
-  `session-capabilities.json` 的会话记录：`deriveMode`（本会话设置）、
-  `derivedMode` / `derivedFrom` / `derivedAt`（派生快照）；RPC 为
-  `session.deriveGet` / `session.deriveSet`。
+  child；动态选择在 spawn 时冻结，child 后续消息不重算、不重复请求 Jev。
+  派生会话页只读展示创建时的模式与结果（成功：`动态选择 · 创建时快照` + 选中数 /
+  阈值；回退：琥珀色提示 + `已回退` chip），不提供可编辑开关；父 / 子工作区目录
+  不同时自动降级为工作区默认。持久化字段在 `session-capabilities.json` 的会话记录：
+  `deriveMode`（本会话设置）、`derivedMode` / `derivedFrom` / `derivedAt` /
+  `derivedDynamic`（派生快照，含 `status` / `reason` / `threshold` / `selected` /
+  `total` / `counts` / `fallback`）；RPC 为 `session.deriveGet` /
+  `session.deriveSet`。**成本与隐私**：动态选择会把委派任务文本发给 Jev，并阻塞
+  spawn 到打分完成（上限 8s）；失败只回退，不阻塞子 agent 创建。
 
 ### 🧭 Jev 能力决策：按输入草稿为本会话预选能力
 

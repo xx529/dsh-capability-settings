@@ -3,7 +3,7 @@
 | 项 | 值 |
 |---|---|
 | 文档 ID | `docs/architecture/agent-capability-inheritance.md`（本文件） |
-| 状态 | **v0.5（已实现：派生继承会话 / 派生继承工作区）**，2026-10-30 |
+| 状态 | **v0.6（已实现：派生继承会话 / 派生继承工作区 / 动态选择）**，2026-11-05 |
 | 作者 | Lead |
 | 上游依据 | 用户反馈（lead 的当前对话能力派生 agent 不继承）+ 本机真实团队运行数据（见附录 A）+ DSH 0.2.1-rc.2 / **0.2.1-rc.3** 源码取证（见附录 B） |
 | 下游任务 | phase 1 / phase 2 实现、tester、Figma（实现后同步配置面） |
@@ -92,6 +92,31 @@
   （child 创建快照）；RPC `session.deriveGet` / `session.deriveSet`。
 - 实现：`src/derive/manager.ts` 的 `agent/created` 监听器在 skills / mcp / tools
   监听器之前写快照；`src/session-state.ts` 的 `seedDerived` 一次落盘。
+
+### 1.7 实现补充（v0.6）：第三种模式「动态选择」
+
+用户 2026-11-05 拍板并在 v24 落代码。与 §5.4 早期 `inherit+auto` 提案的差异：
+**基线换成「工作区默认能力」**（不是父级生效集合的收窄），失败回退 `session`。
+
+- 启用方式：会话级 `deriveMode = "dynamic"`（第三个下拉项），只影响之后创建的
+  child；`resume` / 已有 child 不回溯。
+- 首条任务来源：父侧 `tools/pre-execute`（被 await 的 waterfall）读取
+  `spawn_teammate` / `subagent` 的 `args.prompt`；它等价于 child 第一条 user
+  message。子 agent 自己的 `agent/pre-step` 太晚（工具表已组装），不采用。
+- 打分：工作区基线（无会话覆盖）枚举 Skills / MCP / Tools → Jev 相关度 →
+  `score >= jev.json.decisionThreshold`（默认 `0.50`）才启用；阈值在菜单 /
+  派生页只读展示，改动入口是「Jev 模型」配置页。
+- 应用：`agent/created` 早期（三个域之前）seed child 记录；auto-select 的晚期
+  监听器（三个域之后）await 三域 `setSessionEnabled*`，保证首轮即按选择生效
+  （用户接受首轮创建变慢）。打分上限 8s，失败只回退、不阻塞 spawn。
+- 回退：空集 / Jev 未配置 / 超时 / 异常 / 未捕获首条任务 → `session`
+  （跨项目根 → `workspace`）；`ralph` / `workflow` 拿不到逐 child 任务文本，
+  按回退处理；`spawn_agent`（若新版宿主提供）与 `spawn_teammate` 同一白名单。
+- 持久化：`session-capabilities.json` 的 `derivedDynamic`（status / reason /
+  threshold / selected / total / counts / fallback）；客户端派生页按 status 展示
+  蓝色成功条 + `动态` chip 或琥珀色回退条 + `已回退` chip。
+- 实现：`src/derive/auto-select.ts`（新增）、`src/derive/manager.ts`、
+  `src/session-state.ts`、`src/client/composer-capability.tsx`。
 
 ---
 
@@ -581,6 +606,7 @@ spawn 工具调用
 | v0.3 | 2026-10-30 | 补充 Q9：子会话能力页面的编辑作用域（只读 / 子级本地覆盖 / owner 投影）待拍板，并修正 §7 的默认口径说明 |
 | v0.4 | 2026-10-30 | **选定 spawn-time 快照语义**：继承/不继承只作用于创建那一刻；创建后 lead 与 child 互不传播、child 页面独立；`resume` 不重新继承。取代 §3.4 热传播与 §5.3 owner 投影 |
 | v0.5 | 2026-10-30 | **实现定稿**：选项改为「派生继承会话 / 派生继承工作区」（去掉「派生模式」前置标题）；新增 §1.6 实现口径；代码落在 `derive/manager.ts` + `session-state.seedDerived` + `session.deriveGet/Set` + 首屏/能力页下拉 |
+| v0.6 | 2026-11-05 | **v24 落代码：第三种模式「动态选择」**（§1.7）：基线改为工作区默认能力；`tools/pre-execute` 抓首条任务 + `agent/created` 早期 seed / 晚期 await；失败回退 `session`；新增 `derive/auto-select.ts` 与 `derivedDynamic` 持久化；UI 三项下拉 + 只读阈值 + 动态/回退 banner |
 
 ---
 
