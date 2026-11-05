@@ -593,25 +593,6 @@ function PromptDetail({
           </span>
         </div>
 
-        <div className="skp-prompt-note" style={{ marginTop: 8, flex: "none" }}>
-          <span className="skp-prompt-note-title">首轮注入规则（由本插件按宿主语义复刻）</span>
-          <span>
-            顺序：$DSH_HOME/AGENTS.md → $DSH_AGENTS_HOME/AGENTS.md → 项目根到工作区目录逐级（每级 AGENTS.md →
-            CLAUDE.md → *.local.md）
-          </span>
-          <span>
-            去重：同一候选组内 trim 后内容 SHA-1 相同者只注入一次（CLAUDE.md 复制 AGENTS.md 时折叠）；全局与项目
-            <span className="skp-strip-strong">叠加注入</span>，不互相覆盖。
-          </span>
-          <span>
-            预算：默认 {formatSize(list.budget.maxBytes)}；超限先省略更宽泛的文件，再截断最具体的，并在正文写入 budget
-            提示。
-          </span>
-          <span>
-            上限：单文件 &gt; {formatSize(list.budget.maxSourceBytes)} 静默跳过（不注入，也不计入预算省略名单）。
-          </span>
-          {projectName !== undefined && <span>项目根：{list.projectRoot || projectName}</span>}
-        </div>
       </div>
     </DetailPage>
   );
