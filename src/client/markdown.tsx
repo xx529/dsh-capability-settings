@@ -5,7 +5,7 @@
  *   - ATX 标题 `#` ~ `###`（更深的标题降级为 h3）
  *   - 有序 / 无序列表（单层，不解析嵌套）
  *   - ``` 围栏代码块（不做语法高亮）
- *   - `>` 引用、`---` 分隔线、普通段落
+ *   - `>` 引用、`---` 分隔线、GFM 表格（表头 + 对齐分隔行 + 数据行）
  *   - 行内 `` `code` `` 与 `**bold**`
  *
  * 刻意**不**做的事：不解析内联 HTML、不调用 `dangerouslySetInnerHTML`、
@@ -69,6 +69,55 @@ function isBlockStart(line: string): boolean {
 
 function headingLevel(hashes: string): number {
   return Math.min(hashes.length, 3);
+}
+
+/** 按 `|` 拆分表格行（去首尾竖线、trim；支持 `\\|` 转义，不引入正则 lookbehind）。 */
+function splitTableRow(line: string): string[] {
+  let text = line.trim();
+  if (text.startsWith("|")) text = text.slice(1);
+  if (text.endsWith("|")) text = text.slice(0, -1);
+  const cells: string[] = [];
+  let current = "";
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === "\\" && text[index + 1] === "|") {
+      current += "|";
+      index += 1;
+      continue;
+    }
+    if (char === "|") {
+      cells.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
+/** 解析 GFM 对齐分隔行；不是分隔行时返回 undefined。 */
+function tableAlignments(line: string): Array<"left" | "center" | "right" | undefined> | undefined {
+  const trimmed = line.trim();
+  if (!trimmed.includes("|") && !trimmed.includes("-")) return undefined;
+  const cells = splitTableRow(trimmed);
+  if (cells.length === 0) return undefined;
+  const aligns: Array<"left" | "center" | "right" | undefined> = [];
+  for (const cell of cells) {
+    const match = /^(:?)-{3,}(:?)$/.exec(cell);
+    if (match === null) return undefined;
+    const left = match[1] === ":";
+    const right = match[2] === ":";
+    aligns.push(left && right ? "center" : left ? "left" : right ? "right" : undefined);
+  }
+  return aligns;
+}
+
+/** 当前行 + 下一行是否构成表格起始（表头行 → 分隔行）。 */
+function isTableStart(line: string, next: string | undefined): boolean {
+  if (next === undefined) return false;
+  if (!line.includes("|")) return false;
+  return tableAlignments(next) !== undefined;
 }
 
 /**
@@ -191,10 +240,69 @@ export function renderMarkdown(source: string): ReactNode {
       continue;
     }
 
+    // GFM 表格：表头行 + 分隔行 + 连续数据行（单元格内支持行内 code / bold）。
+    if (isTableStart(line, lines[i + 1])) {
+      const headers = splitTableRow(line);
+      const aligns = tableAlignments(lines[i + 1]) ?? [];
+      const rows: string[][] = [];
+      i += 1;
+      let rowCount = 0;
+      while (i < lines.length) {
+        const next = lines[i];
+        if (next.trim().length === 0) break;
+        // 连续两条分隔行视为无数据；遇到其它块级起始（标题/列表/围栏等）也收口。
+        if (rowCount > 0 && isBlockStart(next)) break;
+        if (!next.includes("|")) break;
+        if (tableAlignments(next) !== undefined) {
+          i += 1;
+          continue;
+        }
+        rows.push(splitTableRow(next));
+        rowCount += 1;
+        i += 1;
+      }
+      const alignStyle = (column: number): { textAlign?: "left" | "center" | "right" } => {
+        const align = aligns[column];
+        return align === undefined ? {} : { textAlign: align };
+      };
+      blocks.push(
+        <div key={`table-${blocks.length}`} className="skp-md-table-wrap">
+          <table className="skp-md-table">
+            <thead>
+              <tr>
+                {headers.map((cell, column) => (
+                  <th key={`th-${blocks.length}-${column}`} style={alignStyle(column)}>
+                    {renderInline(cell, `th-${blocks.length}-${column}`)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr key={`tr-${blocks.length}-${rowIndex}`}>
+                  {headers.map((_, column) => (
+                    <td key={`td-${blocks.length}-${rowIndex}-${column}`} style={alignStyle(column)}>
+                      {renderInline(row[column] ?? "", `td-${blocks.length}-${rowIndex}-${column}`)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      );
+      continue;
+    }
+
     // 段落：收集到空行或下一个块级起始为止；软换行按 CJK 规则拼接。
     const paragraph: string[] = [line.trim()];
     i += 1;
-    while (i < lines.length && lines[i].trim().length > 0 && !isBlockStart(lines[i])) {
+    while (
+      i < lines.length &&
+      lines[i].trim().length > 0 &&
+      !isBlockStart(lines[i]) &&
+      !isTableStart(lines[i], lines[i + 1])
+    ) {
       const previous = paragraph[paragraph.length - 1];
       paragraph[paragraph.length - 1] = joinSoft(previous, lines[i].trim());
       i += 1;

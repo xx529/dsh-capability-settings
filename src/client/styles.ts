@@ -616,6 +616,13 @@ button.skp-tag:focus-visible{outline:none;box-shadow:0 0 0 2px var(--skp-accent-
 .skp-md-quote{margin:0 0 12px;padding:2px 0 2px 12px;border-left:2px solid var(--skp-border-strong);color:var(--skp-text-3);}
 .skp-md-quote p{margin:0 0 4px;}
 .skp-md-hr{margin:14px 0;border:0;border-top:1px solid var(--skp-border);}
+.skp-md-table-wrap{margin:0 0 12px;overflow-x:auto;scrollbar-width:thin;}
+.skp-md-table{width:100%;border-collapse:collapse;font-size:11.5px;line-height:1.55;}
+.skp-md-table th,.skp-md-table td{border:1px solid var(--skp-border);padding:5px 8px;vertical-align:top;text-align:left;}
+.skp-md-table th{background:var(--skp-fill);font-weight:600;color:var(--skp-text);white-space:nowrap;}
+.skp-md-table td{color:var(--skp-text-2);}
+.skp-md-table tbody tr:nth-child(even) td{background:color-mix(in srgb,var(--skp-fill) 55%,transparent);}
+.skp-md-table .skp-md-inline-code{white-space:nowrap;}
 .skp-md-warn{margin:0 0 8px;font-size:11.5px;color:var(--skp-warn);}
 .skp-modal-text{margin:0;font-size:13.5px;line-height:1.6;color:var(--skp-text-2);}
 

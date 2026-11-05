@@ -30,6 +30,14 @@
   - `prompt-policy.json`：全局可见范围 + 每工作区默认 + 按宿主项目根的每文件默认 + 会话首屏显式选择；
   - `prompt-manifests.json`：会话首轮冻结清单（文件顺序/字节/SHA-1、omitted、truncated、正文）。
 
+### 修复
+
+- **Markdown 预览不渲染 GFM 表格**（用户反馈：Prompt 详情里的 `AGENTS.md` 表格显示成
+  `| 需求 | 首选 | … |` 原始管道符）：轻量渲染器补表格支持——表头 + 对齐分隔行 + 数据行，
+  支持 `:---:` / `---:` 对齐、单元格内行内 `code` / `**bold**` / `\|` 转义；宽表外层
+  `.skp-md-table-wrap` 横向滚动。Skills / MCP / Prompt 的 Markdown 预览同时生效。
+  验证 `notes/verify/v25-markdown-table.mjs` 7/7。
+
 ### 变更
 
 - **Prompt 详情页的「保存后：仅对新会话生效」不再常驻**：改为保存成功后在详情顶部弹出
