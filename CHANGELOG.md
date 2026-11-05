@@ -39,7 +39,7 @@
   `notes/verify/skill-sources/host-disk-name-mismatch.test.mjs` 28/28
   （含 flat 布局、覆盖创建、导出路径、删除无连带、未知名称仍 not found）。
 
-## [1.14.1] - 2026-11-05
+## [1.14.2] - 2026-11-05
 
 ### 修复
 
