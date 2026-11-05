@@ -39,6 +39,15 @@
   `notes/verify/skill-sources/host-disk-name-mismatch.test.mjs` 28/28
   （含 flat 布局、覆盖创建、导出路径、删除无连带、未知名称仍 not found）。
 
+## [1.14.6] - 2026-11-05
+
+### 内部
+
+- **补齐 v1.14.5 的 lib 清理**：1.14.5 只是在原 lib 上重新编译，`tsc` 不会删除
+  v1.14.4 误提交的 `lib/derive/auto-select.js` / `lib/types/derive/auto-select.d.ts`
+  （并行会话未提交源码的产物）。本版本在干净 worktree 里**删除 `lib/` 后完整重建**并提交，
+  确认 `lib` 只包含已提交源码的产物。并行会话的代码仍由它自己提交。
+
 ## [1.14.5] - 2026-11-05
 
 ### 内部
