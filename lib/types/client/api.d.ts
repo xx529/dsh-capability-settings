@@ -856,34 +856,9 @@ export interface SessionApi {
  * 派生继承模式：新派生的 subagent / teammate 在创建那一刻继承什么。
  *
  * - `session`（默认）：复制当前会话的显式能力覆盖；
- * - `workspace`：不复制，使用工作区 / 项目默认能力；
- * - `dynamic`（v24）：按子 agent 首条任务在工作区默认能力上打分，只启用
- *   `score >= 阈值` 的能力；空集 / Jev 不可用 / 超时回退 `session`。
+ * - `workspace`：不复制，使用工作区 / 项目默认能力。
  */
-export type DeriveMode = "session" | "workspace" | "dynamic";
-/** 动态选择结果（派生会话页只读展示；与宿主 `DerivedDynamicInfo` 同构）。 */
-export interface DerivedDynamicInfo {
-    /** `ok` = 按首条任务选出并应用；`fallback` = 已回退继承策略。 */
-    status: "ok" | "fallback";
-    /** fallback 原因码（UI 文案用）。 */
-    reason?: string;
-    /** 本次使用的相关度阈值（0–1）。 */
-    threshold: number;
-    /** 达到阈值的已启用量。 */
-    selected: number;
-    /** 参与打分的候选总数。 */
-    total: number;
-    /** 三域各自选中数。 */
-    counts: {
-        skills: number;
-        mcp: number;
-        tools: number;
-    };
-    /** fallback 时实际回退到的策略（`session` / `workspace`）。 */
-    fallback?: "session" | "workspace";
-    /** 写入时间（毫秒）。 */
-    at: number;
-}
+export type DeriveMode = "session" | "workspace";
 /** 派生会话的创建快照（只读；由宿主在 child 创建时落盘）。 */
 export interface DerivedInfo {
     /** 创建时实际使用的模式。 */
@@ -892,8 +867,6 @@ export interface DerivedInfo {
     from?: string;
     /** 快照写入时间（毫秒）。 */
     at?: number;
-    /** 动态选择的创建时结果（仅 `mode === "dynamic"`）。 */
-    dynamic?: DerivedDynamicInfo;
 }
 /** `session.deriveGet` 的返回。 */
 export interface DeriveGetResult {

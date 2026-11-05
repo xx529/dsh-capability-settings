@@ -2,13 +2,11 @@
  * 派生继承（spawn-time snapshot）：在子 agent 创建时按父会话的「派生继承模式」
  * 决定复制哪些会话级能力开关。
  *
- * 语义（v24）：
+ * 语义（用户 2026-10-30 拍板）：
  *
- *   - 主对话的 `deriveMode` 有三个值：
+ *   - 主对话的 `deriveMode` 只有两个值：
  *     `session`（默认）= 复制当前会话的显式覆盖（Skills / MCP / Tools）；
  *     `workspace` = 不复制，子 agent 使用工作区 / 项目默认；
- *     `dynamic` = 按子 agent 首条任务在工作区默认能力上打分，只启用达到阈值的
- *     能力；空集 / Jev 不可用 / 超时回退 `session`（跨项目根时回退 `workspace`）；
  *   - **只在 `agent/created` 且 `source === "startup"`（新创建）时生效**；
  *     `source === "resume"` 一律跳过——子会话记录里已有创建时快照；
  *   - 只影响之后创建的 child，已存在的 child 不回溯；
@@ -16,13 +14,10 @@
  *
  * 时序：本模块必须在 skills / mcp / tools 的 `agent/created` 监听器之前创建，
  * 这样监听器（被 cordis serial await）先把快照写进 child 的会话记录，三个域
- * 后续 hydrate 时就能读到同一份快照，无需 owner 投影或热传播。动态选择的
- * 打分在父侧 `tools/pre-execute` 完成（见 `derive/auto-select.ts`），这里只消费
- * 结果并 seed；三域的最终收敛由 auto-select 的晚期监听器 await。
+ * 后续 hydrate 时就能读到同一份快照，无需 owner 投影或热传播。
  *
  * @module dsh-capability-settings/derive/manager
  */
-import type { DynamicSelectHost } from "./auto-select.js";
 import type { SessionStateStore } from "../session-state.js";
 /** 结构化 logger 子集（缺省静默）。 */
 export interface DeriveInheritanceLogger {
@@ -50,11 +45,6 @@ export interface DeriveInheritanceDeps {
             errors: string[];
         }>;
     } | undefined;
-    /**
-     * v24 动态选择：惰性访问器（组合根在 skills / mcp / tools 之后才构造完整模块，
-     * 但 `agent/created` 事件发生在插件装配完成之后）。
-     */
-    dynamic?: () => DynamicSelectHost | undefined;
 }
 /** 生命周期句柄。 */
 export interface DeriveInheritance {

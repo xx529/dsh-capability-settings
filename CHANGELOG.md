@@ -39,6 +39,16 @@
   `notes/verify/skill-sources/host-disk-name-mismatch.test.mjs` 28/28
   （含 flat 布局、覆盖创建、导出路径、删除无连带、未知名称仍 not found）。
 
+## [1.14.5] - 2026-11-05
+
+### 内部
+
+- **重新生成 `lib/`，使其与已提交源码一致**：v1.14.4 构建时工作区里还有另一个并行会话
+  尚未提交的动态模型源码（`src/derive/auto-select.ts` 等），`pnpm build` 把这些**未提交
+  源码**的产物一起打进了 `lib/` 并随 tag 提交，导致 tag 的 `lib` 与 `src` 不匹配。
+  本版本在 `e32a6db` 的干净 worktree 里按已提交源码重新构建并提交 `lib/`；
+  并行会话的源码与产物由它自己提交，不受影响。
+
 ## [1.14.4] - 2026-11-05
 
 ### 修复
