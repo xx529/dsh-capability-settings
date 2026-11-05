@@ -27,6 +27,8 @@ import type {
   ClientPromptScope,
 } from "./api.js";
 import { formatSize } from "./skill-content.js";
+import { MarkdownPreview } from "./markdown.js";
+import { Modal } from "./modal.js";
 
 // ---------------------------------------------------------------------------
 // 图标（内联 SVG，颜色走 currentColor；与 composer-capability 的图标套系同档）
@@ -433,37 +435,67 @@ function ReadonlyPromptCard({ file, frozen }: { file: ClientPromptFile; frozen: 
   );
 }
 
-/** 只读正文预览（`frozen.text` 截断展示，不落会话日志、不可编辑）。 */
+/**
+ * 把宿主渲染的 baseline 正文整理成「可读的 Markdown」：
+ *
+ *   - 去掉插件控制的 `<system-reminder>` 包裹；
+ *   - 去掉固定 intro（"The following workspace instructions…" / replacement / budget 提示）；
+ *   - 每个文件的 `Instructions from: <path>` 升级成二级标题，正文按原 Markdown 渲染。
+ *
+ * 只影响展示，不改会话里实际注入的内容。
+ */
+function frozenPreviewMarkdown(text: string): string {
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  const out: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === "<system-reminder>" || trimmed === "</system-reminder>") continue;
+    if (
+      trimmed.startsWith("The following workspace instructions may be relevant") ||
+      trimmed.startsWith("This complete workspace instruction baseline replaces") ||
+      trimmed.startsWith("Workspace instructions were omitted or truncated") ||
+      trimmed.startsWith("Workspace instruction budget ")
+    ) {
+      continue;
+    }
+    const section = /^Instructions from: (.+)$/.exec(trimmed);
+    if (section !== null) {
+      out.push(`## ${section[1]}`);
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join("\n").trim();
+}
+
+/** 只读正文预览：Markdown 渲染 + 「查看全部」弹层；不落会话日志、不可编辑。 */
 function FrozenPreview({ text, fileCount }: { text: string; fileCount: number }) {
-  const LIMIT = 4000;
-  const shown = text.length > LIMIT ? text.slice(0, LIMIT) : text;
-  const lines = text.split("\n").length;
+  const [open, setOpen] = useState(false);
+  const source = frozenPreviewMarkdown(text);
+  const lines = source.split("\n").length;
   return (
-    <div className="skp-dock-rail" style={{ flexDirection: "column", alignItems: "stretch", gap: 6, maxHeight: 250, overflow: "hidden" }}>
-      <span className="skp-dock-rail-count">已注入内容预览 · 共 {fileCount} 个文件</span>
-      <pre
-        style={{
-          margin: 0,
-          overflow: "auto",
-          maxHeight: 170,
-          padding: "8px 10px",
-          borderRadius: 8,
-          background: "var(--dsw-alias-bg-layer-1,#fff)",
-          fontFamily: "var(--ds-font-family-code,ui-monospace,monospace)",
-          fontSize: 10.5,
-          lineHeight: "16px",
-          color: "var(--dsw-alias-label-secondary,#5b6472)",
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-        }}
-      >
-        {shown}
-        {text.length > LIMIT ? "\n…" : ""}
-      </pre>
-      <span className="skp-dock-rail-note">
-        只读预览 · 全文 {lines} 行{text.length > LIMIT ? `（已截断，仅显示前 ${LIMIT} 字）` : ""} · 不可修改 / 不可开关
-      </span>
-    </div>
+    <>
+      <div className="skp-dock-rail" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
+          <span className="skp-dock-rail-count">已注入内容预览 · 共 {fileCount} 个文件</span>
+          <span style={{ flex: "1 1 auto" }} />
+          <button type="button" className="skp-dock-link" onClick={() => setOpen(true)}>
+            查看全部
+          </button>
+        </div>
+        <div className="skp-prompt-frozen" style={{ maxHeight: 200, overflow: "hidden" }}>
+          <MarkdownPreview source={source} />
+        </div>
+        <span className="skp-dock-rail-note">只读预览 · 全文 {lines} 行 · 不可修改 / 不可开关</span>
+      </div>
+      {open && (
+        <Modal title={`已注入内容 · 共 ${fileCount} 个文件`} wide onClose={() => setOpen(false)}>
+          <div className="skp-prompt-frozen skp-prompt-frozen-full">
+            <MarkdownPreview source={source} />
+          </div>
+        </Modal>
+      )}
+    </>
   );
 }
 

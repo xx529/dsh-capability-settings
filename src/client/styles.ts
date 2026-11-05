@@ -478,6 +478,23 @@ export const SKP_CSS = `
 /* FINDING-02：会话「能力」Tab 1080 容器内宽 990 → 4 列需要 min ≤ (990-3×12)/4 = 238.5。
    卡片最小宽 240→228，1fr 拉伸后实际 ≈238（帧 05 的 4 列）；hero 模式仍是固定 4 列，不受影响。 */
 .skp-dock-panel-view .skp-dock-grid{max-height:none;overflow:visible;grid-template-columns:repeat(auto-fill,minmax(228px,1fr));gap:12px;padding:0;}
+/* Prompt 只读预览：Markdown 渲染容器。
+   composer 作用域没有 .skp-panel 的 --skp-* 令牌，这里按宿主 dsw 令牌补一层映射，
+   让 .skp-md 的标题 / 表格 / 引用在只读页同样可读。 */
+.skp-prompt-frozen{
+  --skp-text:var(--dsw-alias-label-primary,#e6e8eb);
+  --skp-text-2:var(--dsw-alias-label-secondary,#b3b8c2);
+  --skp-text-3:var(--dsw-alias-label-tertiary,#8b95a1);
+  --skp-border:var(--dsw-alias-border-l1,rgba(255,255,255,.1));
+  --skp-border-strong:var(--dsw-alias-border-l3,rgba(255,255,255,.18));
+  --skp-fill:var(--dsw-alias-bg-layer-1,rgba(255,255,255,.06));
+  padding:10px 12px;border-radius:8px;background:var(--dsw-alias-bg-layer-1,rgba(255,255,255,.04));
+  box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l1,rgba(255,255,255,.08));
+  overflow:auto;scrollbar-width:thin;
+}
+.skp-prompt-frozen-full{max-height:min(70vh,640px);}
+.skp-prompt-frozen .skp-md{font-size:11.5px;line-height:1.65;}
+.skp-prompt-frozen .skp-md-h1,.skp-prompt-frozen .skp-md-h2,.skp-prompt-frozen .skp-md-h3{margin-top:10px;}
 /* Prompt 网格：不参与 flex 分配，只读页的「已注入内容预览」紧跟卡片下一行。 */
 .skp-dock-grid-prompt{flex:0 0 auto;min-height:0;}
 .skp-dock-panel-view .skp-dock-card{min-height:100px;padding:10px 12px;border-radius:12px;}

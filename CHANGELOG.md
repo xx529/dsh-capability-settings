@@ -39,6 +39,20 @@
   `notes/verify/skill-sources/host-disk-name-mismatch.test.mjs` 28/28
   （含 flat 布局、覆盖创建、导出路径、删除无连带、未知名称仍 not found）。
 
+## [1.14.3] - 2026-11-05
+
+### 修复
+
+- **会话「能力」→ Prompt 只读页的「已注入内容预览」改为 Markdown 渲染 + 查看全部**
+  （用户反馈：预览是 `<pre>` 原文、且没有查看全部入口）：
+  - 预览用 `MarkdownPreview` 渲染，去掉插件控制的 `<system-reminder>` 包裹与固定 intro，
+    每个文件的 `Instructions from: <path>` 升级为二级标题，正文（含 GFM 表格）原样渲染；
+  - 右上角新增「查看全部」按钮，打开宽版弹层滚动查看完整注入内容（弹层内同样是 Markdown）；
+  - 只读页预览默认高度 200px，超出部分在弹层里查看；正文不再按 4000 字截断。
+  - composer 作用域补 `.skp-prompt-frozen` 的 `--skp-*` 令牌映射，保证 Markdown 在深色只读页可读。
+  验证 `notes/verify/v25-prompt-frozen.mjs` 5/5（Markdown 渲染 / framing 清理 / 表格 /
+  查看全部弹层 / 遮罩关闭）。
+
 ## [1.14.2] - 2026-11-05
 
 ### 修复
