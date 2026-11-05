@@ -3,6 +3,21 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 新增
+
+- **「Jev 模型」配置页可配置能力决策的初始相关度阈值**（用户反馈：首屏「✦ 能力决策」
+  结果面板的阈值初值固定 `0.50`，希望能在配置里改）：`jev.json` 新增 additive 字段
+  `decisionThreshold`（`0–1`，默认 `0.50`），宿主读取 / `setConfig` 校验（越界返回
+  `E_DECISION_THRESHOLD`，不落盘）、`getConfig` 视图回传；「Jev 模型」Tab 的
+  「能力决策」区新增**相关度阈值**滑杆（步长 `0.05`，随表单一起保存 / 恢复默认）；
+  首屏结果面板的初始阈值改读该配置（配置未就绪 / 旧宿主缺字段时兜底 `0.50`），
+  面板内拖动仍只影响本次、不回写配置。
+  验证：`pnpm typecheck` / `pnpm build`；本地 Jev 套件 `host-config` 82/82、
+  `client-adapter` 21/21、新增 `client-threshold` 9/9（配置页回显 / 保存载荷 /
+  首屏初值取自配置 / 旧宿主兜底）。
+
 ## [1.14.1] - 2026-11-05
 
 ### 修复

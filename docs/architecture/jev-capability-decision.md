@@ -239,6 +239,7 @@ export interface JevConfig {
   apiKey?: string;       // 直接填写；落盘，文件 0600
   apiKeyEnv?: string;    // 默认 TYPESAFE_API_KEY；env 优先于文件
   autoTrigger: JevAutoTrigger;
+  decisionThreshold: number; // 能力决策结果面板初始阈值 0–1，默认 0.5（additive）
   timeoutMs: number;     // 单次 HTTP 尝试超时，默认 30000（范围见 3.5）
 }
 
@@ -248,6 +249,7 @@ export function defaultJevConfig(): JevConfig {
     model: "jev-latest",
     apiKeyEnv: "TYPESAFE_API_KEY",
     autoTrigger: { enabled: false, pauseMs: 1000, minChars: 10, minEditChars: 4 },
+    decisionThreshold: 0.5,
     timeoutMs: 30000,
   };
 }
@@ -268,6 +270,7 @@ export function defaultJevConfig(): JevConfig {
 | `autoTrigger.pauseMs` | 整数，300 ≤ x ≤ 3000，且 `x % 100 === 0` | `E_PAUSE_MS` |
 | `autoTrigger.minChars` | 整数，1 ≤ x ≤ 200 | `E_MIN_CHARS` |
 | `autoTrigger.minEditChars` | 整数，1 ≤ x ≤ 100 | `E_MIN_EDIT_CHARS` |
+| `decisionThreshold` | 有限数值，0 ≤ x ≤ 1（additive；旧配置缺省回落 0.5） | `E_DECISION_THRESHOLD` |
 | `timeoutMs` | 整数，1000 ≤ x ≤ 120000 | `E_TIMEOUT_MS` |
 | 顶层未知字段 | 忽略（不报错、不落盘） | — |
 
@@ -305,6 +308,7 @@ export type JevConfigValidation =
 |---|---|
 | `baseURL` / `model` / `apiKey` / `apiKeyEnv` / `timeoutMs` | 下一次 `jev.test` / `jev.rank` 立即生效（**不缓存 HTTP client**，每次读配置） |
 | `autoTrigger.*` | 前端保存成功后立即写入本地调度状态（无需重载页面 / 重启插件） |
+| `decisionThreshold` | 下一次**打开**结果面板时作为初始阈值（已打开的面板不跟随；面板内拖动不回写配置） |
 | 文件被手动编辑 | 宿主下一次读取生效；前端在打开配置 Tab 或保存后刷新 `getConfig` |
 
 `[架构决定]`：不监听文件变化（无 `fs.watch`），避免多点变更竞态；代价是外部编辑需要重新打开 Tab。
@@ -351,6 +355,7 @@ export interface JevConfigView {
   apiKeySource: "env" | "file" | "none";
   apiKeyLast4: string | null;
   autoTrigger: JevAutoTrigger;
+  decisionThreshold: number; // additive；旧宿主缺字段时客户端兜底 0.5
   timeoutMs: number;
 }
 ```
@@ -475,6 +480,7 @@ export interface JevConfigView {
   apiKeySource: "env" | "file" | "none";
   apiKeyLast4: string | null;
   autoTrigger: JevAutoTrigger;
+  decisionThreshold: number; // additive；旧宿主缺字段时客户端兜底 0.5
   timeoutMs: number;
 }
 
@@ -1562,10 +1568,12 @@ type DecisionState =
   | { phase: "applied"; applied: number };
 ```
 
-- `threshold` 默认 `0.50`，步长 `0.05`；**只影响预勾选**：`checked = manual.size > 0 ? manual : autoChecked`，
+- `threshold` 初始值取 `getConfig().decisionThreshold`（配置页「相关度阈值」，默认 `0.50`；
+  旧宿主缺字段 / 配置未就绪时兜底 `0.50`），步长 `0.05`；**只影响预勾选**：`checked = manual.size > 0 ? manual : autoChecked`，
   其中 `autoChecked = { id | item.applicable && item.score >= threshold }`；
   用户手改某行 ⇒ 写入 `manual`（此后以 manual 为准）；
-- 改阈值**不重新请求**；重新评分 ⇒ 清空 `manual`、**保留当前阈值**；面板关闭再打开 ⇒ 阈值回 `0.50`；
+- 改阈值**不重新请求**；重新评分 ⇒ 清空 `manual`、**保留当前阈值**；面板关闭再打开 ⇒ 阈值回
+  「Jev 模型」配置的初始值（默认 `0.50`，见 `decisionThreshold`）；
 - 行展示：勾选框 + 类型徽标 + 名称 + 描述 + 分数条 + 数值；`applicable === false` ⇒ 置灰不可勾选 +
   `reason` 文案（`hard-disabled`/`not-restrictable`/`not-toggleable`/`shadowed`）；
 - 计数：单基数「已选 n / N」，`N = items.length`（含不可切换项）；
@@ -1671,13 +1679,13 @@ Authorization 是否出现）供断言；建议同时记录 `body` 原始 JSON �
 
 | # | 用例 | 断言 |
 |---|---|---|
-| H1 | 配置默认值 | 无文件 ⇒ `getConfig` 返回 `https://api.typesafe.ai` / `jev-latest` / `autoTrigger{false,1000,10,4}` / `timeoutMs 30000` / `apiKeySource "none"` |
+| H1 | 配置默认值 | 无文件 ⇒ `getConfig` 返回 `https://api.typesafe.ai` / `jev-latest` / `autoTrigger{false,1000,10,4}` / `decisionThreshold 0.5` / `timeoutMs 30000` / `apiKeySource "none"` |
 | H2 | 掩码 | 文件写入 `apiKey:"sk-test-1234567890"` ⇒ view `hasApiKey true`、`source "file"`、`last4 "7890"`、**响应 JSON 不含 key 原文** |
 | H3 | env 优先 | 同时 env + 文件 ⇒ `source "env"`；只 env ⇒ env；`apiKeyEnv` 自定义名生效 |
 | H4 | 权限 | `stat` 目录 mode & 0o777 === 0o700、文件 === 0o600（Linux/macOS） |
 | H5 | DSH_HOME | 子进程设 `DSH_HOME=/tmp/x` ⇒ 文件落在 `/tmp/x/dsh-capability-settings/jev.json` |
 | H6 | 损坏 JSON | 写入 `{oops` ⇒ `getConfig` 回默认且不抛；`setConfig` 可覆盖修复 |
-| H7 | 越界拒绝 | `pauseMs:250` / `3500` / `1050`、`minChars:0/201`、`minEditChars:0/101` ⇒ `ok:false code:"invalid-config"` + 对应 `issues[].code`；文件未变 |
+| H7 | 越界拒绝 | `pauseMs:250` / `3500` / `1050`、`minChars:0/201`、`minEditChars:0/101`、`decisionThreshold:-0.1/1.5/"0.5"` ⇒ `ok:false code:"invalid-config"` + 对应 `issues[].code`；文件未变 |
 | H8 | baseURL 校验 | `http://example.com` 拒绝；`http://127.0.0.1:PORT` 接受；`https://api.typesafe.ai/v1/systemone` 拒绝（`E_BASE_URL_HAS_ENDPOINT`） |
 | H9 | 一次请求 + v1.1 请求形状 | `requests.length === 1`；`Object.keys(body.questions).length === capabilitiesTotal`；`typeof body.state.request === "string"` 且等于 trim 后的草稿；`typeof body.state.guidance === "string"` 且非空；**`Object.hasOwn(body.state, "capabilities") === false`**（state 不得携带能力）；每题 `instructions.capability.name` 非空；`body.model` = 配置 model |
 | H9b | 题目唯一性（防回归） | N 个能力时 `new Set(questions[].instructions.capability.name).size === N`（若再次退化为「N 道同题」直接失败）；所有题 `instructions.task` 相同属预期 |
@@ -1713,7 +1721,7 @@ Authorization 是否出现）供断言；建议同时记录 `body` 原始 JSON �
 | C7 | 取消静默 | 触发后点取消 ⇒ 同草稿推进时钟不再触发；改 1 字（≥minEdit 时）⇒ 再触发 |
 | C8 | 手动可用 | auto 关闭/门槛不满足时点按钮 ⇒ 立即 1 次 rank |
 | C9 | runId | 连发两次，先返回的旧响应后到 ⇒ 丢弃，UI 显示第 2 次结果 |
-| C10 | 阈值 | 改阈值不重发请求；预勾选随阈值变化；手改后以手改为准；重评清手改、阈值保留；关闭重开回 0.50 |
+| C10 | 阈值 | 初值取配置 `decisionThreshold`（无配置兜底 0.50）；改阈值不重发请求；预勾选随阈值变化；手改后以手改为准；重评清手改、阈值保留；关闭重开回配置初值 |
 | C11 | 不可切换行 | `applicable=false` ⇒ 勾选框 disabled + `aria-disabled` + 原因文案；「应用所选」不含该 id |
 | C12 | 冷会话提示 | `apply` 返回 `pending:true` ⇒ 面板显示「发送首条消息后生效」，chips 乐观回显 |
 | C13 | DOM 兜底 | `useInput` 返回 undefined 且 DOM 存在 ⇒ 读 `[data-composer-card] [data-composer-input]` 的 innerText 并清洗 chip 占位符（`\uE100`/`\uFFFC` 被移除） |

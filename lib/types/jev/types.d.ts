@@ -31,6 +31,13 @@ export interface JevConfig {
     /** 读取 key 的环境变量名，默认 `TYPESAFE_API_KEY`。 */
     apiKeyEnv?: string;
     autoTrigger: JevAutoTrigger;
+    /**
+     * 「✦ 能力决策」结果面板的**初始相关度阈值**（0–1），默认 0.50。
+     *
+     * additive：旧配置缺省时回落默认值；只决定面板打开时的滑杆初值，用户在
+     * 首屏拖动滑杆仍只在本次面板内生效（不回写配置）。
+     */
+    decisionThreshold: number;
     /** 单次 HTTP 尝试超时（毫秒），默认 30000。 */
     timeoutMs: number;
 }
@@ -48,6 +55,8 @@ export interface JevConfigView {
     apiKeySource: JevKeySource;
     apiKeyLast4: string | null;
     autoTrigger: JevAutoTrigger;
+    /** 「✦ 能力决策」结果面板的初始相关度阈值（0–1，默认 0.50）。 */
+    decisionThreshold: number;
     timeoutMs: number;
     /**
      * 已保存的密钥环境变量名（默认 `TYPESAFE_API_KEY`）。

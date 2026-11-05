@@ -1511,6 +1511,8 @@ function toJevConfigView(value: unknown): JevConfigView {
   const source = raw.apiKeySource === "env" || raw.apiKeySource === "file" ? raw.apiKeySource : "none";
   const num = (input: unknown, fallback: number): number =>
     typeof input === "number" && Number.isFinite(input) ? input : fallback;
+  /** 阈值投影：宿主已校验 0–1，这里再夹取 + 取两位小数，避免滑杆收到越界值。 */
+  const threshold = Math.min(1, Math.max(0, Math.round(num(raw.decisionThreshold, 0.5) * 100) / 100));
   return {
     baseURL: typeof raw.baseURL === "string" && raw.baseURL.length > 0 ? raw.baseURL : "https://api.typesafe.ai",
     model: typeof raw.model === "string" && raw.model.length > 0 ? raw.model : "jev-latest",
@@ -1523,6 +1525,7 @@ function toJevConfigView(value: unknown): JevConfigView {
       minChars: num(auto.minChars, 10),
       minEditChars: num(auto.minEditChars, 4),
     },
+    decisionThreshold: threshold,
     timeoutMs: num(raw.timeoutMs, 30000),
     ...(typeof raw.apiKeyEnv === "string" && raw.apiKeyEnv.length > 0 ? { apiKeyEnv: raw.apiKeyEnv } : {}),
   };

@@ -4,8 +4,8 @@
  * 纯客户端表单：配置读写、密钥掩码、测试连接全部走 `api.jev.*`（宿主进程
  * 持有密钥并发请求，浏览器永不接触明文，见架构 §4）。三块内容：
  *   1. Base URL / 模型名 / API Key 来源（直接填写 | 环境变量）；
- *   2. 「能力决策」区：自动评分开关 + 三个门槛（停顿阈值 / 最少触发字数 /
- *      最少修改间隔字符数）
+ *   2. 「能力决策」区：结果面板初始相关度阈值 + 自动评分开关 + 三个门槛
+ *      （停顿阈值 / 最少触发字数 / 最少修改间隔字符数）
  *   3. 测试连接 / 恢复默认 / 保存（保存成功**不关闭、不跳转**）。
  *
  * 关键约定（评审 checklist）：
@@ -35,6 +35,9 @@ const DEFAULT_ENV_NAME = "TYPESAFE_API_KEY";
 const DEFAULT_PAUSE_MS = 1000;
 const DEFAULT_MIN_CHARS = 10;
 const DEFAULT_MIN_EDIT_CHARS = 4;
+/** 结果面板初始相关度阈值默认值与步长（与首屏滑杆一致）。 */
+const DEFAULT_DECISION_THRESHOLD = 0.5;
+const DECISION_THRESHOLD_STEP = 0.05;
 
 /**
  * 配置保存成功的全局事件名（F3 修复的发送端）。
@@ -78,6 +81,8 @@ const COPY = {
   envName: "环境变量名",
   envNameHint: "宿主从自身进程环境读取；变量应在启动 DSH 的环境中设置。",
   autoSection: "能力决策",
+  decisionThreshold: "相关度阈值",
+  decisionThresholdHint: "「✦ 能力决策」结果面板打开时的初始阈值（默认 0.50）；首屏滑杆仍可随时调整，本次调低/调高不回写配置。",
   autoEnable: "输入停顿后自动评分",
   autoEnableHint: "开启后，在对话首屏停止输入达到阈值会自动发起 1 次评分（默认关闭）。",
   autoNoKey: "当前没有可用的 API Key：自动评分不会触发。请先填写并保存密钥，或配置环境变量。",
@@ -116,6 +121,7 @@ interface FieldErrors {
   model?: string;
   apiKey?: string;
   apiKeyEnv?: string;
+  decisionThreshold?: string;
   pauseMs?: string;
   minChars?: string;
   minEditChars?: string;
@@ -131,6 +137,8 @@ interface FormState {
   showKey: boolean;
   apiKeyEnv: string;
   autoEnabled: boolean;
+  /** 结果面板初始阈值：字符串保存，便于滑杆/手填统一校验。 */
+  decisionThreshold: string;
   pauseMs: string;
   minChars: string;
   minEditChars: string;
@@ -153,6 +161,7 @@ const ERR_MODEL_REQUIRED = "请填写模型名";
 const ERR_PAUSE_RANGE = "停顿阈值需在 300–3000 ms 之间（步长 100）";
 const ERR_MIN_CHARS_RANGE = "最少触发字数需在 1–200 之间";
 const ERR_MIN_EDIT_RANGE = "最少修改间隔字符数需在 1–100 之间";
+const ERR_THRESHOLD_RANGE = "相关度阈值需在 0–1 之间（步长 0.05）";
 
 /** 读取失败 / 保存失败等异常的可读消息。 */
 function messageOf(error: unknown): string {
@@ -179,6 +188,18 @@ function parseIntStrict(value: string): number | undefined {
   return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
+/** 0–1 小数解析（相关度阈值；`"0.5"` / `"0.50"` / `"1"` 合法）。 */
+function parseThreshold(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!/^(?:0(?:\.\d+)?|1(?:\.0+)?)$/.test(trimmed)) return undefined;
+  return Number(trimmed);
+}
+
+/** 阈值显示：两位小数（与首屏滑杆数值一致）。 */
+function formatThreshold(value: number): string {
+  return value.toFixed(2);
+}
+
 /** 默认表单：Base URL / 模型默认值、**直接填写**、自动触发默认关闭（AC-CFG-3）。 */
 function defaultForm(): FormState {
   return {
@@ -190,6 +211,7 @@ function defaultForm(): FormState {
     showKey: false,
     apiKeyEnv: DEFAULT_ENV_NAME,
     autoEnabled: false,
+    decisionThreshold: formatThreshold(DEFAULT_DECISION_THRESHOLD),
     pauseMs: String(DEFAULT_PAUSE_MS),
     minChars: String(DEFAULT_MIN_CHARS),
     minEditChars: String(DEFAULT_MIN_EDIT_CHARS),
@@ -207,6 +229,7 @@ function formFromView(view: JevConfigView, keyMode?: KeyMode): FormState {
     showKey: false,
     apiKeyEnv: view.apiKeyEnv ?? DEFAULT_ENV_NAME,
     autoEnabled: view.autoTrigger.enabled,
+    decisionThreshold: formatThreshold(view.decisionThreshold ?? DEFAULT_DECISION_THRESHOLD),
     pauseMs: String(view.autoTrigger.pauseMs),
     minChars: String(view.autoTrigger.minChars),
     minEditChars: String(view.autoTrigger.minEditChars),
@@ -221,6 +244,9 @@ function isDirty(form: FormState, saved: JevConfigView, savedKeyMode: KeyMode): 
   if (form.keyMode === "direct" && form.apiKeyDraft.trim().length > 0) return true;
   if (form.keyMode === "env" && form.apiKeyEnv.trim() !== (saved.apiKeyEnv ?? DEFAULT_ENV_NAME)) return true;
   if (form.autoEnabled !== saved.autoTrigger.enabled) return true;
+  // 阈值按两位小数比较：表单/宿主视图都按 2 位展示，手改文件里的 0.655 不应显示为「已修改」。
+  const formThreshold = parseThreshold(form.decisionThreshold);
+  if (formThreshold === undefined || formThreshold.toFixed(2) !== (saved.decisionThreshold ?? DEFAULT_DECISION_THRESHOLD).toFixed(2)) return true;
   if (parseIntStrict(form.pauseMs) !== saved.autoTrigger.pauseMs) return true;
   if (parseIntStrict(form.minChars) !== saved.autoTrigger.minChars) return true;
   return parseIntStrict(form.minEditChars) !== saved.autoTrigger.minEditChars;
@@ -232,6 +258,7 @@ function issueFieldOf(field: string): keyof FieldErrors | undefined {
   if (field === "model" || field.endsWith(".model")) return "model";
   if (field.includes("apiKeyEnv")) return "apiKeyEnv";
   if (field.includes("apiKey")) return "apiKey";
+  if (field.includes("decisionThreshold")) return "decisionThreshold";
   if (field.includes("pauseMs")) return "pauseMs";
   if (field.includes("minChars")) return "minChars";
   if (field.includes("minEdit")) return "minEditChars";
@@ -404,6 +431,8 @@ export function JevPanel({ api, active }: { api: CapabilityPanelApi; active: boo
     if (pause === undefined || pause < 300 || pause > 3000 || pause % 100 !== 0) {
       nextErrors.pauseMs = ERR_PAUSE_RANGE;
     }
+    const decisionThreshold = parseThreshold(form.decisionThreshold);
+    if (decisionThreshold === undefined) nextErrors.decisionThreshold = ERR_THRESHOLD_RANGE;
     const minChars = parseIntStrict(form.minChars);
     if (minChars === undefined || minChars < 1 || minChars > 200) nextErrors.minChars = ERR_MIN_CHARS_RANGE;
     const minEditChars = parseIntStrict(form.minEditChars);
@@ -420,6 +449,7 @@ export function JevPanel({ api, active }: { api: CapabilityPanelApi; active: boo
         minChars: minChars ?? DEFAULT_MIN_CHARS,
         minEditChars: minEditChars ?? DEFAULT_MIN_EDIT_CHARS,
       },
+      decisionThreshold: decisionThreshold ?? DEFAULT_DECISION_THRESHOLD,
     };
     if (form.keyMode === "env") {
       config.apiKeyEnv = envName;
@@ -799,6 +829,41 @@ export function JevPanel({ api, active }: { api: CapabilityPanelApi; active: boo
           {/* 能力决策 */}
           <div className="skp-jev-section">
             <h4 className="skp-jev-section-title">{COPY.autoSection}</h4>
+
+            {/* 结果面板初始阈值（首屏「✦ 能力决策」滑杆的初值） */}
+            <div className="skp-jev-field">
+              <div className="skp-jev-num-row">
+                <label className="skp-jev-label" htmlFor="skp-jev-threshold">
+                  {COPY.decisionThreshold}
+                </label>
+                <input
+                  id="skp-jev-threshold"
+                  className="skp-jev-range"
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={DECISION_THRESHOLD_STEP}
+                  value={form.decisionThreshold}
+                  disabled={disabled}
+                  aria-invalid={errors.decisionThreshold !== undefined}
+                  aria-describedby="skp-jev-threshold-desc"
+                  aria-valuetext={formatThreshold(parseThreshold(form.decisionThreshold) ?? DEFAULT_DECISION_THRESHOLD)}
+                  onChange={(event) => update({ decisionThreshold: formatThreshold(Number(event.target.value)) })}
+                />
+                <span className="skp-jev-range-value">
+                  {formatThreshold(parseThreshold(form.decisionThreshold) ?? DEFAULT_DECISION_THRESHOLD)}
+                </span>
+              </div>
+              {errors.decisionThreshold !== undefined ? (
+                <span className="skp-jev-err" id="skp-jev-threshold-desc" role="alert">
+                  {errors.decisionThreshold}
+                </span>
+              ) : (
+                <span className="skp-jev-hint" id="skp-jev-threshold-desc">
+                  {COPY.decisionThresholdHint}
+                </span>
+              )}
+            </div>
 
             <div className="skp-jev-switch-row">
               <span className="skp-jev-switch-text">

@@ -122,6 +122,11 @@ function isIntegerInRange(value: unknown, min: number, max: number): value is nu
   return typeof value === "number" && Number.isInteger(value) && value >= min && value <= max;
 }
 
+/** 有限数值区间判定（`decisionThreshold` 这类 0–1 的小数用）。 */
+function isNumberInRange(value: unknown, min: number, max: number): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
+}
+
 /** 控制字符（含换行）检测。 */
 function hasControlChars(text: string): boolean {
   return /[\u0000-\u001f\u007f]/.test(text);
@@ -176,6 +181,9 @@ function sanitizeStoredConfig(raw: Record<string, unknown>): JevConfig {
     model: isUsableModel(raw.model) ? raw.model.trim() : defaults.model,
     apiKeyEnv: isUsableApiKeyEnv(raw.apiKeyEnv) ? raw.apiKeyEnv.trim() : DEFAULT_API_KEY_ENV,
     autoTrigger,
+    decisionThreshold: isNumberInRange(raw.decisionThreshold, 0, 1)
+      ? raw.decisionThreshold
+      : defaults.decisionThreshold,
     timeoutMs: isIntegerInRange(raw.timeoutMs, 1000, 120000) ? raw.timeoutMs : defaults.timeoutMs,
   };
   if (isUsableApiKey(raw.apiKey)) config.apiKey = raw.apiKey.trim();
@@ -354,6 +362,16 @@ export function validateJevConfig(input: unknown): JevConfigValidation {
     }
   }
 
+  // decisionThreshold（能力决策结果面板初始阈值；0–1）
+  let decisionThreshold = defaults.decisionThreshold;
+  if (source.decisionThreshold !== undefined) {
+    if (!isNumberInRange(source.decisionThreshold, 0, 1)) {
+      issue("decisionThreshold", "E_DECISION_THRESHOLD", "decisionThreshold 必须是 0–1 之间的数字");
+    } else {
+      decisionThreshold = source.decisionThreshold;
+    }
+  }
+
   // timeoutMs
   let timeoutMs = defaults.timeoutMs;
   if (source.timeoutMs !== undefined) {
@@ -371,7 +389,7 @@ export function validateJevConfig(input: unknown): JevConfigValidation {
       errors: issues.map((item) => `[${item.code}] ${item.field}: ${item.message}`),
     };
   }
-  const value: JevConfig = { baseURL, model, apiKeyEnv, autoTrigger, timeoutMs };
+  const value: JevConfig = { baseURL, model, apiKeyEnv, autoTrigger, decisionThreshold, timeoutMs };
   if (apiKey !== undefined) value.apiKey = apiKey;
   return { ok: true, value };
 }
@@ -406,7 +424,7 @@ export async function saveJevConfig(dshHome: string | undefined, config: JevConf
  */
 export function mergeJevConfigInput(current: JevConfig, provided: Record<string, unknown>): Record<string, unknown> {
   const next: Record<string, unknown> = { ...current };
-  for (const field of ["baseURL", "model", "apiKeyEnv", "timeoutMs"] as const) {
+  for (const field of ["baseURL", "model", "apiKeyEnv", "timeoutMs", "decisionThreshold"] as const) {
     if (Object.hasOwn(provided, field)) next[field] = provided[field];
   }
   // apiKey 特殊：空串表示「清掉文件 key」，由 validate 统一处理成 undefined。
@@ -516,6 +534,7 @@ export function toJevConfigView(config: JevConfig, env: NodeJS.ProcessEnv): JevC
     apiKeySource: resolved.source,
     apiKeyLast4: resolved.last4,
     autoTrigger: { ...config.autoTrigger },
+    decisionThreshold: config.decisionThreshold,
     timeoutMs: config.timeoutMs,
     // additive（task-19 / AC-CFG-10）：只回变量名；空值回落默认名，与写入校验口径一致。
     apiKeyEnv: typeof config.apiKeyEnv === "string" && config.apiKeyEnv.length > 0 ? config.apiKeyEnv : DEFAULT_API_KEY_ENV,

@@ -754,9 +754,20 @@ export interface ComposerCapabilityEntryProps {
   slotProps?: HeroSlotProps;
 }
 
-/** 结果面板阈值默认值与步长（UX §6.5）。 */
+/**
+ * 结果面板阈值步长（UX §6.5）与**兜底**默认值。
+ *
+ * 初始阈值优先读取「Jev 模型」配置里的 `decisionThreshold`（默认 0.50）；
+ * 配置未就绪 / 旧宿主缺字段时才回落到 {@link DECISION_DEFAULT_THRESHOLD}。
+ */
 const DECISION_DEFAULT_THRESHOLD = 0.5;
 const DECISION_THRESHOLD_STEP = 0.05;
+
+/** 阈值归一：夹到 0–1 并按步长取整、保留两位小数（配置值防御）。 */
+function clampThreshold(value: number): number {
+  const stepped = Math.round(value / DECISION_THRESHOLD_STEP) * DECISION_THRESHOLD_STEP;
+  return Number(Math.min(1, Math.max(0, stepped)).toFixed(2));
+}
 
 /** 自动触发四个门槛（来自 getConfig().autoTrigger）。 */
 interface AutoPrefs {
@@ -1187,6 +1198,17 @@ function useDecision(options: UseDecisionOptions): DecisionController {
 
   const prefs: AutoPrefs = config.status === "ready" ? { ...config.view.autoTrigger } : DISABLED_AUTO_PREFS;
   const configured = config.status === "ready" && config.view.hasApiKey;
+  /**
+   * 结果面板的初始阈值：来自「Jev 模型」配置的 `decisionThreshold`（默认 0.50）。
+   *
+   * 只用于**新开面板**（首次手动触发 / 自动触发且当前无结果 / 配置错误态）；
+   * 面板已打开时拖动滑杆不改配置，重新评分与手改语义保持原样。
+   */
+  const configuredThreshold = config.status === "ready" ? config.view.decisionThreshold : undefined;
+  const initialThreshold =
+    typeof configuredThreshold === "number" && Number.isFinite(configuredThreshold)
+      ? clampThreshold(configuredThreshold)
+      : DECISION_DEFAULT_THRESHOLD;
 
   const clearTimer = useCallback(() => {
     if (timerRef.current !== undefined) {
@@ -1300,10 +1322,10 @@ function useDecision(options: UseDecisionOptions): DecisionController {
     timerRef.current = window.setTimeout(() => {
       timerRef.current = undefined;
       const current = stateRef.current;
-      beginRef.current("auto", current !== undefined && current.phase === "results" ? current.threshold : DECISION_DEFAULT_THRESHOLD);
+      beginRef.current("auto", current !== undefined && current.phase === "results" ? current.threshold : initialThreshold);
     }, pauseMs);
     return clearTimer;
-  }, [draft, enabled, config.status, capabilitiesReady, isComposing, clearTimer, prefs.enabled, prefs.pauseMs, prefs.minChars, prefs.minEditChars, configured, state?.phase]);
+  }, [draft, enabled, config.status, capabilitiesReady, isComposing, clearTimer, prefs.enabled, prefs.pauseMs, prefs.minChars, prefs.minEditChars, configured, initialThreshold, state?.phase]);
 
   // hero 结束：停表、作废在途请求、重置编辑基线（首条消息后不再自动触发）。
   useEffect(() => {
@@ -1322,7 +1344,7 @@ function useDecision(options: UseDecisionOptions): DecisionController {
 
   function startManual() {
     if (draft === undefined || draft === "") return;
-    begin("manual", stateRef.current?.threshold ?? DECISION_DEFAULT_THRESHOLD);
+    begin("manual", stateRef.current?.threshold ?? initialThreshold);
   }
 
   function startConfigError() {
@@ -1330,7 +1352,7 @@ function useDecision(options: UseDecisionOptions): DecisionController {
       phase: "error",
       origin: "manual",
       pauseMs: prefs.pauseMs,
-      threshold: DECISION_DEFAULT_THRESHOLD,
+      threshold: initialThreshold,
       manual: {},
       error: CONFIG_ERROR_INFO,
     });
@@ -1390,8 +1412,7 @@ function useDecision(options: UseDecisionOptions): DecisionController {
   }
 
   function setThreshold(value: number) {
-    const rounded = Math.round(value / DECISION_THRESHOLD_STEP) * DECISION_THRESHOLD_STEP;
-    const next = Math.min(1, Math.max(0, Number(rounded.toFixed(2))));
+    const next = clampThreshold(value);
     setState((current) => (current === undefined ? current : { ...current, threshold: next }));
   }
 
