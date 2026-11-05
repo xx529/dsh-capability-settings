@@ -268,6 +268,9 @@ function PromptDetail({
   const [draft, setDraft] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | undefined>(undefined);
+  /** 保存成功后的瞬时提示（4s 自动消失；不再常驻）。 */
+  const [saveNotice, setSaveNotice] = useState(false);
+  const saveNoticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [copied, setCopied] = useState(false);
   const [localVersion, setLocalVersion] = useState(0);
 
@@ -368,12 +371,23 @@ function PromptDetail({
       setEditing(false);
       setLocalVersion((value) => value + 1);
       onSaved();
+      // 仅在保存成功后短暂提示，避免详情页常驻一段说明。
+      setSaveNotice(true);
+      if (saveNoticeTimer.current !== undefined) clearTimeout(saveNoticeTimer.current);
+      saveNoticeTimer.current = setTimeout(() => setSaveNotice(false), 4000);
     } catch (failure) {
       setSaveError(errorText(failure));
     } finally {
       setSaving(false);
     }
   };
+
+  useEffect(
+    () => () => {
+      if (saveNoticeTimer.current !== undefined) clearTimeout(saveNoticeTimer.current);
+    },
+    [],
+  );
 
   const copyPath = async () => {
     try {
@@ -542,6 +556,12 @@ function PromptDetail({
           </div>
         )}
         {saveError !== undefined && <div className="skp-error">保存失败：{saveError}</div>}
+        {saveNotice && (
+          <div className="skp-prompt-save-note" role="status">
+            <span aria-hidden="true">✓</span>
+            <span>已保存：仅对新会话生效（当前会话保持冻结，已注入的 prompt 不变）</span>
+          </div>
+        )}
         {read.status === "error" && (
           <div className="skp-error">
             读取失败：{read.message}
@@ -584,14 +604,6 @@ function PromptDetail({
             </div>
           </div>
         ) : null}
-
-        <div className="skp-prompt-note" style={{ marginTop: 10, flex: "none" }}>
-          <span className="skp-prompt-note-title">保存后：仅对新会话生效</span>
-          <span>
-            新会话首次读取新内容；当前会话保持冻结（已注入的 prompt 不变）。当前会话的注入选择在对话首屏 / 会话「能力」
-            Tab 里单独调整。
-          </span>
-        </div>
 
       </div>
     </DetailPage>

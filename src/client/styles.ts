@@ -1046,6 +1046,7 @@ button.skp-dock-rail-fail:hover{filter:brightness(.9);}
 .skp-prompt-status-injected{color:var(--skp-success,#4ADE80);background:rgba(74,222,128,.14);}
 .skp-prompt-status-disabled{color:var(--skp-text-3);background:rgba(148,163,184,.14);}
 .skp-prompt-status-warn{color:var(--skp-warn,#FBBF24);background:rgba(251,191,36,.14);}
+.skp-prompt-save-note{display:flex;align-items:center;gap:8px;margin:0 0 10px;padding:8px 12px;border-radius:8px;background:rgba(74,222,128,.12);box-shadow:inset 0 0 0 1px rgba(74,222,128,.28);font-size:11.5px;color:var(--skp-success,#4ADE80);}
 
 `;
 
