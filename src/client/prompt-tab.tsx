@@ -27,8 +27,8 @@ import type {
   ClientPromptScope,
 } from "./api.js";
 import { formatSize } from "./skill-content.js";
+import { createPortal } from "react-dom";
 import { MarkdownPreview } from "./markdown.js";
-import { Modal } from "./modal.js";
 
 // ---------------------------------------------------------------------------
 // 图标（内联 SVG，颜色走 currentColor；与 composer-capability 的图标套系同档）
@@ -472,6 +472,14 @@ function frozenPreviewMarkdown(text: string): string {
 function FrozenPreview({ text, fileCount }: { text: string; fileCount: number }) {
   const [open, setOpen] = useState(false);
   const source = frozenPreviewMarkdown(text);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open]);
   const lines = source.split("\n").length;
   return (
     <>
@@ -488,13 +496,29 @@ function FrozenPreview({ text, fileCount }: { text: string; fileCount: number })
         </div>
         <span className="skp-dock-rail-note">只读预览 · 全文 {lines} 行 · 不可修改 / 不可开关</span>
       </div>
-      {open && (
-        <Modal title={`已注入内容 · 共 ${fileCount} 个文件`} wide onClose={() => setOpen(false)}>
-          <div className="skp-prompt-frozen skp-prompt-frozen-full">
-            <MarkdownPreview source={source} />
-          </div>
-        </Modal>
-      )}
+      {open && typeof document !== "undefined"
+        ? createPortal(
+            <div className="skp-prompt-full-overlay" onClick={() => setOpen(false)}>
+              <div
+                className="skp-prompt-full-panel"
+                role="dialog"
+                aria-label={`已注入内容 · 共 ${fileCount} 个文件`}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="skp-prompt-full-head">
+                  <span className="skp-prompt-full-title">已注入内容 · 共 {fileCount} 个文件</span>
+                  <button type="button" className="skp-prompt-full-close" aria-label="关闭" onClick={() => setOpen(false)}>
+                    ✕
+                  </button>
+                </div>
+                <div className="skp-prompt-full-body">
+                  <MarkdownPreview source={source} />
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </>
   );
 }

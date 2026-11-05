@@ -39,6 +39,19 @@
   `notes/verify/skill-sources/host-disk-name-mismatch.test.mjs` 28/28
   （含 flat 布局、覆盖创建、导出路径、删除无连带、未知名称仍 not found）。
 
+## [1.14.4] - 2026-11-05
+
+### 修复
+
+- **Prompt「查看全部」弹层改用全屏 portal + 背景模糊**（用户反馈：弹层被面板裁切、背景没有模糊、
+  观感差）：
+  - 用 `createPortal` 挂到 `document.body`，`.skp-prompt-full-overlay` 全屏 fixed +
+    `backdrop-filter: blur(10px) saturate(120%)` 遮罩，不受面板 overflow / transform 裁切；
+  - 居中宽版面板（`min(920px, 92vw)` / 最高 82vh）：固定标题栏 + 关闭按钮 + 可滚动正文，
+    正文仍是 Markdown 渲染；点遮罩 / `✕` / `Esc` 关闭；
+  - 补 `src/client/react-dom.d.ts`（只声明 `createPortal`，不引 `@types/react-dom` 整包）。
+  验证 `notes/verify/v25-prompt-frozen.mjs` 5/5（含 portal 位置 / 弹层内表格 / 遮罩关闭）。
+
 ## [1.14.3] - 2026-11-05
 
 ### 修复

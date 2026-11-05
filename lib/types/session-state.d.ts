@@ -53,11 +53,40 @@ export declare const SESSION_STATE_VERSION = 1;
  * 派生继承模式：新派生的 subagent / teammate 在创建那一刻继承什么。
  *
  * - `session`（默认）：复制当前会话的显式能力覆盖（Skills / MCP / Tools）；
- * - `workspace`：不复制，子 agent 使用工作区 / 项目默认能力。
+ * - `workspace`：不复制，子 agent 使用工作区 / 项目默认能力；
+ * - `dynamic`（v24）：按子 agent 首条任务在工作区默认能力上打分，只启用
+ *   `score >= 阈值` 的能力；空集 / Jev 不可用 / 超时时回退 `session`。
  *
  * 只影响创建时刻，已存在的派生 agent 不受影响。
  */
-export type DeriveMode = "session" | "workspace";
+export type DeriveMode = "session" | "workspace" | "dynamic";
+/** 动态选择的创建时结果（派生会话页只读展示；不参与后续创建）。 */
+export interface DerivedDynamicInfo {
+    /** `ok` = 按首条任务选出并应用；`fallback` = 已回退继承策略。 */
+    status: "ok" | "fallback";
+    /**
+     * fallback 原因码（诊断 / UI 文案用）：
+     * `no-config` | `no-key` | `timeout` | `error` | `empty` | `missing` |
+     * `unavailable`。
+     */
+    reason?: string;
+    /** 本次使用的相关度阈值（0–1）。 */
+    threshold: number;
+    /** 达到阈值的已启用量。 */
+    selected: number;
+    /** 参与打分的候选总数。 */
+    total: number;
+    /** 三域各自选中数。 */
+    counts: {
+        skills: number;
+        mcp: number;
+        tools: number;
+    };
+    /** fallback 时实际回退到的策略（`session` / `workspace`）。 */
+    fallback?: "session" | "workspace";
+    /** 写入时间（毫秒）。 */
+    at: number;
+}
 /** 派生继承模式的默认值（与 UI 下拉的默认选中项一致）。 */
 export declare const DEFAULT_DERIVE_MODE: DeriveMode;
 /** 插件在 dsh home 下的目录名（与包名一致，和 `jev.json` 共用）。 */
@@ -112,6 +141,8 @@ export interface SessionStateEntry {
     derivedFrom?: string;
     /** 派生快照写入时间（毫秒）。 */
     derivedAt?: number;
+    /** 动态选择的创建时结果（仅 `derivedMode === "dynamic"`；只读展示）。 */
+    derivedDynamic?: DerivedDynamicInfo;
     /** 两阶段对账的"首次发现不存在"时间戳；确认存在后清除。 */
     missingSince?: number;
 }
@@ -177,19 +208,21 @@ export interface SessionStateStore {
         mode: DeriveMode;
         from?: string;
         at?: number;
+        dynamic?: DerivedDynamicInfo;
     } | undefined;
     /** 写 / 清除本会话的派生继承模式（`undefined` = 恢复默认 `session`）。 */
     setDeriveMode(sessionId: string, mode: DeriveMode | undefined, meta?: SessionStateMeta): Promise<void>;
     /**
      * 创建派生会话时写入一次性快照（**一次落盘**）：
-     * 记录创建模式 / 来源，并在 `mode === "session"` 时复制父会话的显式覆盖。
-     * 不复制 `deriveMode` 本身（子会话对自己后代的模式仍按默认）。
+     * 记录创建模式 / 来源；`session` 与 `dynamic` 会复制/写入三域开关，
+     * `workspace` 不写开关。不复制 `deriveMode` 本身（子会话对自己后代的模式
+     * 仍按默认）。
      */
     seedDerived(sessionId: string, from: string, mode: DeriveMode, toggles: {
         skills?: Readonly<Record<string, boolean>>;
         mcp?: Readonly<Record<string, boolean>>;
         tools?: Readonly<Record<string, boolean>>;
-    }, meta?: SessionStateMeta): Promise<void>;
+    }, meta?: SessionStateMeta, dynamic?: DerivedDynamicInfo): Promise<void>;
     /**
      * 一次性 unit id 迁移（D2）：把 `plugin:<旧 display>` 归一为 `plugin:<包名>`，
      * 同时写入旧键镜像（可回滚）并保留未知键；幂等（已 settled 不写盘）。
