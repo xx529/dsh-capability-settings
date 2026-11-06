@@ -121,9 +121,16 @@ function basename(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1);
 }
 
-/** 隐藏文件（以 `.` 开头的段）与导出里可能出现的空路径不展示。 */
-function isHiddenPath(path: string): boolean {
-  return path.split("/").some((segment) => segment.startsWith("."));
+/**
+ * 文件树只隐藏 VCS / 系统元数据；其它以 `.` 开头的隐藏文件（`.env`、
+ * `.gitignore`、`.npmrc` …）照常展示——技能资源里的 `.env` 往往是运行所需
+ * 的配置，用户需要在详情里看到并复制。
+ */
+const IGNORED_PATH_SEGMENTS: ReadonlySet<string> = new Set([".DS_Store", ".git", ".svn", ".hg"]);
+
+/** 是否为不展示的元数据路径（任意一段命中即隐藏）。 */
+function isIgnoredPath(path: string): boolean {
+  return path.split("/").some((segment) => IGNORED_PATH_SEGMENTS.has(segment));
 }
 
 function pathDepth(path: string): number {
@@ -316,7 +323,7 @@ export function SkillContent({
           const files: SkillFile[] = [textFile("SKILL.md", detail.body)];
           const dirs: string[] = [];
           for (const resource of detail.resources) {
-            if (isHiddenPath(resource)) continue;
+            if (isIgnoredPath(resource)) continue;
             if (looksLikeDirectory(resource)) {
               dirs.push(resource);
               continue;
@@ -357,8 +364,8 @@ export function SkillContent({
           setState({ status: "error", message: result.errors.join("; ") });
           return;
         }
-        const hidden = result.files.filter((file) => isHiddenPath(file.path)).length;
-        const visible = result.files.filter((file) => !isHiddenPath(file.path));
+        const hidden = result.files.filter((file) => isIgnoredPath(file.path)).length;
+        const visible = result.files.filter((file) => !isIgnoredPath(file.path));
         const deep = visible.filter((file) => pathDepth(file.path) > MAX_DEPTH).length;
         const withinDepth = visible.filter((file) => pathDepth(file.path) <= MAX_DEPTH);
         const ordered = sortFiles(withinDepth);

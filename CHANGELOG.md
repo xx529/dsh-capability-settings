@@ -5,7 +5,15 @@
 
 ## [Unreleased]
 
-（暂无）
+### 修复
+
+- **Skills 详情文件树不显示 `.env` 等隐藏文件**（用户反馈：技能目录里的
+  `scripts/.env` 在文件列表里看不到）：客户端原先按「任意路径段以 `.` 开头
+  即隐藏」过滤，把所有 dotfile 一并挡掉。改为只隐藏 VCS / 系统元数据
+  （`.DS_Store` / `.git` / `.svn` / `.hg`，仍计入「隐藏 N」提示），其它
+  以 `.` 开头的普通文件（`.env`、`.gitignore`、`.npmrc` …）在目录树中照常
+  展示、可预览/复制/下载。验证 `notes/verify/v26-skill-dotfiles.mjs` 3/3
+  （jsdom 真实渲染 + 点击 `.env` 行；`.DS_Store` / `.git/config` 仍隐藏）。
 
 ## [1.15.0] - 2026-11-06
 
