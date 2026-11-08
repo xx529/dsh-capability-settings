@@ -251,6 +251,9 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
   fixed 全屏弹窗，active 相位随首屏行整行消失。
 - **外壳版本 ≥ 0.2.0-rc.2**：`sidebar.panellist` 在更早的 `0.1.2-alpha.2` 里不存在
   （那时只有 `sidebar.footer.action`），用它验证会把"注册没生效"误判成缺陷。
+  当前已验证到 **0.2.2-rc.1**（见 `package.json` 的 `engines.dsh`）；0.2.2 给 `main`
+  outlet 加了 `.mainPanel` 包裹层（`flex:1;min-height:0;flex-direction:column`），
+  `.skp-main{height:100%}` 仍能全高、列表内部滚动，无需额外样式。
 - **客户端 bundle 协议**：tsdown 输出 lazy-CJS（`window.__ModuleLoader__.load({ id, factory })`），
   `react` / `react-dom` / `react/jsx-runtime` 必须 external（`deps.neverBundle: true`）；
   打进第二份 React 会让 hooks 崩。改 `tsdown.config.ts` 前先读注释里的历史坑。
@@ -369,6 +372,17 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
   需要真机验收时用独立环境：独立 `DSH_HOME`（如 `.verify-home/`）+ 独立端口 +
   与桌面应用同版本的外壳（本地 `npm i @deepseek-ai/dsh@0.2.0-rc.2`），
   profile bundles = `@deepseek-ai/dsh-base` + `@deepseek-ai/dsh-web-app` + `link:<本仓库>`。
+  **不落盘、免安装的等价做法**：直接用桌面应用自带运行时跑 web 实例——
+  `ELECTRON_RUN_AS_NODE=1 DSH_HOME=$PWD/.verify-home "<app>/Contents/MacOS/DeepSeek Harness" --expose-internals "<app>/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js" --profile web --no-open --port <port>`；
+  启动日志会打印带 token 的 `dsh web: http://127.0.0.1:<port>/?token=…`，再用
+  Playwright（`notes/verify/live-gui-*.mjs`）复核。0.2.2-rc.1 下的复核结论与
+  命令见 CHANGELOG `[1.16.0]`。
+- **宿主兼容版本声明**：`package.json` 的 `engines.dsh` 是运行时兼容范围的**单一事实源**
+  （0.2.1+ 的 loader 有它时只认它、忽略 `@deepseek-ai/dsh*` peer；0.2.0 无此字段支持时
+  回退 peer 校验，所以 `peerDependencies` 里的 dsh 范围仍要保留且自洽）。
+  当前声明 `>=0.2.0-rc.2 <0.3.0`；升级并验证新宿主版本后同步改这里（`semver` 判定用
+  `includePrerelease: true`，0.2.x 预发布都算满足）。`@deepseek-ai/cordis` 不在
+  校验范围（loader 只过滤 `@deepseek-ai/dsh*`），peer 写 `>=4.0.4 <5.0.0` 即可。
 - **推送 + 重装优先用脚本**：`bash scripts/push-and-reinstall.sh`（或 `pnpm push:install`，
   默认 desktop/master，`--dry-run` 先看参数与计划）；细节见上文「推送 + 重装（一条命令）」。
   手动兜底通道才是 `plugin_manager` 的 `remove_bundle` + `install_bundle`

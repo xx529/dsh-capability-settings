@@ -3,6 +3,72 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.16.0] - 2026-11-08
+
+### 修复
+
+- **DSH 升级到 0.2.2-rc.1 后，插件清单的兼容声明与实际宿主版本不符**
+  （用户反馈：确认插件在 0.2.2-rc.1 下的适配情况）。宿主 0.2.2 的插件加载门禁
+  （`@deepseek-ai/dsh-app-boot` 的 `evaluatePluginCompatibility`）规则是：声明了
+  `engines.dsh` 就只按它判定、忽略 `@deepseek-ai/dsh*` peer；否则逐个校验 dsh-*
+  peer（`semver.satisfies(runtime, range, { includePrerelease: true })`），不匹配
+  整个 bundle 被 `skipping profile bundle` 跳过。原清单：
+  - `@deepseek-ai/cordis` peer 是 `~4.0.4`，而宿主 0.2.2 用 **cordis 4.1.0**；
+    cordis 不在门禁过滤范围（只看 `@deepseek-ai/dsh*`），**不影响加载**，但声明失真；
+  - `@deepseek-ai/dsh-invariants` peer 指向的包自 0.2.1 起已不再随宿主发布
+    （0.2.2 app.asar 内不存在、npm 无 0.2.1+ 版本）；门禁只比「范围 vs 运行时版本」、
+    插件源码也不 import，**不影响加载**，但同样失真且会让 pnpm/插件管理器报
+    unmet peer。
+
+  现改为：删除 `@deepseek-ai/dsh-invariants`（peer + dev）；`@deepseek-ai/cordis`
+  peer 放宽为 `>=4.0.4 <5.0.0`（devDeps 升到 `^4.1.0`，与宿主 4.1.0 的
+  `ctx.inject`/`ctx.plugin` 返回 Fiber 语义对齐）；新增
+  **`engines.dsh: ">=0.2.0-rc.2 <0.3.0"`** 作为运行时兼容范围的单一事实源
+  （0.2.1+ 只认它；0.2.0-rc.2 无该字段支持时回退 peer，两种路径都通过）。
+
+### 变更
+
+- 开发依赖 / 类型目标升级到 **DSH 0.2.2-rc.1**：`@deepseek-ai/dsh-*` devDeps 全部
+  `^0.2.2-rc.1`；运行时兜底依赖 `@deepseek-ai/dsh-home-paths`、
+  `@deepseek-ai/dsh-mcp-client` 同步到 `^0.2.2-rc.1`（仍优先使用宿主 loader 里的同一份实例）。
+- 宿主行为变化（插件无需改码，仅记录）：0.2.2 起 agent-instructions baseline 额外读取
+  `~/.agents/AGENTS.md`（`agents-global` 作用域）并做双根去重 —— 插件 v23 Prompt 域
+  已按同语义建模；`dsh-mcp-client` 对未声明 `resources` 能力的 server 不再调用
+  `resources/list`，插件「关掉 server 后资源清单遮蔽」逻辑与段格式不变。
+
+### 内部
+
+- **0.2.2-rc.1 兼容审计（0 breaking）**：宿主侧 A–M 契约（插件加载 / tools
+  `restrict`·`schemas`·`guard`·`change` / `systemPrompt.section` 同名空文本 shadow /
+  `agent/pre-step`·`agent/created`·`agent/disposed`·`session/disposed` /
+  `webServer.register({kind:"prefix"})` / `loader.import` / `system-prompt/assemble` /
+  mcp-client / mcp-resources / skills 注册表 / `sessionPersistence.stat` /
+  `dsh-home-paths`）与客户端 24 条契约（lazy-CJS 注册协议、`dsh.client.inject`、
+  `exports["./client"]`、4 个槽位与 standardProps、`connection.rpc.call` 包络、
+  workspaces/sessions 快照、`layout.selectPanel`、React externals）逐条对照 0.2.0/0.2.1
+  基线，均为 unchanged 或纯加性变化。关键对照：`dsh-client-ui-renderer` 与
+  `dsh-client-connection` 的 `client.browser.js` 相对 0.2.1-rc.3 **字节相同**。
+  审计报告（本地、已 gitignore）：`notes/compat-022/{host-audit,client-audit}/findings.md`。
+- **隔离实机复核**（不触碰用户 profile）：桌面应用自带 0.2.2-rc.1 运行时 +
+  `DSH_HOME=.verify-home` 起独立 web 实例（`--profile web --port 19400`），Playwright
+  只读复核：能力面板 5 个域全部渲染（Skills 176 / MCP 9 / Tools 3 / Prompt 0 /
+  Jev 模型）；RPC `skills.list` / `mcp.list` / `tools.list` / `prompt.list` /
+  `overrides.globalGet` / `session.listOverrides` 全部 `{ok:true}`；首屏 hero 入口
+  计数（Skills 175 / MCP 9 / Tools 3）与「派生继承」下拉正常；`.skp-main` 高度 =
+  视口 950px、列表滚动容器 `.skp-group-scroll` clientH 752 / scrollH 18170
+  —— 确认 0.2.2 新增的 `.mainPanel` 包裹层不影响全高与内部滚动。
+- 启动日志无 `skipping profile bundle "dsh-capability-settings"`（新 `engines.dsh`
+  在 0.2.2-rc.1 门禁下判定通过；重启隔离实例后复验）。
+- 验证：`pnpm typecheck` / `pnpm build` 通过（`lib/client.js` 831.26 kB，与运行中桌面
+  实际下发的 831,309 B bundle 一致）；`loader-behavior` 81/81、Jev host 套件
+  （host-config 82/82、host-rank 132/132、host-apply 122/122、host-rpc 13/13、
+  client-adapter 21/21）、v23/v24/v25 UI 与 prompt 套件全过。
+- **本地 `run-all.sh` 说明**：整体仍有 17 个脚本失败，逐条核对为**与当前代码语义
+  脱节的历史残留用例**（如 `slot-input-dock-hero` 期望 v18 已移除的 `input.dock`、
+  `render-smoke` 期望旧版导航、`dock-visual` 抛错），用 HEAD 的旧依赖基线（0.2.0-rc.1）
+  跑同名脚本失败数完全一致（render-smoke 8 / capability-dock-render 10 /
+  bug1-composer-cwd-e2e 7），**与本版本改动无关**；不是依赖升级引入的回归。
+
 ## [1.15.1] - 2026-11-06
 
 ### 修复
