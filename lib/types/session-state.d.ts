@@ -224,6 +224,18 @@ export interface SessionStateStore {
         tools?: Readonly<Record<string, boolean>>;
     }, meta?: SessionStateMeta, dynamic?: DerivedDynamicInfo): Promise<void>;
     /**
+     * 会话分叉（对话「分叉」）时把源会话的显式覆盖复制到新会话记录（一次落盘）。
+     *
+     * 与 {@link seedDerived} 的区别：不写 `derived*` 元数据——分叉会话仍是普通
+     * 会话（派生继承下拉、派生页只服务 subagent / teammate），只是创建时复制
+     * 了当时的会话级能力开关。三域都为空时不建记录。
+     */
+    inheritToggles(sessionId: string, toggles: {
+        skills?: Readonly<Record<string, boolean>>;
+        mcp?: Readonly<Record<string, boolean>>;
+        tools?: Readonly<Record<string, boolean>>;
+    }, meta?: SessionStateMeta): Promise<void>;
+    /**
      * 一次性 unit id 迁移（D2）：把 `plugin:<旧 display>` 归一为 `plugin:<包名>`，
      * 同时写入旧键镜像（可回滚）并保留未知键；幂等（已 settled 不写盘）。
      */

@@ -12,7 +12,12 @@
  *   - **只在 `agent/created` 且 `source === "startup"`（新创建）时生效**；
  *     `source === "resume"` 一律跳过——子会话记录里已有创建时快照；
  *   - 只影响之后创建的 child，已存在的 child 不回溯；
- *   - 复制的是父会话的**显式覆盖**（不是项目 / 全局默认）。
+ *   - 复制的是父会话的**显式覆盖**（不是项目 / 全局默认）；
+ *   - **会话分叉**（对话「分叉 / branch」，宿主不写 `parentSession`、只有
+ *     `isSeeded`）也走同一个快照计算，但不再看派生模式：总是复制源会话的
+ *     会话级覆盖（同一段对话的延续），且不写 `derived*` 元数据——分叉会话仍是
+ *     普通会话（派生下拉 / 派生页只服务 subagent / teammate）。源会话 id 由
+ *     `derive/fork-source.ts` 在宿主 fork 调用期间提供。
  *
  * 时序：本模块必须在 skills / mcp / tools 的 `agent/created` 监听器之前创建，
  * 这样监听器（被 cordis serial await）先把快照写进 child 的会话记录，三个域
@@ -57,6 +62,11 @@ export interface DeriveInheritanceDeps {
    * 但 `agent/created` 事件发生在插件装配完成之后）。
    */
   dynamic?: () => DynamicSelectHost | undefined;
+  /**
+   * 会话分叉来源：`agent/created` 执行期间（宿主 fork 调用内部）返回被分叉的
+   * 源会话 id；不在 fork 流程里返回 undefined（见 `derive/fork-source.ts`）。
+   */
+  forkSource?: () => string | undefined;
 }
 
 /** 生命周期句柄。 */
@@ -241,7 +251,14 @@ export function createDeriveInheritance(ctx: any, deps: DeriveInheritanceDeps): 
     if (source !== "startup") return;
     const header = agent?.session?.header;
     const childId = typeof agent?.id === "string" ? agent.id : undefined;
-    const parentId = typeof header?.parentSession === "string" ? header.parentSession : undefined;
+    const headerParent = typeof header?.parentSession === "string" ? header.parentSession : undefined;
+    /**
+     * 会话分叉（对话「分叉 / branch」）：宿主按设计**不给** fork 子会话写
+     * `parentSession`（只写 `isSeeded`），源会话 id 由 `derive/fork-source` 在
+     * fork 调用期间经 AsyncLocalStorage 提供。拿不到时按普通新会话处理。
+     */
+    const forkParent = headerParent === undefined && header?.isSeeded === true ? deps.forkSource?.() : undefined;
+    const parentId = headerParent ?? forkParent;
     if (childId === undefined || parentId === undefined) return;
 
     await state.ready();
@@ -249,7 +266,6 @@ export function createDeriveInheritance(ctx: any, deps: DeriveInheritanceDeps): 
     // 已经写过派生快照（例如同一 agent 被重复 announce）⇒ 保留第一次结果。
     if (state.derivedInfo(childId) !== undefined) return;
 
-    const mode = state.deriveMode(parentId);
     const meta = metaOf(agent);
     const childCwd = typeof header?.cwd === "string" ? header.cwd : undefined;
     let parentAgent: any;
@@ -266,6 +282,31 @@ export function createDeriveInheritance(ctx: any, deps: DeriveInheritanceDeps): 
       if (typeof recordCwd === "string" && recordCwd.length > 0) parentCwd = recordCwd;
     }
 
+    /**
+     * 会话分叉：总是复制源会话的会话级覆盖（它是同一段对话的延续，与「派生继承
+     * 下拉」无关）；不写 `derived*` 元数据——分叉会话仍是普通会话，下拉与派生页
+     * 只服务 subagent / teammate。
+     */
+    if (forkParent !== undefined) {
+      const toggles = await sessionTogglesFor({
+        ctx,
+        state,
+        ...(logger !== undefined ? { logger } : {}),
+        parentId,
+        parentAgent,
+        parentCwd,
+        childAgent: agent,
+        childCwd,
+      });
+      await state.inheritToggles(childId, toggles, meta);
+      logger?.info?.(
+        `capability-panel: 会话分叉 ${parentId} → ${childId}：复制会话级能力` +
+          `（skills ${Object.keys(toggles.skills).length} / mcp ${Object.keys(toggles.mcp).length} / tools ${Object.keys(toggles.tools).length}）`,
+      );
+      return;
+    }
+
+    const mode = state.deriveMode(parentId);
     const dynamicHost = deps.dynamic?.();
     let recordMode: DeriveMode;
     let toggles: DerivedToggles = emptyToggles();

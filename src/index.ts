@@ -41,6 +41,7 @@ import { createJevManager } from "./jev/manager.js";
 import { createSessionState } from "./session-state.js";
 import { createSessionStateReconciler } from "./session-state-reconcile.js";
 import { createDeriveInheritance, repairDynamicFallbackSkillProjection } from "./derive/manager.js";
+import { createForkSourceTracker } from "./derive/fork-source.js";
 import { createDeriveAutoSelect } from "./derive/auto-select.js";
 import type { DeriveAutoSelect } from "./derive/auto-select.js";
 import { createToolsManager } from "./tools/manager.js";
@@ -205,11 +206,15 @@ export function apply(ctx: any, config: Config = {}) {
     };
   } = {};
   const deriveDynamicRef: { current?: DeriveAutoSelect } = {};
+  // 会话分叉（对话「分叉 / branch」）不写 `parentSession`，靠宿主 fork 方法外层
+  // 的 AsyncLocalStorage 记录源会话 id；必须在用户点击分叉前安装。
+  const forkSource = createForkSourceTracker(ctx, ctx.logger);
   const deriveInheritance = createDeriveInheritance(ctx, {
     state: sessionState,
     logger: ctx.logger,
     getSkillSessions: () => deriveSkillSessionsRef.current,
     dynamic: () => deriveDynamicRef.current,
+    forkSource: () => forkSource.parent(),
   });
   // Tools 域（v13）：枚举全局工具注册表 → 按插件聚合成开关单元 → 按会话
   // restrict 该插件全部可继承工具。与会话存储共用同一实例（`tools` 域）。
@@ -537,6 +542,7 @@ export function apply(ctx: any, config: Config = {}) {
     disposeUsageGuard,
     () => disposePromptInjection(),
     () => deriveInheritance.dispose(),
+    () => forkSource.dispose(),
     () => deriveAutoSelect.dispose(),
     () => skillsRegistry.dispose(),
     () => skillSessions.dispose(),

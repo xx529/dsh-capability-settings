@@ -12,7 +12,12 @@
  *   - **只在 `agent/created` 且 `source === "startup"`（新创建）时生效**；
  *     `source === "resume"` 一律跳过——子会话记录里已有创建时快照；
  *   - 只影响之后创建的 child，已存在的 child 不回溯；
- *   - 复制的是父会话的**显式覆盖**（不是项目 / 全局默认）。
+ *   - 复制的是父会话的**显式覆盖**（不是项目 / 全局默认）；
+ *   - **会话分叉**（对话「分叉 / branch」，宿主不写 `parentSession`、只有
+ *     `isSeeded`）也走同一个快照计算，但不再看派生模式：总是复制源会话的
+ *     会话级覆盖（同一段对话的延续），且不写 `derived*` 元数据——分叉会话仍是
+ *     普通会话（派生下拉 / 派生页只服务 subagent / teammate）。源会话 id 由
+ *     `derive/fork-source.ts` 在宿主 fork 调用期间提供。
  *
  * 时序：本模块必须在 skills / mcp / tools 的 `agent/created` 监听器之前创建，
  * 这样监听器（被 cordis serial await）先把快照写进 child 的会话记录，三个域
@@ -55,6 +60,11 @@ export interface DeriveInheritanceDeps {
      * 但 `agent/created` 事件发生在插件装配完成之后）。
      */
     dynamic?: () => DynamicSelectHost | undefined;
+    /**
+     * 会话分叉来源：`agent/created` 执行期间（宿主 fork 调用内部）返回被分叉的
+     * 源会话 id；不在 fork 流程里返回 undefined（见 `derive/fork-source.ts`）。
+     */
+    forkSource?: () => string | undefined;
 }
 /** 生命周期句柄。 */
 export interface DeriveInheritance {

@@ -802,8 +802,9 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   resume 后都保持；写入失败只记 warning（本次运行内仍生效）。会话被删除后，插件
   按「存在性校验 + 24 小时两阶段」清理其记录——宿主没有会话删除事件，关机时的
   `session/disposed` 只做缺失标记、**绝不直接删除**，避免重启清空全部会话开关。
-  `fork` 出的子会话是新 id；默认的「派生继承会话」会在创建那一刻复制父会话的
-  显式覆盖，选择「派生继承工作区」则不复制（见上条派生继承）。
+  subagent fork / teammate 出的子会话是新 id；默认的「派生继承会话」会在创建
+  那一刻复制父会话的显式覆盖，选择「派生继承工作区」则不复制（见上条派生继承）；
+  对话「分叉」另有专门规则，见下条。
 
 - **派生继承（v24，spawn-time snapshot）**：主对话的「本会话能力」工具行右端与
   首屏行各有一个下拉，`派生继承会话`（默认）/ `派生继承工作区` / `动态选择`。
@@ -827,6 +828,16 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   `total` / `counts` / `fallback`）；RPC 为 `session.deriveGet` /
   `session.deriveSet`。**成本与隐私**：动态选择会把委派任务文本发给 Jev，并阻塞
   spawn 到打分完成（上限 8s）；失败只回退，不阻塞子 agent 创建。
+
+- **对话分叉（branch）继承会话级能力**：聊天消息上的「分叉」会从当前会话复制
+  历史前缀、创建一个**新会话**（宿主按设计不写 `parentSession`，只有 `isSeeded`）。
+  插件在宿主 `session/fork` 方法外层用 `AsyncLocalStorage` 记录源会话 id，在该
+  子会话 `agent/created`（`source=startup` + `isSeeded` + 无 `parentSession`）时
+  把源会话的会话级开关按「派生继承会话」同一口径复制过去：Skills 按父 / 子可见
+  集合投影，MCP / Tools 复制显式覆盖。与派生模式下拉**无关**（分叉是同一段对话
+  的延续）；分叉会话仍是**普通会话**——不写 `derived*` 元数据，派生下拉 / 派生页
+  只服务 subagent / teammate，之后父子各自独立修改。`resume` 不重新继承；源会话
+  是冷会话时只复制已落盘的显式覆盖（拿不到可见技能集合，不做投影）。
 
 ### 🧭 Jev 能力决策：按输入草稿为本会话预选能力
 

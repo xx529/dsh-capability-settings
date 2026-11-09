@@ -265,6 +265,22 @@ export interface SessionStateStore {
     dynamic?: DerivedDynamicInfo,
   ): Promise<void>;
   /**
+   * 会话分叉（对话「分叉」）时把源会话的显式覆盖复制到新会话记录（一次落盘）。
+   *
+   * 与 {@link seedDerived} 的区别：不写 `derived*` 元数据——分叉会话仍是普通
+   * 会话（派生继承下拉、派生页只服务 subagent / teammate），只是创建时复制
+   * 了当时的会话级能力开关。三域都为空时不建记录。
+   */
+  inheritToggles(
+    sessionId: string,
+    toggles: {
+      skills?: Readonly<Record<string, boolean>>;
+      mcp?: Readonly<Record<string, boolean>>;
+      tools?: Readonly<Record<string, boolean>>;
+    },
+    meta?: SessionStateMeta,
+  ): Promise<void>;
+  /**
    * 一次性 unit id 迁移（D2）：把 `plugin:<旧 display>` 归一为 `plugin:<包名>`，
    * 同时写入旧键镜像（可回滚）并保留未知键；幂等（已 settled 不写盘）。
    */
@@ -645,6 +661,23 @@ export function createSessionState(deps: SessionStateDeps = {}): SessionStateSto
         delete entry.mcp;
         delete entry.tools;
       }
+      await persist();
+    },
+
+    async inheritToggles(sessionId, toggles, meta): Promise<void> {
+      await ready();
+      const skills = { ...(toggles.skills ?? {}) };
+      const mcp = { ...(toggles.mcp ?? {}) };
+      const tools = { ...(toggles.tools ?? {}) };
+      // 三域都没有可复制的显式覆盖 ⇒ 不建记录（新会话按默认值启动即可）。
+      if (Object.keys(skills).length === 0 && Object.keys(mcp).length === 0 && Object.keys(tools).length === 0) return;
+      const entry = ensureEntry(sessionId, meta);
+      if (Object.keys(skills).length > 0) entry.skills = skills;
+      else delete entry.skills;
+      if (Object.keys(mcp).length > 0) entry.mcp = mcp;
+      else delete entry.mcp;
+      if (Object.keys(tools).length > 0) entry.tools = tools;
+      else delete entry.tools;
       await persist();
     },
 

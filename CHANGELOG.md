@@ -3,6 +3,31 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 新增
+
+- **对话「分叉」继承原会话的会话级能力开关**（用户反馈：分叉出的会话没有继承
+  原会话的 session 级能力配置）：宿主 `session/fork` 按设计**不写 `parentSession`**
+  （只写 `isSeeded` + 继承事件前缀），插件原本只在有 `parentSession` 时才做派生
+  继承，因此分叉会话总是落回项目 / 全局默认。现在：
+  - 新增 `src/derive/fork-source.ts`：在宿主 `sessionController.fork` 方法外层套
+    `AsyncLocalStorage`，fork 调用期间（含其内部 `agent/created` 派发）可读到源
+    会话 id；cordis traceable Proxy 用 `Symbol.for("cordis.original")` 取原始服务
+    实例替换方法，dispose 还原，任何失败 fail-open（分叉照常创建）；
+  - `derive/manager` 的 `agent/created` 把「`isSeeded` + 无 `parentSession` +
+    fork 上下文有源会话」识别为分叉，按「派生继承会话」同一口径复制：Skills 按
+    父 / 子可见集合投影、MCP / Tools 复制显式覆盖；**不看派生模式下拉**（分叉是
+    同一段对话的延续），`resume` 不重新继承；
+  - 分叉会话仍是普通会话：不写 `derived*` 元数据（派生下拉 / 派生页只服务
+    subagent / teammate），父子之后各自独立；
+  - 新增 `session-state.inheritToggles`（一次落盘复制三域覆盖；全空不建记录）。
+  验证：`notes/verify/v27-fork-inherit.mjs` 6/6；**真实宿主（隔离实例
+  DSH 0.2.2-rc.1）E2E**：对带完整轮次的会话设置 Skills / MCP / Tools 会话开关后
+  调 `session/fork`，子会话记录得到 `skills` 172 项投影（含父显式关闭项）、
+  `mcp:server:tavily=false`、`tools:plugin:dsh-task-gantt=false`；子会话 live
+  列表 `enabledInSession=false` 生效，`session.deriveGet` 无 `derived` 字段。
+
 ## [1.16.0] - 2026-11-08
 
 ### 修复
