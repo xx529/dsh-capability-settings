@@ -944,14 +944,7 @@ export function McpDebugDialog({
           </button>
         </div>
 
-        {/* 常驻安全提示 */}
-        <div className="skp-dbg-notice">
-          <span aria-hidden="true">⚠</span>
-          <span>
-            调试调用会真实执行一次工具（可能产生副作用 / 消耗额度）；结果不写入对话上下文
-            {entry !== undefined ? "，走一次性连接不挂载。" : "，走已挂载实例。"}
-          </span>
-        </div>
+        {/* 不展示安全提示条（按用户要求）：连接方式与「不挂载 / 走已挂载实例」说明保留在底部左侧。 */}
 
         <div className="skp-dbg-body">
           {/* 刻意不展示 tool.description：工具说明在详情页 / 工具列表已可见，
