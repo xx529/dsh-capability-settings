@@ -888,6 +888,7 @@ export function McpDebugDialog({
       if (event.key === "Escape") {
         // 自绘下拉打开时，Esc 只关下拉（SkpSelect 自己处理），不要连带关弹窗。
         if (document.querySelector(".skp-dd-pop") !== null) return;
+        if (document.querySelector(".skp-dbg-help-pop") !== null) return;
         event.stopPropagation();
         onClose();
         return;
@@ -1065,7 +1066,7 @@ interface ArrayActions {
   onRemove(field: DebugField, index: number): void;
 }
 
-/** 字段标签行（名称 / 类型 / 必填；说明单独一行，跨两列展示）。 */
+/** 字段标签行（名称 / 类型 / 必填）；说明收进「?」悬浮提示，不占行。 */
 function FieldLabel({ field }: { field: DebugField }) {
   return (
     <div className="skp-dbg-field-label">
@@ -1076,7 +1077,94 @@ function FieldLabel({ field }: { field: DebugField }) {
       <span className={field.required ? "skp-tag skp-tag-warn" : "skp-tag skp-tag-flat"}>
         {field.required ? "必填" : "可选"}
       </span>
+      {field.description !== undefined && <HelpTip text={field.description} />}
     </div>
+  );
+}
+
+/**
+ * 参数说明的「?」悬浮提示。
+ *
+ * 长描述不再内联占行（会把表单撑得很散）：鼠标移入 / 键盘聚焦时弹出，
+ * 文案放在 fixed 定位的浮层里（不受弹窗滚动容器裁剪），并按视口上下空间
+ * 自动选择向上 / 向下展开；Esc 关闭、移出后短暂延迟收起（方便移入浮层阅读）。
+ */
+function HelpTip({ text }: { text: string }) {
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const hideTimer = useRef<number | undefined>(undefined);
+  const [anchor, setAnchor] = useState<{ left: number; top?: number; bottom?: number; width: number } | null>(null);
+  const open = anchor !== null;
+  const clearHide = () => {
+    if (hideTimer.current !== undefined) {
+      window.clearTimeout(hideTimer.current);
+      hideTimer.current = undefined;
+    }
+  };
+  const show = () => {
+    clearHide();
+    const button = btnRef.current;
+    if (button === null) return;
+    const rect = button.getBoundingClientRect();
+    const width = Math.min(360, window.innerWidth - 16);
+    const left = Math.min(Math.max(8, rect.right - width), window.innerWidth - width - 8);
+    if (window.innerHeight - rect.bottom >= 160) setAnchor({ left, top: rect.bottom + 6, width });
+    else setAnchor({ left, bottom: window.innerHeight - rect.top + 6, width });
+  };
+  const hide = () => {
+    clearHide();
+    hideTimer.current = window.setTimeout(() => setAnchor(null), 120);
+  };
+  const close = () => {
+    clearHide();
+    setAnchor(null);
+  };
+  useEffect(() => () => clearHide(), []);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      close();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+  return (
+    <span className="skp-dbg-help">
+      <button
+        ref={btnRef}
+        type="button"
+        className="skp-dbg-help-btn"
+        aria-label="参数说明"
+        title={text}
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        onFocus={show}
+        onBlur={hide}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (open) close();
+          else show();
+        }}
+      >
+        ?
+      </button>
+      {open && anchor !== null && (
+        <div
+          className="skp-dbg-help-pop"
+          role="tooltip"
+          style={{
+            left: anchor.left,
+            ...(anchor.top !== undefined ? { top: anchor.top } : { bottom: anchor.bottom }),
+            width: anchor.width,
+          }}
+          onMouseEnter={show}
+          onMouseLeave={hide}
+        >
+          {text}
+        </div>
+      )}
+    </span>
   );
 }
 
@@ -1107,10 +1195,7 @@ function DebugFieldRow({
   if (field.kind === "object") {
     return (
       <div className={error !== undefined ? "skp-dbg-group skp-dbg-group-error" : "skp-dbg-group"}>
-        <div className="skp-dbg-group-head">
-          {label}
-          {field.description !== undefined && <div className="skp-dbg-field-desc">{field.description}</div>}
-        </div>
+        <div className="skp-dbg-group-head">{label}</div>
         <div className="skp-dbg-group-body">
           {(field.children ?? []).map((child) => (
             <DebugFieldRow
@@ -1139,7 +1224,6 @@ function DebugFieldRow({
           <button type="button" className="skp-link-btn" onClick={() => arrayActions.onAdd(field)}>
             ＋ 添加一项
           </button>
-          {field.description !== undefined && <div className="skp-dbg-field-desc">{field.description}</div>}
         </div>
         <div className="skp-dbg-group-body">
           {count === 0 && (
@@ -1213,7 +1297,6 @@ function DebugFieldRow({
       <div className="skp-dbg-field-control">
         <FieldControl field={field} value={draft[field.path] ?? ""} onChange={onChange} />
       </div>
-      {field.description !== undefined && <div className="skp-dbg-field-desc">{field.description}</div>}
       {error !== undefined && <div className="skp-dbg-field-error-text">{error}</div>}
     </div>
   );
