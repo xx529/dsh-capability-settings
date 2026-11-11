@@ -1067,7 +1067,7 @@ interface ArrayActions {
   onRemove(field: DebugField, index: number): void;
 }
 
-/** 字段标签行（名称 / 类型 / 必填 / 说明）。 */
+/** 字段标签行（名称 / 类型 / 必填；说明单独一行，跨两列展示）。 */
 function FieldLabel({ field }: { field: DebugField }) {
   return (
     <div className="skp-dbg-field-label">
@@ -1078,7 +1078,6 @@ function FieldLabel({ field }: { field: DebugField }) {
       <span className={field.required ? "skp-tag skp-tag-warn" : "skp-tag skp-tag-flat"}>
         {field.required ? "必填" : "可选"}
       </span>
-      {field.description !== undefined && <span className="skp-dbg-field-desc">{field.description}</span>}
     </div>
   );
 }
@@ -1110,7 +1109,10 @@ function DebugFieldRow({
   if (field.kind === "object") {
     return (
       <div className={error !== undefined ? "skp-dbg-group skp-dbg-group-error" : "skp-dbg-group"}>
-        <div className="skp-dbg-group-head">{label}</div>
+        <div className="skp-dbg-group-head">
+          {label}
+          {field.description !== undefined && <div className="skp-dbg-field-desc">{field.description}</div>}
+        </div>
         <div className="skp-dbg-group-body">
           {(field.children ?? []).map((child) => (
             <DebugFieldRow
@@ -1139,6 +1141,7 @@ function DebugFieldRow({
           <button type="button" className="skp-link-btn" onClick={() => arrayActions.onAdd(field)}>
             ＋ 添加一项
           </button>
+          {field.description !== undefined && <div className="skp-dbg-field-desc">{field.description}</div>}
         </div>
         <div className="skp-dbg-group-body">
           {count === 0 && (
@@ -1212,6 +1215,7 @@ function DebugFieldRow({
       <div className="skp-dbg-field-control">
         <FieldControl field={field} value={draft[field.path] ?? ""} onChange={onChange} />
       </div>
+      {field.description !== undefined && <div className="skp-dbg-field-desc">{field.description}</div>}
       {error !== undefined && <div className="skp-dbg-field-error-text">{error}</div>}
     </div>
   );

@@ -1079,13 +1079,15 @@ button.skp-dock-rail-fail:hover{filter:brightness(.9);}
 .skp-dbg-spacer{flex:1 1 auto;}
 .skp-dbg-params{display:flex;flex-direction:column;border-top:1px solid var(--skp-border);}
 .skp-dbg-field{display:grid;grid-template-columns:minmax(0,260px) minmax(0,1fr);column-gap:14px;row-gap:4px;padding:9px 0;border-bottom:1px solid var(--skp-border);align-items:start;}
-.skp-dbg-field-label{display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0;}
+.skp-dbg-field-label{grid-column:1;grid-row:1;display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0;}
 .skp-dbg-field-name{font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:12.5px;color:var(--skp-text);}
-.skp-dbg-field-desc{flex:1 0 100%;font-size:11px;line-height:16px;color:var(--skp-text-3);}
-.skp-dbg-field-control{min-width:0;display:flex;flex-direction:column;gap:4px;}
-.skp-dbg-field-error-text{grid-column:2;font-size:10.5px;color:var(--skp-error);}
+/* 说明跨两列、独占一行：长英文（含无空格长词）按列宽换行，不再压到输入框上。 */
+.skp-dbg-field-desc{grid-column:1 / -1;grid-row:2;min-width:0;max-width:100%;font-size:11px;line-height:16px;color:var(--skp-text-3);overflow-wrap:anywhere;word-break:break-word;}
+.skp-dbg-field-control{grid-column:2;grid-row:1;min-width:0;display:flex;flex-direction:column;gap:4px;}
+.skp-dbg-field-error-text{grid-column:1 / -1;grid-row:3;font-size:10.5px;color:var(--skp-error);}
 .skp-dbg-group{border:1px solid var(--skp-border);border-radius:9px;margin:2px 0;background:color-mix(in srgb,var(--skp-fill) 55%,transparent);}
 .skp-dbg-group-head{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:8px 10px;border-bottom:1px solid var(--skp-border);}
+.skp-dbg-group-head>.skp-dbg-field-desc{flex:1 0 100%;min-width:0;overflow-wrap:anywhere;}
 .skp-dbg-group-body{padding:0 10px 0 16px;}
 .skp-dbg-group-body .skp-dbg-field{grid-template-columns:minmax(0,220px) minmax(0,1fr);}
 .skp-dbg-group-body .skp-dbg-field:last-child{border-bottom:0;}
