@@ -3,7 +3,7 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [1.18.0] - 2026-11-11
 
 ### 新增
 
@@ -34,13 +34,26 @@
   - 结果预算 200k 字符（超长文本截断并标记）；调用超时默认 / 上限 60s；失败
     （连接失败 / 超时 / 服务器 JSON-RPC 错误 / isError）都收敛成业务失败就地展示。
   - 文档与设计：README 新增「MCP 工具调试（v25）」；Figma 新页
-    `Capability Panel · MCP 工具调试 v25（定稿）`（page `240:2`，8 帧），预览
-    `docs/figma/preview/v25-01…08-*.png`。
+    `Capability Panel · MCP 工具调试 v25（定稿）`（page `240:2`，9 帧），预览
+    `docs/figma/preview/v25-01…09-*.png`。
   - 验证：`node notes/verify/mcp-invoke.mjs` 12/12（真实 stdio 夹具 tools/call、
     参数校验、未知工具、连接失败、manager 两条路径、RPC 信封、无残留子进程）；
     隔离实例（`DSH_HOME=.verify-home --profile v25`）Playwright 走查 12/12（右栏
     按钮 → 弹窗 → 填参 → 执行回显 `hello v25` → JSON 模式 → Esc）；`pnpm typecheck`
     与 `pnpm build` 通过。
+
+### 修复
+
+- **调试弹窗长描述压到输入框 / 溢出的排版问题**：`string(enum)` 等字段的
+  `description` 很长（含 `sky_click`、`OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS=1`
+  这类长词）时，说明原先放在 260px 标签列里（`flex:1 0 100%`），长词的
+  min-content 宽于列宽、Flex 子项又无法收缩，横向溢出到控件列并压到输入框底部。
+  现在参数行改为三行网格：第 1 行「标签 | 控件」、第 2 行「说明」跨两列、
+  第 3 行「错误」跨两列；说明加 `min-width:0 / max-width:100% /
+  overflow-wrap:anywhere`，长英文与下划线长词按列宽强制断行；分组头的说明
+  同样独占一行。验证 `notes/verify/v25-longdesc-gui.mjs` 6/6（说明在输入框下方、
+  跨两列、不超出弹窗、不压下一行、无横向溢出），回归 v25-debug-gui 12/12、
+  v25-nested-gui 5/5、v25-array-gui 8/8。
 
 ## [1.17.0] - 2026-11-09
 
