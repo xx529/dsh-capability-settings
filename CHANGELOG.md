@@ -3,6 +3,21 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.18.3] - 2026-11-11
+
+### 变更
+
+- **调试弹窗不再展示工具级 `description`**（反馈：context7 的 `resolve-library-id`
+  说明很长，一进弹窗就占满上半屏）：工具说明在 MCP 详情页 / 工具列表已可见，弹窗
+  只保留「参数（含各字段说明）+ 结果」，参数区直接贴着安全提示条开始。
+  - 客户端移除弹窗顶部 `tool.description` 渲染与 `.skp-dbg-desc` 样式；字段级
+    `.skp-dbg-field-desc` 不受影响。
+  - 设计同步：v25 的 02 / 03 / 06 / 08 / 09 帧移除工具描述行并整体上移，规范板 02
+    补「不在弹窗重复展示工具 description」；预览图已重导。
+  - 验证 `notes/verify/v25-nodesc-gui.mjs` 3/3（无工具级描述节点 / 描述文本不出现 /
+    字段级说明仍展示）；回归 v25-debug-gui 12/12、v25-nested-gui 5/5、
+    v25-array-gui 8/8、v25-schemaonly-gui 5/5。
+
 ## [1.18.2] - 2026-11-11
 
 ### 修复

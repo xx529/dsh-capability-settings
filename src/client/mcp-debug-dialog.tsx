@@ -954,10 +954,8 @@ export function McpDebugDialog({
         </div>
 
         <div className="skp-dbg-body">
-          {tool.description !== undefined && tool.description.trim().length > 0 && (
-            <p className="skp-dbg-desc">{tool.description.trim()}</p>
-          )}
-
+          {/* 刻意不展示 tool.description：工具说明在详情页 / 工具列表已可见，
+              弹窗只保留参数（含各字段说明）与结果，避免大段说明挤压表单。 */}
           {mode === "form" ? (
             <>
               <div className="skp-dbg-params-head">

@@ -1073,7 +1073,6 @@ button.skp-dock-rail-fail:hover{filter:brightness(.9);}
 .skp-dbg-close:hover{color:var(--skp-text);}
 .skp-dbg-notice{flex:none;display:flex;gap:8px;align-items:flex-start;padding:8px 16px;background:var(--skp-warn-soft);color:var(--skp-warn);font-size:11.5px;line-height:18px;border-bottom:1px solid var(--skp-border);}
 .skp-dbg-body{flex:1 1 auto;min-height:0;overflow-y:auto;padding:12px 16px 4px;scrollbar-width:thin;}
-.skp-dbg-desc{margin:0 0 10px;font-size:12px;line-height:19px;color:var(--skp-text-3);}
 .skp-dbg-params-head{display:flex;align-items:center;gap:10px;margin:2px 0 8px;min-width:0;}
 .skp-dbg-section-title{font-size:12px;font-weight:600;color:var(--skp-text);flex:none;}
 .skp-dbg-spacer{flex:1 1 auto;}
