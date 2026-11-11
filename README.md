@@ -322,11 +322,10 @@ v2 把手写文字按钮全部收进详情，**列表每行右端只有一个开
 - **嵌套参数**：`object` 带自己的 `properties` 时**递归成子表单**（缩进卡片，最多展开
   3 层；内层 `required` 同样标必填并校验，执行时自动拼回嵌套对象）；`array` 的 `items`
   是基础类型 → **每项一个控件**，是 object → **每项一张子卡片**，可「＋ 添加一项 / ✕ 删除」
-  （删除后下标前移）；`items` 只声明为 object（没有 `properties`）但说明里引用了同服务器
-  某个工具时，按该工具 schema **推断元素字段**（如 AnySearch `batch_search` 的 `queries`
-  按 `search` 推断出 `query`/`domain`/…，分组头标注「字段按 search 推断」）；只有推断不到、
-  `items` 是数组或没有 `items` 时才退回多行 JSON。JSON 模式下可整体编辑，切回表单只回填
-  schema 已知字段（未知键给警告）。
+  （删除后下标前移）；**只按 schema 渲染，不做 schema 之外的猜测**——`items` 只声明为
+  object（没有 `properties`）/ `items` 是数组 / 没有 `items` 时，每项退回多行 JSON，
+  输入不是合法 JSON 对象就提示「输入格式不正确：应为 JSON 对象（例如 {"key":"value"}）」。
+  JSON 模式下可整体编辑，切回表单只回填 schema 已知字段（未知键给警告）。
 - **结果渲染**：`content` 按类型展示（text → 等宽块、JSON 自动 pretty；image → 缩略图；
   resource → 链接），`structuredContent` 默认折叠，可一键复制；`isError` 红标原样展示。
 - **安全边界**：调试调用会真实执行工具（写操作 / 外部 API 会真的发生），提示条常驻；

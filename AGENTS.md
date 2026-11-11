@@ -318,9 +318,9 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
     工具「▶ 调试」弹窗——入口只在右栏当前选中工具标题右侧；参数按 `inputSchema` 生成
     （表单 / JSON 双模式），执行后结果在参数下方滚动展示；object 带 properties 时递归
     成缩进子表单（最多 3 层；内层 required 同样校验）；array 的 items 逐项成行
-    （基础类型一项一控件、object 一项一张子卡片，可增删），items 只声明 object 且说明
-    引用同服务器工具时按该工具 schema 推断字段；只有推断不到 / items 是数组 / 无 items
-    才用 JSON。9 帧：`240:5` 右栏入口 / `240:500` 页面上下文 / `240:272` 参数表单 /
+    （基础类型一项一控件、object 一项一张子卡片，可增删）；**只按 schema 渲染，不做
+    schema 之外的推断**——items 只声明 object / items 是数组 / 无 items 时每项用 JSON，
+    格式不对提示「输入格式不正确」。9 帧：`240:5` 右栏入口 / `240:500` 页面上下文 / `240:272` 参数表单 /
     `240:355` 执行成功 / `240:406` 失败 / `240:453` JSON 模式 / `240:769` 规范板 /
     `242:1055` 嵌套对象子表单。预览图 `docs/figma/preview/v25-*.png`。
     实现：`src/mcp/invoke.ts` + `src/mcp/manager.ts` 的 `invoke` + `src/client/mcp-debug-dialog.tsx`。

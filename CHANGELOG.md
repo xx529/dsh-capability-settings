@@ -3,6 +3,25 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.18.2] - 2026-11-11
+
+### 修复
+
+- **撤销 1.18.1 的「按说明推断元素字段」**（反馈：不要特殊处理，schema 识别不了就
+  提示输入格式不对）：参数表单只按 `inputSchema` 渲染，schema 没声明的字段不猜测、
+  不推断。
+  - `array` 的 `items` 只声明 `type: "object"`（没有 `properties`）时，每项就是一个
+    多行 JSON 文本框；输入不是 JSON 对象时明确提示
+    「输入格式不正确：应为 JSON 对象（例如 {"key":"value"}）」，数组则提示
+    「输入格式不正确：应为 JSON 数组（例如 [1, 2]）」。
+  - 保留 1.18.1 的两个修复：行内解析失败不再叠加「必填数组未添加任何项」；
+    长描述排版（说明跨两列 + 长词断行）。
+  - AnySearch `batch_search` 的 `queries` 因此恢复为每项 JSON：正确写法是
+    `{"query": "新闻"}`（可带 domain / sub_domain / sub_domain_params）。
+  - 验证 `notes/verify/v25-schemaonly-gui.mjs` 5/5（无推断标签 / 每项 JSON 文本框 /
+    非 JSON 提示格式不正确 / 不误报必填数组 / 合法 JSON 可执行回显）；回归
+    v25-debug-gui 12/12、v25-nested-gui 5/5、v25-array-gui 8/8。
+
 ## [1.18.1] - 2026-11-11
 
 ### 修复

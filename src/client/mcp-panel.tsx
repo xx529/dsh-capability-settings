@@ -1700,7 +1700,6 @@ function McpExternalDetail({
           api={api}
           serverLabel={sourceLabel}
           serverName={server.serverName}
-          serverTools={server.tools}
           tool={debugTool}
           onClose={() => setDebugTool(undefined)}
         />
@@ -2153,7 +2152,6 @@ function McpDetail({
           serverLabel={server.key}
           entry={server.entry}
           entryKey={server.key}
-          serverTools={tools}
           tool={debugTool}
           onClose={() => setDebugTool(undefined)}
         />

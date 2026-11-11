@@ -21,20 +21,11 @@
  */
 import type { ClientMcpTool, McpApi } from "./api.js";
 import type { McpServerEntry } from "../mcp/types.js";
-/** 同服务器的其它工具（用于「元素字段按某个工具 schema 推断」）。 */
-export interface DebugSchemaContext {
-    tools?: readonly {
-        name: string;
-        parameters?: Record<string, unknown>;
-    }[];
-}
 /** 调试弹窗：参数表单 + 执行 + 结果（同一滚动区）。 */
-export declare function McpDebugDialog({ api, serverLabel, serverName, entry, entryKey, tool, serverTools, onClose, }: {
+export declare function McpDebugDialog({ api, serverLabel, serverName, entry, entryKey, tool, onClose, }: {
     api: McpApi;
     /** 服务器展示名（头部徽章）。 */
     serverLabel: string;
-    /** 同服务器的其它工具（用于自由格式 object 元素的字段推断）。 */
-    serverTools?: readonly ClientMcpTool[];
     /** 外部注入实例路径：serverName。 */
     serverName?: string;
     /** 配置条目路径：条目本身 + 键名。 */
