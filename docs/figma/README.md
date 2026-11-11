@@ -112,9 +112,10 @@
   03 参数表单 `240:272` / 04 执行成功（参数保持展开，结果在参数下方滚动）`240:355` /
   05 失败（工具 isError + 连接失败两分支）`240:406` / 06 JSON 模式 + 行级校验 `240:453` /
   07 规范板（入口 / 弹窗外壳 / 表单控件映射 / JSON / 执行通道 / 结果渲染 / 安全边界 /
-  实现映射）`240:769` / 08 嵌套对象递归子表单 `242:1055`（object 带 properties → 缩进
-  子表单，最多 3 层；array / 无 properties 的 object 仍 JSON）；notes `240:789`。
-  预览图 `preview/v25-01..08`。scene JSON 未导出
+  实现映射）`240:769` / 08 嵌套对象递归子表单 `242:1055` / 09 数组逐项输入
+  `242:1130`（items 基础类型 → 一项一控件；items object → 一项一张子卡片；可增删、
+  删除后下标前移；只有 items 是数组 / 无 items 才退回 JSON）；notes `240:789`。
+  预览图 `preview/v25-01..09`。scene JSON 未导出
   （草案阶段同 v19/v21/v22/v24 口径，确认后按 `tools/export-scene.js` 补）。
   **已落代码（Unreleased）**：宿主 `src/mcp/invoke.ts`（`callToolOnce`，复用
   `probe.openMcpSession`）+ `src/mcp/manager.ts` 的 `invoke`（配置条目 = 一次性连接；

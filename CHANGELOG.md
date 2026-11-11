@@ -21,14 +21,16 @@
     校验、JSON 模式行内错误、执行后自动滚动到结果、`content` 按类型渲染（text
     pretty / image 缩略图 / resource 链接）、`structuredContent` 折叠、复制结果、
     Esc 关闭、⌘/Ctrl+Enter 执行；草稿与上次结果缓存在内存（同工具再打开恢复）。
-  - **嵌套 object 递归子表单**（反馈「object 嵌套参数怎么填」）：`object` 带
-    `properties` 时按 schema 递归渲染成缩进子表单（最多 3 层；内层 `required`
-    同样标必填并校验，必填对象要求至少填一个子字段），执行时自动拼回嵌套对象；
-    `array` 与无 `properties` 的 `object` 继续用多行 JSON；JSON 模式递归校验嵌套
-    类型/必填并提示未知键，切回表单只回填已知字段。设计新增第 8 帧
-    `preview/v25-08-nested.png`；验证 `notes/verify/v25-nested-gui.mjs` 5/5
-    （子表单卡片 / name·vip 分行 / 不再用 JSON 文本框 / 必填后执行可用 / 结果回显
-    `customer.name`·`customer.vip`）。
+  - **嵌套 object 递归子表单 + 数组逐项输入**（反馈「object 嵌套参数怎么填」
+    「array 应该给一个个格子」）：`object` 带 `properties` 时按 schema 递归渲染成
+    缩进子表单（最多 3 层；内层 `required` 同样标必填并校验，必填对象要求至少填一个
+    子字段）；`array` 的 `items` 是基础类型 → 每项一个控件，是 object → 每项一张子
+    卡片，支持「＋ 添加一项 / ✕ 删除」（删除后下标前移，已填值保留）；只有 items 是
+    数组或没有 items 时才退回多行 JSON；必填数组 0 项时执行禁用。JSON 模式递归校验
+    嵌套类型/必填/数组项并提示未知键，切回表单只回填已知字段。设计新增第 8/9 帧
+    `preview/v25-08-nested.png` / `v25-09-array.png`；验证
+    `notes/verify/v25-nested-gui.mjs` 5/5、`notes/verify/v25-array-gui.mjs` 8/8
+    （逐项分组 / 增删与下标前移 / 必填数组禁用 / 字符串数组与对象数组执行回显）。
   - 结果预算 200k 字符（超长文本截断并标记）；调用超时默认 / 上限 60s；失败
     （连接失败 / 超时 / 服务器 JSON-RPC 错误 / isError）都收敛成业务失败就地展示。
   - 文档与设计：README 新增「MCP 工具调试（v25）」；Figma 新页

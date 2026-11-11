@@ -320,9 +320,10 @@ v2 把手写文字按钮全部收进详情，**列表每行右端只有一个开
   实例没有配置可读，改走**已挂载**工具注册表（`tools.execute`），仅全局可见实例可调，
   agent 作用域注入的按钮置灰并说明原因。
 - **嵌套参数**：`object` 带自己的 `properties` 时**递归成子表单**（缩进卡片，最多展开
-  3 层；内层 `required` 同样标必填并校验，执行时自动拼回嵌套对象）；`array` 与没有
-  `properties` 的 `object` 仍用多行 JSON；JSON 模式下可整体编辑，切回表单只回填 schema
-  已知字段（未知键给警告）。
+  3 层；内层 `required` 同样标必填并校验，执行时自动拼回嵌套对象）；`array` 的 `items`
+  是基础类型 → **每项一个控件**，是 object → **每项一张子卡片**，可「＋ 添加一项 / ✕ 删除」
+  （删除后下标前移）；只有 `items` 是数组或没有 `items` 时才退回多行 JSON。JSON 模式下可
+  整体编辑，切回表单只回填 schema 已知字段（未知键给警告）。
 - **结果渲染**：`content` 按类型展示（text → 等宽块、JSON 自动 pretty；image → 缩略图；
   resource → 链接），`structuredContent` 默认折叠，可一键复制；`isError` 红标原样展示。
 - **安全边界**：调试调用会真实执行工具（写操作 / 外部 API 会真的发生），提示条常驻；
@@ -330,7 +331,7 @@ v2 把手写文字按钮全部收进详情，**列表每行右端只有一个开
   上次结果（仅内存，进程重载即清空）；单次调用超时上限 60s。
 
 设计稿：Figma `Capability Panel · MCP 工具调试 v25（定稿）`（page `240:2`），预览
-`docs/figma/preview/v25-01…08-*.png`（08 = 嵌套对象递归子表单）。
+`docs/figma/preview/v25-01…09-*.png`（08 = 嵌套对象递归子表单，09 = 数组逐项输入）。
 
 ![MCP 工具调试（v25）：右栏入口 / 参数表单 / 执行结果](docs/figma/preview/v25-02-context.png)
 
