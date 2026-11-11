@@ -3,6 +3,18 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.18.6] - 2026-11-11
+
+### 修复
+
+- **问号悬浮说明停留久了会出现两个浮层**（反馈：hover 一会儿后系统 tooltip 与自定义
+  浮层叠在一起）：问号按钮原先同时挂了原生 `title`，浏览器在 ~1s 后弹出系统 tooltip。
+  现在移除 `title`，只用自定义浮层；同时给按钮加 `aria-describedby` 指向打开的
+  浮层（无障碍信息不丢）。
+  - 设计同步：第 10 帧规则补「不使用原生 title」，规范板 03 的 ? 规则同步。
+  - 验证 `notes/verify/v25-singletip-gui.mjs` 4/4（无 title / 停留 2.5s 仅一个浮层 /
+    aria-describedby 指向浮层 / 内容正确）；回归 v25-helptip-gui 10/10 等。
+
 ## [1.18.5] - 2026-11-11
 
 ### 变更

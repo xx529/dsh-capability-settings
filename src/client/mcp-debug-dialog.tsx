@@ -20,7 +20,7 @@
  * @module dsh-capability-settings/client/mcp-debug-dialog
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ClientMcpTool, McpApi, McpInvokeInput, McpInvokeResult } from "./api.js";
 import type { McpServerEntry } from "../mcp/types.js";
 import { SkpSelect } from "./select.js";
@@ -1090,6 +1090,7 @@ function FieldLabel({ field }: { field: DebugField }) {
  * 自动选择向上 / 向下展开；Esc 关闭、移出后短暂延迟收起（方便移入浮层阅读）。
  */
 function HelpTip({ text }: { text: string }) {
+  const tipId = useId();
   const btnRef = useRef<HTMLButtonElement>(null);
   const hideTimer = useRef<number | undefined>(undefined);
   const [anchor, setAnchor] = useState<{ left: number; top?: number; bottom?: number; width: number } | null>(null);
@@ -1136,7 +1137,7 @@ function HelpTip({ text }: { text: string }) {
         type="button"
         className="skp-dbg-help-btn"
         aria-label="参数说明"
-        title={text}
+        aria-describedby={open ? tipId : undefined}
         onMouseEnter={show}
         onMouseLeave={hide}
         onFocus={show}
@@ -1151,6 +1152,7 @@ function HelpTip({ text }: { text: string }) {
       </button>
       {open && anchor !== null && (
         <div
+          id={tipId}
           className="skp-dbg-help-pop"
           role="tooltip"
           style={{
