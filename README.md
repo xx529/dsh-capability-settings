@@ -329,7 +329,7 @@ v2 把手写文字按钮全部收进详情，**列表每行右端只有一个开
   不写入对话历史、不触发 Jev 决策、不进「使用记录」；关闭后再次打开同一工具恢复草稿与
   上次结果（仅内存，进程重载即清空）；单次调用超时上限 60s。
 
-设计稿：Figma `Capability Panel · MCP 工具调试 v25（草案）`（page `240:2`），预览
+设计稿：Figma `Capability Panel · MCP 工具调试 v25（定稿）`（page `240:2`），预览
 `docs/figma/preview/v25-01…08-*.png`（08 = 嵌套对象递归子表单）。
 
 ![MCP 工具调试（v25）：右栏入口 / 参数表单 / 执行结果](docs/figma/preview/v25-02-context.png)

@@ -314,7 +314,7 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
     `225:562` / 规范板 `225:504`；预览图 `docs/figma/preview/v24-*`。实现：
     `src/derive/auto-select.ts` + `src/derive/manager.ts` + `src/session-state.ts`（`derivedDynamic`）
     + `src/client/composer-capability.tsx`。
-  - `Capability Panel · MCP 工具调试 v25（草案，已落代码 Unreleased）`（page `240:2`）：
+  - `Capability Panel · MCP 工具调试 v25（定稿，已实现）`（page `240:2`）：
     工具「▶ 调试」弹窗——入口只在右栏当前选中工具标题右侧；参数按 `inputSchema` 生成
     （表单 / JSON 双模式），执行后结果在参数下方滚动展示；object 带 properties 时递归
     成缩进子表单（最多 3 层；内层 required 同样校验），array / 无 properties 的 object

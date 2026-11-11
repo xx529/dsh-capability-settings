@@ -1,4 +1,4 @@
-# Figma 原型（Dock v5 · 能力面板 v6–v8 · Jev/能力决策 v9–v11 · Skill 来源 v12 · 首屏入口 v14–v17 过程稿 / v18 实现基线 · 派生继承 v19 实现定稿 · 详情页内容优先 v22 草案 · Prompt 指令域 v23 草案 · 派生动态选择 v24 草案 · MCP 工具调试 v25 草案）
+# Figma 原型（Dock v5 · 能力面板 v6–v8 · Jev/能力决策 v9–v11 · Skill 来源 v12 · 首屏入口 v14–v17 过程稿 / v18 实现基线 · 派生继承 v19 实现定稿 · 详情页内容优先 v22 草案 · Prompt 指令域 v23 草案 · 派生动态选择 v24 草案 · MCP 工具调试 v25 定稿）
 
 本目录是能力面板相关 UI 的 Figma 设计源，供人工查看 / 未来智能体继续改原型：
 
@@ -105,7 +105,7 @@
   `src/client/composer-capability.tsx`（三项下拉 + 阈值只读行 + 动态/回退 banner）；
   验证 `notes/verify/v24-dynamic-derive.mjs` 7/7。
 
-- **Capability Panel · MCP 工具调试 v25（草案，已落代码 Unreleased）**（page `240:2`）：
+- **Capability Panel · MCP 工具调试 v25（定稿，已实现）**（page `240:2`）：
   需求——MCP「工具与参数」里每个工具能直接调试调用。**入口只在右栏**：当前选中工具标题
   右侧的「▶ 调试」主按钮（工具列表行内不放按钮，点行仍是切换工具）。7 帧：
   01 详情页 · 右栏入口 `240:5` / 02 页面上下文（遮罩 + 居中弹窗）`240:500` /
