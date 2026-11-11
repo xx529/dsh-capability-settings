@@ -3,6 +3,26 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.18.1] - 2026-11-11
+
+### 修复
+
+- **自由格式 object 数组被要求手写 JSON，且解析错误叠加误报**（反馈：AnySearch
+  `batch_search` 的 `queries` 每项明明是搜索对象，却只给 JSON 文本框；填 `新闻` 后
+  每项报「JSON 解析失败」，分组底部还额外报「必填数组未添加任何项」）：
+  - `items` 只声明 `type: "object"`（没有 `properties`）时，若数组 `description`
+    引用了同服务器的某个工具（如「follows the search tool schema」），按该工具的
+    `inputSchema` 推断元素字段；`batch_search` 因此直接渲染出 `query`（必填）/
+    `domain` / `sub_domain` / `max_results` 等逐项字段，分组头标注
+    「字段按 search 推断」；推断不到才退回每项 JSON。
+  - 修掉误报：只有数组 **0 项**时才提示「必填数组未添加任何项」，行内解析失败
+    不再额外叠加这条错误。
+  - 自由格式 object 的 JSON 解析失败文案改为「应为 JSON 对象（该工具未声明元素
+    字段，请按工具说明填写…）」，不再只写「JSON 解析失败」。
+  - 验证 `notes/verify/v25-freeobj-gui.mjs` 7/7（推断标注 / 推断出 query·domain·
+    max_results / 不再要求整项 JSON / 执行回显 / 无引用时保留 JSON / 错误文案 /
+    不误报必填数组）。
+
 ## [1.18.0] - 2026-11-11
 
 ### 新增

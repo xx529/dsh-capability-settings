@@ -61,6 +61,8 @@ interface DebugField {
   itemTemplate?: DebugField;
   /** 嵌套深度（0 = 顶层）。 */
   depth: number;
+  /** array 的 item 字段是从哪个同服务器工具推断出来的（schema 未声明字段时）。 */
+  inferredFrom?: string;
 }
 
 /** true = 纯 JSON 对象（非 null / 数组）。 */
@@ -93,8 +95,42 @@ function requiredOf(prop: Record<string, unknown>): string[] {
   return Array.isArray(prop.required) ? prop.required.filter((name): name is string => typeof name === "string") : [];
 }
 
+/** 同服务器的其它工具（用于「元素字段按某个工具 schema 推断」）。 */
+export interface DebugSchemaContext {
+  tools?: readonly { name: string; parameters?: Record<string, unknown> }[];
+}
+
+/**
+ * 当数组的 items 只声明了 `type: "object"`（没有 properties）时，尝试从
+ * **本数组 description** 里找「follows the <name> tool schema」这类引用，用同服务器
+ * 同名工具的 inputSchema 作为元素模型（例如 AnySearch 的 batch_search 引用 search）。
+ *
+ * 只认 `<name> tool` / `<name> schema` 紧邻写法，且目标工具必须自带 properties；
+ * 找不到就返回 undefined，调用方退回「每项一个 JSON 文本框」。
+ */
+function inferItemSchema(description: string | undefined, context: DebugSchemaContext | undefined) {
+  if (description === undefined || context?.tools === undefined) return undefined;
+  const candidates = context.tools.filter(
+    (tool) => tool.parameters !== undefined && propertiesOf(tool.parameters) !== undefined,
+  );
+  for (const tool of [...candidates].sort((a, b) => b.name.length - a.name.length)) {
+    const escaped = tool.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`(^|[^A-Za-z0-9_])${escaped}\\s+(tool|schema)`, "i").test(description)) {
+      return { name: tool.name, schema: tool.parameters as Record<string, unknown> };
+    }
+  }
+  return undefined;
+}
+
 /** 把一个 schema 属性展开成字段模型（object / array 在层数内递归）。 */
-function fieldOf(name: string, raw: unknown, required: boolean, parentPath: string, depth: number): DebugField {
+function fieldOf(
+  name: string,
+  raw: unknown,
+  required: boolean,
+  parentPath: string,
+  depth: number,
+  context?: DebugSchemaContext,
+): DebugField {
   const prop = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
   const enumValues = Array.isArray(prop.enum) && prop.enum.length > 0 ? (prop.enum as unknown[]) : undefined;
   const declared = typeOf(prop);
@@ -126,12 +162,29 @@ function fieldOf(name: string, raw: unknown, required: boolean, parentPath: stri
         )
       : undefined;
   // 数组：items 是基础类型或「带 properties 的 object」→ 逐项行；其余（数组 / 无结构）退回 JSON。
+  // 例外：items 只写了 `type: "object"`（没有 properties）时，若 description 引用了同服务器
+  // 某个工具（如「follows the search tool schema」），按该工具的 schema 推断元素字段。
   let itemTemplate: DebugField | undefined;
+  let inferredFrom: string | undefined;
   if (baseType === "array" && depth < MAX_NEST_DEPTH && prop.items !== undefined) {
     const items = prop.items;
     if (items !== null && typeof items === "object" && !Array.isArray(items)) {
-      const candidate = fieldOf("item", items, false, path, depth + 1);
-      if (candidate.kind === "leaf" || candidate.kind === "object") itemTemplate = candidate;
+      const itemProp = items as Record<string, unknown>;
+      const inferred = propertiesOf(itemProp) === undefined
+        ? inferItemSchema(typeof prop.description === "string" ? prop.description : undefined, context)
+        : undefined;
+      const candidate = fieldOf(
+        "item",
+        inferred !== undefined ? inferred.schema : items,
+        false,
+        path,
+        depth + 1,
+        context,
+      );
+      if (candidate.kind === "leaf" || candidate.kind === "object") {
+        itemTemplate = candidate;
+        if (inferred !== undefined) inferredFrom = inferred.name;
+      }
     }
   }
   const kind: DebugKind =
@@ -151,17 +204,18 @@ function fieldOf(name: string, raw: unknown, required: boolean, parentPath: stri
     ...(prop.default !== undefined ? { defaultValue: prop.default } : {}),
     ...(children !== undefined ? { children } : {}),
     ...(itemTemplate !== undefined ? { itemTemplate } : {}),
+    ...(inferredFrom !== undefined ? { inferredFrom } : {}),
   };
 }
 
 /** 从工具的 parameters（inputSchema）展开字段列表。 */
-function fieldsOf(parameters: Record<string, unknown> | undefined): DebugField[] {
+function fieldsOf(parameters: Record<string, unknown> | undefined, context?: DebugSchemaContext): DebugField[] {
   if (parameters === undefined || parameters === null) return [];
   const properties = parameters.properties;
   if (properties === null || typeof properties !== "object" || Array.isArray(properties)) return [];
   const required = requiredOf(parameters);
   return Object.entries(properties as Record<string, unknown>).map(([name, raw]) =>
-    fieldOf(name, raw, required.includes(name), "", 0),
+    fieldOf(name, raw, required.includes(name), "", 0, context),
   );
 }
 
@@ -298,6 +352,9 @@ function parseField(field: DebugField, text: string): { ok: true; value?: unknow
         if (field.baseType === "object" && !isPlainObject(value)) return { ok: false, error: "应为 JSON 对象" };
         return { ok: true, value };
       } catch {
+        if (field.baseType === "object") {
+          return { ok: false, error: "应为 JSON 对象（该工具未声明元素字段，请按工具说明填写，如 {\"key\":\"value\"}）" };
+        }
         return { ok: false, error: "JSON 解析失败" };
       }
     }
@@ -367,7 +424,7 @@ function buildObject(
         }
         if (parsed.value !== undefined) items.push(parsed.value);
       }
-      if (field.required && items.length === 0) fieldErrors[field.path] = "必填数组未添加任何项";
+      if (field.required && count === 0) fieldErrors[field.path] = "必填数组未添加任何项";
       if (items.length > 0) value[field.name] = items;
       continue;
     }
@@ -730,11 +787,14 @@ export function McpDebugDialog({
   entry,
   entryKey,
   tool,
+  serverTools,
   onClose,
 }: {
   api: McpApi;
   /** 服务器展示名（头部徽章）。 */
   serverLabel: string;
+  /** 同服务器的其它工具（用于自由格式 object 元素的字段推断）。 */
+  serverTools?: readonly ClientMcpTool[];
   /** 外部注入实例路径：serverName。 */
   serverName?: string;
   /** 配置条目路径：条目本身 + 键名。 */
@@ -743,7 +803,8 @@ export function McpDebugDialog({
   tool: ClientMcpTool;
   onClose: () => void;
 }) {
-  const fields = fieldsOf(tool.parameters);
+  const schemaContext: DebugSchemaContext | undefined = serverTools !== undefined ? { tools: serverTools } : undefined;
+  const fields = fieldsOf(tool.parameters, schemaContext);
   const cacheKey = `${entryKey ?? serverName ?? "server"}::${tool.name}`;
   const cached = DRAFT_CACHE.get(cacheKey);
   const [mode, setMode] = useState<"form" | "json">(cached?.mode ?? "form");
@@ -1137,6 +1198,14 @@ function DebugFieldRow({
         <div className="skp-dbg-group-head">
           {label}
           <span className="skp-test-stat">共 {count} 项</span>
+          {field.inferredFrom !== undefined && (
+            <span
+              className="skp-tag skp-tag-flat"
+              title={`items 只声明为 object；元素字段按同服务器「${field.inferredFrom}」工具的 inputSchema 推断`}
+            >
+              字段按 {field.inferredFrom} 推断
+            </span>
+          )}
           <span className="skp-dbg-spacer" />
           <button type="button" className="skp-link-btn" onClick={() => arrayActions.onAdd(field)}>
             ＋ 添加一项
