@@ -592,6 +592,38 @@ export type McpTestResult = {
     ok: false;
     errors: string[];
 };
+/** 「调试调用」的入参：配置条目与外部注入实例二选一。 */
+export interface McpInvokeInput {
+    /** 配置条目键名（决定命名空间）。 */
+    key?: string;
+    /** 配置条目（条目路径必填；外部实例路径不传）。 */
+    entry?: McpServerEntry;
+    /** 外部注入实例的 serverName（条目路径不传）。 */
+    serverName?: string;
+    /** 服务器原始工具名（不是 `mcp__*` 公共名）。 */
+    tool: string;
+    /** 调用参数（必须是 JSON 对象；缺省 `{}`）。 */
+    arguments?: Record<string, unknown>;
+    /** 超时（毫秒）；缺省 60s、硬上限 60s。 */
+    timeoutMs?: number;
+}
+/** 一个结果内容块（MCP `content` 数组元素，原样透传）。 */
+export type ClientMcpInvokeContent = Record<string, unknown>;
+/** 「调试调用」的结果（成功带内容块与耗时；失败带人类可读错误）。 */
+export type McpInvokeResult = {
+    ok: true;
+    /** text / image / resource … 内容块。 */
+    content: ClientMcpInvokeContent[];
+    /** structuredContent（服务器有则带上）。 */
+    structuredContent?: unknown;
+    /** 服务器是否把这次调用标记为工具错误（`isError`）。 */
+    isError: boolean;
+    /** 往返耗时（毫秒，含连接）。 */
+    elapsedMs: number;
+} | {
+    ok: false;
+    errors: string[];
+};
 /** MCP 域的面板 API。 */
 export interface McpApi {
     list(): Promise<ClientMcpList>;
@@ -631,6 +663,17 @@ export interface McpApi {
         key?: string;
         timeoutMs?: number;
     }): Promise<McpTestResult>;
+    /**
+     * 「调试调用」：真实调用一次 MCP 工具。
+     *
+     * - 配置条目（传 `entry`）：宿主起一次性 MCP 连接 `callTool`——不挂载、不注册
+     *   工具、不影响正在运行的对话；与「测试连接」同一套收尾。
+     * - 外部注入实例（传 `serverName`）：没有配置可读，改走已挂载工具注册表；
+     *   仅当该工具在全局注册表可见时可调（agent 作用域注入的会返回业务失败）。
+     *
+     * 失败以 `{ ok:false, errors }` 返回（不抛异常），由弹窗就地展示。
+     */
+    invoke(input: McpInvokeInput): Promise<McpInvokeResult>;
     /**
      * 最近 MCP 工具调用记录（**只读、内存内、不落盘**）：什么时候、哪个 session
      * 调用了哪个 server 的哪个 tool。传 `serverName` 只取该 server 的记录。

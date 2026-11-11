@@ -10,6 +10,7 @@
 import { type McpRuntimeView, type McpUsageView } from "./types.js";
 import { type McpUsageLog } from "./usage.js";
 import { type McpProbeResult } from "./probe.js";
+import { type McpInvokeInput, type McpInvokeResult } from "./invoke.js";
 import type { OverridesManager } from "../overrides/manager.js";
 import type { ImportsManager } from "../imports/manager.js";
 import type { McpListResult, McpScope, McpServerEntry, McpStatusView } from "./types.js";
@@ -89,6 +90,7 @@ export declare function createMcpManager(deps: McpManagerDeps, loader: McpLoader
     }>;
     status: (cwd?: string) => McpStatusView[];
     test: (input: McpTestInput) => Promise<McpProbeResult>;
+    invoke: (input: McpInvokeInput) => Promise<McpInvokeResult>;
     usage: (input?: {
         serverName?: string;
         limit?: number;

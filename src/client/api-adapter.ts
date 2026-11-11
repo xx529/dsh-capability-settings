@@ -49,6 +49,8 @@ import type {
   JevSetConfigResult,
   JevTestResult,
   McpTestResult,
+  ClientMcpInvokeContent,
+  McpInvokeResult,
   McpUpsertInput,
   SessionBulkFailure,
   SessionBulkInput,
@@ -395,6 +397,17 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
       async test(input) {
         const cwd = deps.currentWorkspaceCwd();
         return toMcpTestResult(unwrap(await rpc("mcp.test", { ...input, cwd })));
+      },
+
+      /**
+       * 「调试调用」：真实调用一次 MCP 工具。
+       *
+       * 失败以业务失败形状返回（不抛），由弹窗就地展示；结果防御性投影成
+       * （内容块必须是对象、耗时非负数值），脏数据丢弃。
+       */
+      async invoke(input) {
+        const cwd = deps.currentWorkspaceCwd();
+        return toMcpInvokeResult(unwrap(await rpc("mcp.invoke", { ...input, cwd })));
       },
 
       /**
@@ -1475,6 +1488,29 @@ function toInstallResult(result: RawResult): InstallResult {
     ok: true,
     ...(typeof self.name === "string" ? { name: self.name } : {}),
     ...(self.existed === true ? { existed: true } : {}),
+  };
+}
+
+/**
+ * 把解开信封后的调试调用结果投影成 McpInvokeResult（防御宿主侧数据漂移：
+ * content 必须是对象数组，否则丢弃该块；isError / elapsedMs 补缺省值）。
+ */
+function toMcpInvokeResult(result: RawResult): McpInvokeResult {
+  if (!result.ok) return { ok: false, errors: result.errors };
+  const self = result as unknown as Record<string, unknown>;
+  const content = (Array.isArray(self.content) ? self.content : []).filter(
+    (block): block is ClientMcpInvokeContent =>
+      block !== null && typeof block === "object" && !Array.isArray(block),
+  );
+  return {
+    ok: true,
+    content,
+    ...(self.structuredContent !== undefined ? { structuredContent: self.structuredContent } : {}),
+    isError: self.isError === true,
+    elapsedMs:
+      typeof self.elapsedMs === "number" && Number.isFinite(self.elapsedMs) && self.elapsedMs >= 0
+        ? self.elapsedMs
+        : 0,
   };
 }
 

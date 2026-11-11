@@ -99,8 +99,8 @@ danger-full-access 审批重试同一条命令即可。手动兜底通道仍是 
 | `src/channel.ts` | RPC 通道名唯一来源：`CHANNEL = "/capability-panel"`（两端 import，禁止硬编码） |
 | `src/remote.ts` | 宿主 ⇄ 浏览器 RPC：在 `webServer` 挂 `CHANNEL` 前缀路由；endpoint 为 `skills.* / mcp.* / quick.* / overrides.*`（见文件头注释与路由表） |
 | `src/client.ts` | 客户端插件入口：注入样式/语言包，注册 `sidebar.panellist` + `main`（面板）与 `conversation.input.*`（composer），构造面板 api 与**每会话** composer api |
-| `src/client/*.tsx` | UI：`panel.tsx`（skills/quick 共用列表/详情）、`mcp-panel.tsx`、`quick-messages-panel.tsx`、`detail-shell.tsx`（v22 详情页共用外壳：`DetailPage` 固定头部三段 / `DetailTitleBar` / `DetailStrip` / `ToggleSwitch` / `MoreMenu` / `MetaPanel`）、`composer-*.tsx`、`composer-capability.tsx`（会话能力：首屏 `conversation.hero.options` 行内入口 + 背景模糊配置弹窗 + 顶部「能力」Tab 整页；Tab 打开时隐藏输入框）、`prompt-panel.tsx`（Prompt 域列表/详情/编辑器/可见范围弹层）、`prompt-tab.tsx`（首屏/会话内 Prompt Tab 卡片网格）、`select.tsx`（自绘下拉）、`panel-entry.tsx`（主区域页面 + 侧栏图标）、`styles.ts` |
-| `src/{skills,mcp,quick-messages,overrides,imports}/` | 各域宿主实现（配置读写、CRUD、挂载、探测、声明文件）；`skills/session.ts` = 会话级 Skills 开关（agent 作用域同名 runtime shadow，按会话落盘 + 项目默认投影） |
+| `src/client/*.tsx` | UI：`panel.tsx`（skills/quick 共用列表/详情）、`mcp-panel.tsx`、`quick-messages-panel.tsx`、`detail-shell.tsx`（v22 详情页共用外壳：`DetailPage` 固定头部三段 / `DetailTitleBar` / `DetailStrip` / `ToggleSwitch` / `MoreMenu` / `MetaPanel`）、`composer-*.tsx`、`composer-capability.tsx`（会话能力：首屏 `conversation.hero.options` 行内入口 + 背景模糊配置弹窗 + 顶部「能力」Tab 整页；Tab 打开时隐藏输入框）、`mcp-debug-dialog.tsx`（v25：工具调试弹窗，表单/JSON 双模式 + 结果渲染）、`prompt-panel.tsx`（Prompt 域列表/详情/编辑器/可见范围弹层）、`prompt-tab.tsx`（首屏/会话内 Prompt Tab 卡片网格）、`select.tsx`（自绘下拉）、`panel-entry.tsx`（主区域页面 + 侧栏图标）、`styles.ts` |
+| `src/{skills,mcp,quick-messages,overrides,imports}/` | 各域宿主实现（配置读写、CRUD、挂载、探测、声明文件）；`mcp/invoke.ts` = 调试调用（一次性 `callTool` + 结果预算）；`skills/session.ts` = 会话级 Skills 开关（agent 作用域同名 runtime shadow，按会话落盘 + 项目默认投影） |
 | `src/prompt/` | **Prompt 域（v23）**：`paths.ts`（宿主语义 home / `.git` 项目根 / 目录链 / 候选）、`store.ts`（`prompt-policy.json` + 冻结清单 `prompt-manifests.json`，0600 + 原子写 + 锁）、`host.ts`（`loader.import` 取宿主 `dsh-agent-instructions`；虚拟 fs 只暴露允许集合 → 拼接/去重/预算/framing 全由宿主完成）、`manager.ts`（列表/读写/策略/冻结清单）、`inject.ts`（root `agent/pre-step` + `prepend`：首轮用宿主渲染结果替换 baseline 正文，之后丢弃增量并清 inbox；resume/compaction 按冻结正文重放；fail-open） |
 | `src/session-state.ts` | 会话级开关持久化（`<dshHome>/dsh-capability-settings/session-capabilities.json`：原子写 + 文件锁 + 懒加载 + 两阶段对账；Skills / MCP / Tools / 派生继承（含 `derivedDynamic`）共用一个实例） |
 | `src/derive/manager.ts` | 派生继承（spawn-time snapshot）：`agent/created` 且 `source=startup` 时按父会话 `deriveMode`（`session` / `workspace` / `dynamic`）把三域显式覆盖写入 child 记录；动态模式的打分在 `auto-select.ts`，这里消费结果并在失败/空集时回退 `session`；早于三个域注册 |
@@ -222,6 +222,12 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
    快照的 `displayTitle`）在适配器里投影。
 9. 探测（「测试连接」/「查看工具与参数」）走 `src/mcp/probe.ts`：一次性 Client +
    transport、`finally` 关闭、不注册工具、不留子进程；不要用它挂载/缓存连接。
+10. **「调试调用」（v25）走 `src/mcp/invoke.ts`**：配置条目复用 `openMcpSession`
+    起一次性连接 `callTool`（不挂载、不注册工具、不写使用记录）；外部注入实例没有配置
+    可读，改走**已挂载** `tools.execute`（公共名从 `tools.schemas()` 反查，仅全局可见
+    实例可调）。`callId` 必须带 `capability-panel-debug` 前缀（`MCP_DEBUG_CALL_ID`），
+    使用记录 guard 据此跳过——调试不是对话里的真实调用，不要让它进「使用记录」。
+    结果有 200k 字符预算（超长截断）；超时默认/上限 60s。
 
 ---
 
@@ -308,6 +314,12 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
     `225:562` / 规范板 `225:504`；预览图 `docs/figma/preview/v24-*`。实现：
     `src/derive/auto-select.ts` + `src/derive/manager.ts` + `src/session-state.ts`（`derivedDynamic`）
     + `src/client/composer-capability.tsx`。
+  - `Capability Panel · MCP 工具调试 v25（草案，已落代码 Unreleased）`（page `240:2`）：
+    工具「▶ 调试」弹窗——入口只在右栏当前选中工具标题右侧；参数按 `inputSchema` 生成
+    （表单 / JSON 双模式），执行后结果在参数下方滚动展示。7 帧：`240:5` 右栏入口 /
+    `240:500` 页面上下文 / `240:272` 参数表单 / `240:355` 执行成功 / `240:406` 失败 /
+    `240:453` JSON 模式 / `240:769` 规范板。预览图 `docs/figma/preview/v25-*.png`。
+    实现：`src/mcp/invoke.ts` + `src/mcp/manager.ts` 的 `invoke` + `src/client/mcp-debug-dialog.tsx`。
   - `Capability Dock · 首屏入口 v14`（page `134:8699`）：**旧实现基线**（工具行 icon+计数胶囊）：
     4 帧 `134:8700` / `134:8942` / `134:9184` / `134:9426`；预览图 `docs/figma/preview/v14-*`；
     4 帧 scene JSON 已导出（`docs/figma/scenes/v14-*.scene.json`，97/283/205/97 节点，

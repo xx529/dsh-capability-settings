@@ -19,6 +19,17 @@ import { errMessage } from "../shared/errors.js";
 import { locateConfigFile, removeFiles, type ConfigFileLocation } from "../shared/config-location.js";
 import { readMcpFile, sanitizeServerName, summarizeEntry, transportOf, validateEntry, writeMcpFile } from "./config-file.js";
 import { probeMcpServer, type McpProbeResult } from "./probe.js";
+import {
+  callToolOnce,
+  normalizeInvokeArguments,
+  boundInvokeContent,
+  boundInvokeValue,
+  MCP_DEBUG_CALL_ID,
+  DEFAULT_INVOKE_TIMEOUT_MS,
+  MAX_INVOKE_TIMEOUT_MS,
+  type McpInvokeInput,
+  type McpInvokeResult,
+} from "./invoke.js";
 import { GLOBAL_MCP_FILE_NAME, globalMcpDirs, projectMcpFile } from "./paths.js";
 import type { OverridesManager } from "../overrides/manager.js";
 import type { CapabilityDefaults } from "../overrides/types.js";
@@ -440,6 +451,111 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
   }
 
   /**
+   * 调试调用一个 MCP 工具（面板「▶ 调试」）。
+   *
+   * 两条路径（见 `src/mcp/invoke.ts` 文件头）：
+   *   - **配置条目**（传 `entry`）：一次性 MCP 连接 `callTool`，不挂载、不注册
+   *     工具、不依赖会话；与「测试连接」同一套 `openMcpSession` 收尾。
+   *   - **外部注入实例**（传 `serverName`）：没有配置可读，改走**已挂载**的工具
+   *     注册表（`tools.execute` + `mcp__<serverName>__<tool>` 公共名）。仅当该工具
+   *     在全局注册表可见时可调（agent 作用域注入的实例不可见 → 业务失败并说明）。
+   *
+   * 业务失败统一收敛成 `{ ok:false, errors }`（不抛到 RPC 层）；任何路径都不
+   * 写文件、不改配置、不留子进程。
+   */
+  async function invoke(input: McpInvokeInput): Promise<McpInvokeResult> {
+    const tool = typeof input?.tool === "string" ? input.tool.trim() : "";
+    if (tool.length === 0) return { ok: false, errors: ["工具名不能为空"] };
+    // 配置条目路径：表单草稿也能调（与 test 同口径，不要求先保存）。
+    if (input.entry !== undefined && input.entry !== null) {
+      return callToolOnce({
+        tool,
+        entry: input.entry,
+        ...(input.key !== undefined ? { key: input.key } : {}),
+        ...(input.arguments !== undefined ? { arguments: input.arguments } : {}),
+        ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
+        ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+      });
+    }
+    const serverName = typeof input.serverName === "string" ? input.serverName.trim() : "";
+    if (serverName.length === 0) return { ok: false, errors: ["缺少 entry 或 serverName：无法确定调试目标"] };
+    return invokeRegisteredTool(serverName, tool, input.arguments, input.timeoutMs);
+  }
+
+  /**
+   * 外部注入实例的调试路径：找全局注册表里同 serverName + 原始工具名的**公共名**，
+   * 再交给宿主的 `tools.execute`（走真实的已挂载连接、复用断线重连）。
+   *
+   * `callId` 用 `capability-panel-debug` 前缀：使用记录 guard 会跳过它，调试
+   * 调用不会污染「使用记录」。
+   */
+  async function invokeRegisteredTool(
+    serverName: string,
+    tool: string,
+    rawArguments: unknown,
+    rawTimeoutMs: number | undefined,
+  ): Promise<McpInvokeResult> {
+    const tools = deps.tools?.();
+    if (tools === undefined || typeof tools.execute !== "function") {
+      return { ok: false, errors: ["宿主 tools 服务不可用（版本过旧？）：无法调试外部注入实例"] };
+    }
+    const schemas = typeof tools.schemas === "function" ? tools.schemas() : [];
+    const match = (Array.isArray(schemas) ? schemas : []).find((schema: any) => {
+      const parsed = parseMcpToolName(typeof schema?.name === "string" ? schema.name : "");
+      return parsed !== undefined && parsed.serverName === serverName && parsed.tool === tool;
+    });
+    if (match === undefined) {
+      return {
+        ok: false,
+        errors: [
+          `该实例的工具在全局工具注册表里不可见（可能按 agent 作用域注入）：${serverName} / ${tool}`,
+          "请在对话里直接调用该工具，或改用在全局视图可见的实例。",
+        ],
+      };
+    }
+    const args = normalizeInvokeArguments(rawArguments);
+    if (!args.ok) return args;
+    const timeoutMs =
+      typeof rawTimeoutMs === "number" && Number.isFinite(rawTimeoutMs)
+        ? Math.min(Math.max(Math.floor(rawTimeoutMs), 500), MAX_INVOKE_TIMEOUT_MS)
+        : DEFAULT_INVOKE_TIMEOUT_MS;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    timer.unref();
+    const startedAt = Date.now();
+    try {
+      const outcome = await tools.execute({
+        calls: [{ id: MCP_DEBUG_CALL_ID, name: match.name as string, arguments: JSON.stringify(args.value) }],
+        signal: controller.signal,
+      });
+      const first = outcome?.results?.[0]?.result;
+      if (first === undefined || first === null) {
+        return { ok: false, errors: ["宿主没有返回调用结果（可能被 guard 拦截或工具不可执行）"] };
+      }
+      const content = Array.isArray(first.content) ? (first.content as Array<Record<string, unknown>>) : [];
+      const structuredContent = (first as { structuredContent?: unknown }).structuredContent;
+      return {
+        ok: true,
+        content: boundInvokeContent(content),
+        ...(structuredContent !== undefined ? { structuredContent: boundInvokeValue(structuredContent) } : {}),
+        isError: (first as { isError?: unknown }).isError === true,
+        elapsedMs: Date.now() - startedAt,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        ok: false,
+        errors: [
+          controller.signal.aborted ? `调试调用超时（超过 ${timeoutMs}ms）` : "调试调用失败",
+          ...(message.length > 0 ? [`原始错误：${message}`] : []),
+        ],
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
    * 最近 MCP 工具调用记录（**只读、内存内、不落盘**）。
    *
    * 记录来自 loader/index 在宿主注册的 `tools.guard` 旁路（见 mcp/usage.ts），
@@ -727,6 +843,7 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
     importToProject,
     status,
     test,
+    invoke,
     usage,
     runtime,
     setSessionEnabled,

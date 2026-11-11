@@ -3,6 +3,35 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 新增
+
+- **MCP 工具调试（v25）**：能力面板「MCP → 详情 → 工具与参数」右栏，当前选中工具
+  标题右侧新增「▶ 调试」按钮，弹窗内可按 `inputSchema` 填参数（表单 / JSON 双模式）
+  并真实调用一次工具，结果就地展示（参数区保持展开，结果在下方滚动）。
+  - 宿主新增 `mcp.invoke`：**配置条目**（全局 / 工作区 / 引用）走一次性 MCP 连接
+    `callTool`（复用 `openMcpSession`，与探测同源：不挂载、不注册工具、不影响正在
+    运行的对话，任何路径都关连接）；**外部注入实例**无配置可读，改走已挂载工具
+    注册表（`tools.execute` + `mcp__<server>__<tool>` 公共名），仅全局可见实例可调，
+    agent 作用域注入的返回业务失败并说明；`callId` 带 `capability-panel-debug`
+    前缀，使用记录 guard 跳过，调试调用不污染「使用记录」。
+  - 客户端新增 `src/client/mcp-debug-dialog.tsx`：`inputSchema` → 表单（string /
+    number / integer / boolean / enum 下拉 / array·object 多行 JSON）、必填与类型
+    校验、JSON 模式行内错误、执行后自动滚动到结果、`content` 按类型渲染（text
+    pretty / image 缩略图 / resource 链接）、`structuredContent` 折叠、复制结果、
+    Esc 关闭、⌘/Ctrl+Enter 执行；草稿与上次结果缓存在内存（同工具再打开恢复）。
+  - 结果预算 200k 字符（超长文本截断并标记）；调用超时默认 / 上限 60s；失败
+    （连接失败 / 超时 / 服务器 JSON-RPC 错误 / isError）都收敛成业务失败就地展示。
+  - 文档与设计：README 新增「MCP 工具调试（v25）」；Figma 新页
+    `Capability Panel · MCP 工具调试 v25（草案）`（page `240:2`，7 帧），预览
+    `docs/figma/preview/v25-01…07-*.png`。
+  - 验证：`node notes/verify/mcp-invoke.mjs` 12/12（真实 stdio 夹具 tools/call、
+    参数校验、未知工具、连接失败、manager 两条路径、RPC 信封、无残留子进程）；
+    隔离实例（`DSH_HOME=.verify-home --profile v25`）Playwright 走查 12/12（右栏
+    按钮 → 弹窗 → 填参 → 执行回显 `hello v25` → JSON 模式 → Esc）；`pnpm typecheck`
+    与 `pnpm build` 通过。
+
 ## [1.17.0] - 2026-11-09
 
 ### 新增

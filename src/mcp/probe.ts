@@ -82,17 +82,46 @@ export type McpProbeResult =
   | { ok: false; errors: string[] };
 
 /**
- * 真实连接一次 MCP 配置并列出其工具。
+ * 一条已连接的一次性 MCP 会话（探测 / 调试调用共用）。
  *
- * 只读探测：不落盘、不改 loader 状态、不注册任何工具、不保留任何子进程。
- * 失败（含超时、命令不存在、HTTP 鉴权失败）统一返回 `{ ok:false, errors }`。
+ * 生命周期由调用方负责：任何路径都必须 `await session.close()`（内部会关
+ * client 与 transport，回收 stdio 子进程）；`signal` 到点会自动 abort。
  */
-export async function probeMcpServer(input: McpProbeInput): Promise<McpProbeResult> {
+export interface McpClientSession {
+  /** 已 connect 的 SDK Client。 */
+  client: Client;
+  /** 硬超时用的 signal（connect / listTools / callTool 都传它）。 */
+  signal: AbortSignal;
+  /** 本次会话的超时预算（毫秒）。 */
+  timeoutMs: number;
+  /** 规范化后的命名空间（与挂载后的 `mcp__<serverName>__*` 一致）。 */
+  serverName: string;
+  /** 连接期间累计的服务器 stderr（截断到 {@link MAX_STDERR_CHARS}）。 */
+  stderrTail(): string;
+  /** 是否已因超时被中断。 */
+  timedOut(): boolean;
+  /** 一行人类可读的连接目标（只用于错误文案）。 */
+  target: string;
+  /** 关闭会话（幂等；绝不抛错）。 */
+  close(): Promise<void>;
+}
+
+/** `openMcpSession` 的结果：成功给会话，失败给人类可读错误（不抛）。 */
+export type McpSessionOpenResult = { ok: true; session: McpClientSession } | { ok: false; errors: string[] };
+
+/**
+ * 打开一次**一次性** MCP 连接（不落盘、不注册工具、不碰 loader）。
+ *
+ * 连接序列与桥接层一致（同一 SDK Client + versionNegotiation auto + 配置
+ * 形状取自 `toClientConfig`）。失败（含超时 / 命令不存在 / HTTP 鉴权失败）
+ * 收敛成 `{ ok:false, errors }`；调用方在 `finally` 里仍要调用
+ * `session.close()`（成功路径），失败路径这里已经收尾。
+ */
+export async function openMcpSession(input: McpProbeInput): Promise<McpSessionOpenResult> {
   const timeoutMs = clampTimeout(input.timeoutMs);
-  const startedAt = Date.now();
   const controller = new AbortController();
   let timedOut = false;
-  // 硬超时：到点就中断 connect / listTools，不让探测无限挂起。
+  // 硬超时：到点就中断 connect / listTools / callTool，不让会话无限挂起。
   // unref 让这个定时器本身不拖住宿主进程退出。
   const timer = setTimeout(() => {
     timedOut = true;
@@ -124,29 +153,76 @@ export async function probeMcpServer(input: McpProbeInput): Promise<McpProbeResu
 
     await client.connect(transport, { signal: controller.signal, timeout: timeoutMs });
 
-    // 服务器未声明 tools 能力时不必发 tools/list（与桥接层同一口径）；
-    // 未开 enforceStrictCapabilities，此处只是省一次往返。
-    const listed = client.getServerCapabilities()?.tools === undefined
-      ? []
-      : (await client.listTools(undefined, { cacheMode: "refresh", signal: controller.signal, timeout: timeoutMs })).tools;
-    const tools = listed.map(toProbedTool);
-
-    const instructions = client.getInstructions()?.trim();
+    const connected = client;
+    const usedTransport = transport;
     return {
       ok: true,
-      serverName: config.serverName,
+      session: {
+        client: connected,
+        signal: controller.signal,
+        timeoutMs,
+        serverName: config.serverName,
+        stderrTail: () => stderrTail,
+        timedOut: () => timedOut,
+        target,
+        async close() {
+          clearTimeout(timer);
+          // 先关 client（内部会关 transport），再兜底关一次 transport
+          // （connect 中途失败时 client 可能还没接管 transport）。重复 close
+          // 幂等，关键是**不留下 stdio 子进程**。
+          await closeQuietly(connected);
+          await closeQuietly(usedTransport);
+        },
+      },
+    };
+  } catch (error) {
+    clearTimeout(timer);
+    // 失败路径这里就收尾；调用方拿不到 session，无需再关。
+    await closeQuietly(client);
+    await closeQuietly(transport);
+    return { ok: false, errors: failureMessages(error, { timedOut, timeoutMs, target, stderrTail }) };
+  }
+}
+
+/**
+ * 真实连接一次 MCP 配置并列出其工具。
+ *
+ * 只读探测：不落盘、不改 loader 状态、不注册任何工具、不保留任何子进程。
+ * 失败（含超时、命令不存在、HTTP 鉴权失败）统一返回 `{ ok:false, errors }`。
+ */
+export async function probeMcpServer(input: McpProbeInput): Promise<McpProbeResult> {
+  const startedAt = Date.now();
+  const opened = await openMcpSession(input);
+  if (!opened.ok) return opened;
+  const session = opened.session;
+  try {
+    // 服务器未声明 tools 能力时不必发 tools/list（与桥接层同一口径）；
+    // 未开 enforceStrictCapabilities，此处只是省一次往返。
+    const listed = session.client.getServerCapabilities()?.tools === undefined
+      ? []
+      : (await session.client.listTools(undefined, { cacheMode: "refresh", signal: session.signal, timeout: session.timeoutMs })).tools;
+    const tools = listed.map(toProbedTool);
+
+    const instructions = session.client.getInstructions()?.trim();
+    return {
+      ok: true,
+      serverName: session.serverName,
       tools,
       elapsedMs: Date.now() - startedAt,
       ...(instructions !== undefined && instructions.length > 0 ? { instruction: instructions.slice(0, MAX_INSTRUCTION_CHARS) } : {}),
     };
   } catch (error) {
-    return { ok: false, errors: failureMessages(error, { timedOut, timeoutMs, target, stderrTail }) };
+    return {
+      ok: false,
+      errors: failureMessages(error, {
+        timedOut: session.timedOut(),
+        timeoutMs: session.timeoutMs,
+        target: session.target,
+        stderrTail: session.stderrTail(),
+      }),
+    };
   } finally {
-    // 任何路径（成功 / 失败 / 超时）都在这里收尾：先关 client（内部会关
-    // transport），再兜底关一次 transport（connect 中途失败时 client 可能
-    // 还没接管 transport）。重复 close 幂等，关键是**不留下 stdio 子进程**。
-    await closeQuietly(client);
-    await closeQuietly(transport);
+    await session.close();
   }
 }
 

@@ -43,6 +43,7 @@ import type { McpScope, McpServerEntry } from "../mcp/types.js";
 import { Modal } from "./modal.js";
 import { ScopeChain } from "./scope-chain.js";
 import { ToolParameterTable, toolParameters } from "./tool-schema.js";
+import { McpDebugDialog } from "./mcp-debug-dialog.js";
 import { SkpSelect } from "./select.js";
 import {
   DetailPage,
@@ -1156,6 +1157,8 @@ function ToolsSplitView({
   query,
   onQuery,
   loading = false,
+  onDebug,
+  debugBlockedReason,
 }: {
   tools: readonly ClientMcpTool[];
   selectedName?: string;
@@ -1163,6 +1166,10 @@ function ToolsSplitView({
   query: string;
   onQuery(next: string): void;
   loading?: boolean;
+  /** v25：调试入口（作用于当前选中工具）；undefined = 不给入口。 */
+  onDebug?(tool: ClientMcpTool): void;
+  /** v25：入口禁用原因（外部注入但按 agent 作用域注入时不可调）。 */
+  debugBlockedReason?: string;
 }) {
   const filtered = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -1237,10 +1244,29 @@ function ToolsSplitView({
           ) : (
             <>
               <div className="skp-tool-detail-head">
-                <span className="skp-tool-detail-name">{selected.name}</span>
-                {selected.description !== undefined && selected.description.trim().length > 0 && (
-                  <span className="skp-tool-detail-desc">{selected.description}</span>
-                )}
+                <div className="skp-tool-detail-head-main">
+                  <span className="skp-tool-detail-name">{selected.name}</span>
+                  {selected.description !== undefined && selected.description.trim().length > 0 && (
+                    <span className="skp-tool-detail-desc">{selected.description}</span>
+                  )}
+                </div>
+                <div className="skp-tool-detail-head-actions">
+                  <span className="skp-test-stat">
+                    {(() => {
+                      const count = toolParameters(selected.parameters).length;
+                      return count === 0 ? "无参数" : `${count} 个参数`;
+                    })()}
+                  </span>
+                  <button
+                    type="button"
+                    className="skp-btn skp-btn-primary skp-tool-debug-btn"
+                    disabled={onDebug === undefined || loading}
+                    title={debugBlockedReason ?? (onDebug === undefined ? "仅全局可见的外部实例可调试" : "调试调用当前工具（真实执行一次）")}
+                    onClick={() => onDebug?.(selected)}
+                  >
+                    ▶ 调试
+                  </button>
+                </div>
               </div>
               <ToolParameterTable parameters={toolParameters(selected.parameters)} emptyText="该工具无参数" />
               <div className="skp-tool-detail-note">参数来自最近一次连接快照；服务器改动后点「重新测试」刷新。</div>
@@ -1451,6 +1477,8 @@ function McpExternalDetail({
   const [selectedTool, setSelectedTool] = useState<string | undefined>(server.tools[0]?.name);
   const [toolQuery, setToolQuery] = useState("");
   const [copiedKey, setCopiedKey] = useState<string | undefined>(undefined);
+  /** v25：当前正在调试的工具（外部实例走已挂载工具注册表）。 */
+  const [debugTool, setDebugTool] = useState<ClientMcpTool | undefined>(undefined);
   const hasTools = server.tools.length > 0;
   /** 全局默认关闭（原始名单；宿主 `disabledGlobally` 为 true 时也必然是关闭）。 */
   const globalOff = globalOffProp || globalDefaultDisabled || server.disabledGlobally === true;
@@ -1652,6 +1680,8 @@ function McpExternalDetail({
           onSelect={setSelectedTool}
           query={toolQuery}
           onQuery={setToolQuery}
+          onDebug={server.restrictable ? (tool) => setDebugTool(tool) : undefined}
+          debugBlockedReason={server.restrictable ? undefined : EXTERNAL_TOGGLE_BLOCKED_TITLE}
         />
       ) : (
         <div className="skp-detail-loading">
@@ -1663,6 +1693,16 @@ function McpExternalDetail({
         <Modal title={`使用记录 · ${server.serverName}`} onClose={() => setUsageOpen(false)}>
           <McpUsageSection api={api} serverName={server.serverName} />
         </Modal>
+      )}
+
+      {debugTool !== undefined && (
+        <McpDebugDialog
+          api={api}
+          serverLabel={sourceLabel}
+          serverName={server.serverName}
+          tool={debugTool}
+          onClose={() => setDebugTool(undefined)}
+        />
       )}
     </DetailPage>
   );
@@ -1743,6 +1783,8 @@ function McpDetail({
   const [selectedTool, setSelectedTool] = useState<string | undefined>(undefined);
   const [toolQuery, setToolQuery] = useState("");
   const [copiedKey, setCopiedKey] = useState<string | undefined>(undefined);
+  /** v25：当前正在调试的工具（配置条目走一次性连接）。 */
+  const [debugTool, setDebugTool] = useState<ClientMcpTool | undefined>(undefined);
 
   const copyText = (key: string, text: string) => {
     void navigator.clipboard?.writeText(text).catch(() => undefined);
@@ -2073,6 +2115,7 @@ function McpDetail({
           query={toolQuery}
           onQuery={setToolQuery}
           loading={testing}
+          onDebug={(tool) => setDebugTool(tool)}
         />
       )}
 
@@ -2101,6 +2144,17 @@ function McpDetail({
             </button>
           </div>
         </Modal>
+      )}
+
+      {debugTool !== undefined && (
+        <McpDebugDialog
+          api={api}
+          serverLabel={server.key}
+          entry={server.entry}
+          entryKey={server.key}
+          tool={debugTool}
+          onClose={() => setDebugTool(undefined)}
+        />
       )}
     </DetailPage>
   );

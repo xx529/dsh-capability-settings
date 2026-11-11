@@ -24,6 +24,7 @@
  *
  * @module dsh-capability-settings/mcp/probe
  */
+import { Client } from "@modelcontextprotocol/client";
 import type { McpServerEntry } from "./types.js";
 /** 探测默认超时（毫秒）。 */
 export declare const DEFAULT_PROBE_TIMEOUT_MS = 15000;
@@ -62,6 +63,47 @@ export type McpProbeResult = {
     ok: false;
     errors: string[];
 };
+/**
+ * 一条已连接的一次性 MCP 会话（探测 / 调试调用共用）。
+ *
+ * 生命周期由调用方负责：任何路径都必须 `await session.close()`（内部会关
+ * client 与 transport，回收 stdio 子进程）；`signal` 到点会自动 abort。
+ */
+export interface McpClientSession {
+    /** 已 connect 的 SDK Client。 */
+    client: Client;
+    /** 硬超时用的 signal（connect / listTools / callTool 都传它）。 */
+    signal: AbortSignal;
+    /** 本次会话的超时预算（毫秒）。 */
+    timeoutMs: number;
+    /** 规范化后的命名空间（与挂载后的 `mcp__<serverName>__*` 一致）。 */
+    serverName: string;
+    /** 连接期间累计的服务器 stderr（截断到 {@link MAX_STDERR_CHARS}）。 */
+    stderrTail(): string;
+    /** 是否已因超时被中断。 */
+    timedOut(): boolean;
+    /** 一行人类可读的连接目标（只用于错误文案）。 */
+    target: string;
+    /** 关闭会话（幂等；绝不抛错）。 */
+    close(): Promise<void>;
+}
+/** `openMcpSession` 的结果：成功给会话，失败给人类可读错误（不抛）。 */
+export type McpSessionOpenResult = {
+    ok: true;
+    session: McpClientSession;
+} | {
+    ok: false;
+    errors: string[];
+};
+/**
+ * 打开一次**一次性** MCP 连接（不落盘、不注册工具、不碰 loader）。
+ *
+ * 连接序列与桥接层一致（同一 SDK Client + versionNegotiation auto + 配置
+ * 形状取自 `toClientConfig`）。失败（含超时 / 命令不存在 / HTTP 鉴权失败）
+ * 收敛成 `{ ok:false, errors }`；调用方在 `finally` 里仍要调用
+ * `session.close()`（成功路径），失败路径这里已经收尾。
+ */
+export declare function openMcpSession(input: McpProbeInput): Promise<McpSessionOpenResult>;
 /**
  * 真实连接一次 MCP 配置并列出其工具。
  *

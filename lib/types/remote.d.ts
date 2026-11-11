@@ -96,6 +96,11 @@ export interface PanelRpcService {
          */
         test(input: unknown): Promise<unknown>;
         /**
+         * 「调试调用」：真实调用一次 MCP 工具（配置条目走一次性连接；外部注入实例
+         * 走已挂载工具注册表）。失败也走业务失败信封（value.ok=false）。
+         */
+        invoke(input: unknown): Promise<unknown>;
+        /**
          * 最近 MCP 工具调用记录（只读、内存内、不落盘）。
          * 传 `serverName` 只返回该 server 的调用；`limit` 控制"最近 n 条"。
          */

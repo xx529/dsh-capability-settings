@@ -100,6 +100,11 @@ export interface PanelRpcService {
      */
     test(input: unknown): Promise<unknown>;
     /**
+     * 「调试调用」：真实调用一次 MCP 工具（配置条目走一次性连接；外部注入实例
+     * 走已挂载工具注册表）。失败也走业务失败信封（value.ok=false）。
+     */
+    invoke(input: unknown): Promise<unknown>;
+    /**
      * 最近 MCP 工具调用记录（只读、内存内、不落盘）。
      * 传 `serverName` 只返回该 server 的调用；`limit` 控制"最近 n 条"。
      */
@@ -281,6 +286,9 @@ export async function handleEndpoint(service: PanelRpcService, endpoint: string,
         // 探测自身把失败收进业务信封（value.ok=false），这里保持同一形状：
         // 客户端适配器解出 { ok:false, errors } 后由面板展示。
         return { ok: true, value: await service.mcp.test(p) };
+      case "mcp.invoke":
+        // 与 mcp.test 同口径：业务失败在 value.ok=false，不抛到通道层。
+        return { ok: true, value: await service.mcp.invoke(p) };
       case "prompt.list":
         return {
           ok: true,

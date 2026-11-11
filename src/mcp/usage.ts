@@ -19,6 +19,7 @@
  */
 
 import { MCP_USAGE_CAPACITY, MCP_USAGE_VIEW_LIMIT, type McpUsageEntry, type McpUsageView } from "./types.js";
+import { MCP_DEBUG_CALL_ID } from "./invoke.js";
 
 /** 一条调用记录的输入（时间由记录方填）。 */
 export interface McpUsageRecordInput {
@@ -122,6 +123,9 @@ export function registerMcpUsageGuard(ctx: any, usage: McpUsageLog): () => void 
     if (typeof tools?.guard !== "function") return () => undefined;
     return tools.guard((execution: any) => {
       try {
+        // 面板「▶ 调试」走 tools.execute 时会带这个 callId 前缀：它不是对话里的
+        // 真实调用，不能混进「使用记录」（一次性连接路径本来也不经过这里）。
+        if (typeof execution?.callId === "string" && execution.callId.startsWith(MCP_DEBUG_CALL_ID)) return undefined;
         const parsed = parseMcpToolName(typeof execution?.name === "string" ? execution.name : "");
         if (parsed !== undefined) {
           const sessionId = execution?.agent?.id;

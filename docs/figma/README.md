@@ -1,4 +1,4 @@
-# Figma 原型（Dock v5 · 能力面板 v6–v8 · Jev/能力决策 v9–v11 · Skill 来源 v12 · 首屏入口 v14–v17 过程稿 / v18 实现基线 · 派生继承 v19 实现定稿 · 详情页内容优先 v22 草案 · Prompt 指令域 v23 草案 · 派生动态选择 v24 草案）
+# Figma 原型（Dock v5 · 能力面板 v6–v8 · Jev/能力决策 v9–v11 · Skill 来源 v12 · 首屏入口 v14–v17 过程稿 / v18 实现基线 · 派生继承 v19 实现定稿 · 详情页内容优先 v22 草案 · Prompt 指令域 v23 草案 · 派生动态选择 v24 草案 · MCP 工具调试 v25 草案）
 
 本目录是能力面板相关 UI 的 Figma 设计源，供人工查看 / 未来智能体继续改原型：
 
@@ -104,6 +104,22 @@
   `src/derive/manager.ts` + `src/session-state.ts`（`derivedDynamic`）；客户端
   `src/client/composer-capability.tsx`（三项下拉 + 阈值只读行 + 动态/回退 banner）；
   验证 `notes/verify/v24-dynamic-derive.mjs` 7/7。
+
+- **Capability Panel · MCP 工具调试 v25（草案，已落代码 Unreleased）**（page `240:2`）：
+  需求——MCP「工具与参数」里每个工具能直接调试调用。**入口只在右栏**：当前选中工具标题
+  右侧的「▶ 调试」主按钮（工具列表行内不放按钮，点行仍是切换工具）。7 帧：
+  01 详情页 · 右栏入口 `240:5` / 02 页面上下文（遮罩 + 居中弹窗）`240:500` /
+  03 参数表单 `240:272` / 04 执行成功（参数保持展开，结果在参数下方滚动）`240:355` /
+  05 失败（工具 isError + 连接失败两分支）`240:406` / 06 JSON 模式 + 行级校验 `240:453` /
+  07 规范板（入口 / 弹窗外壳 / 表单控件映射 / JSON / 执行通道 / 结果渲染 / 安全边界 /
+  实现映射）`240:769`；notes `240:789`。预览图 `preview/v25-01..07`。scene JSON 未导出
+  （草案阶段同 v19/v21/v22/v24 口径，确认后按 `tools/export-scene.js` 补）。
+  **已落代码（Unreleased）**：宿主 `src/mcp/invoke.ts`（`callToolOnce`，复用
+  `probe.openMcpSession`）+ `src/mcp/manager.ts` 的 `invoke`（配置条目 = 一次性连接；
+  外部注入 = `tools.execute`）+ `src/remote.ts` 的 `mcp.invoke`；客户端
+  `src/client/mcp-debug-dialog.tsx` + `mcp-panel.tsx`（右栏「▶ 调试」）+ `styles.ts`
+  （`.skp-dbg-*`）。验证 `notes/verify/mcp-invoke.mjs` 12/12、隔离实例 GUI 走查
+  `notes/verify/v25-debug-gui.mjs` 12/12。
 
 - **Capability Panel · 能力决策 v11**（page `56:7043`）：**能力决策基线**——统一命名「能力决策」、
   自动触发默认关闭、双门槛（最少触发字数 10 / 最少修改间隔字符数 4）、密钥路径
