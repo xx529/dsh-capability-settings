@@ -32,9 +32,15 @@ import { SkpSelect } from "./select.js";
 /** 字段的基础类型（决定渲染控件与参数强制转换）。 */
 type DebugBaseType = "string" | "integer" | "number" | "boolean" | "array" | "object" | "enum" | "unknown";
 
+/** 嵌套对象最多自动展开的层数（再深就退回 JSON，避免无限递归/超宽表单）。 */
+const MAX_NEST_DEPTH = 3;
+
 /** 一个参数的可编辑模型。 */
 interface DebugField {
+  /** 当前层的字段名（嵌套子字段只显示本地名）。 */
   name: string;
+  /** 从根到当前字段的点路径（`customer.name`；草稿与错误都按它索引）。 */
+  path: string;
   /** 类型列展示文本（string / integer / string (enum) …）。 */
   typeLabel: string;
   baseType: DebugBaseType;
@@ -44,6 +50,10 @@ interface DebugField {
   enumValues?: unknown[];
   /** schema.default（「填入示例」优先用它）。 */
   defaultValue?: unknown;
+  /** object 且带自己的 `properties` → 递归子表单；否则 undefined（JSON 文本框）。 */
+  children?: DebugField[];
+  /** 嵌套深度（0 = 顶层）；用于缩进与最大深度。 */
+  depth: number;
 }
 
 /** true = 纯 JSON 对象（非 null / 数组）。 */
@@ -64,8 +74,20 @@ function typeOf(prop: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
-/** 把一个 schema 属性展开成字段模型。 */
-function fieldOf(name: string, raw: unknown, required: boolean): DebugField {
+/** 读一个 schema 对象的 `properties`（非对象 / 空 → undefined）。 */
+function propertiesOf(prop: Record<string, unknown>): Record<string, unknown> | undefined {
+  const properties = prop.properties;
+  if (properties === null || typeof properties !== "object" || Array.isArray(properties)) return undefined;
+  return Object.keys(properties).length > 0 ? (properties as Record<string, unknown>) : undefined;
+}
+
+/** required 名单（只保留字符串）。 */
+function requiredOf(prop: Record<string, unknown>): string[] {
+  return Array.isArray(prop.required) ? prop.required.filter((name): name is string => typeof name === "string") : [];
+}
+
+/** 把一个 schema 属性展开成字段模型（object 带 properties 时递归）。 */
+function fieldOf(name: string, raw: unknown, required: boolean, parentPath: string, depth: number): DebugField {
   const prop = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
   const enumValues = Array.isArray(prop.enum) && prop.enum.length > 0 ? (prop.enum as unknown[]) : undefined;
   const declared = typeOf(prop);
@@ -88,16 +110,27 @@ function fieldOf(name: string, raw: unknown, required: boolean): DebugField {
       : declared === "union"
         ? "union"
         : (declared ?? "unknown");
+  const path = parentPath.length > 0 ? `${parentPath}.${name}` : name;
+  const properties = baseType === "object" && depth < MAX_NEST_DEPTH ? propertiesOf(prop) : undefined;
+  const children =
+    properties !== undefined
+      ? Object.entries(properties).map(([childName, childRaw]) =>
+          fieldOf(childName, childRaw, requiredOf(prop).includes(childName), path, depth + 1),
+        )
+      : undefined;
   return {
     name,
+    path,
     typeLabel: label,
     baseType,
     required,
+    depth,
     ...(typeof prop.description === "string" && prop.description.trim().length > 0
       ? { description: prop.description.trim() }
       : {}),
     ...(enumValues !== undefined ? { enumValues } : {}),
     ...(prop.default !== undefined ? { defaultValue: prop.default } : {}),
+    ...(children !== undefined ? { children } : {}),
   };
 }
 
@@ -106,10 +139,32 @@ function fieldsOf(parameters: Record<string, unknown> | undefined): DebugField[]
   if (parameters === undefined || parameters === null) return [];
   const properties = parameters.properties;
   if (properties === null || typeof properties !== "object" || Array.isArray(properties)) return [];
-  const required = Array.isArray(parameters.required)
-    ? parameters.required.filter((name): name is string => typeof name === "string")
-    : [];
-  return Object.entries(properties as Record<string, unknown>).map(([name, raw]) => fieldOf(name, raw, required.includes(name)));
+  const required = requiredOf(parameters);
+  return Object.entries(properties as Record<string, unknown>).map(([name, raw]) =>
+    fieldOf(name, raw, required.includes(name), "", 0),
+  );
+}
+
+/** 所有叶子字段（不含 object 分组本身）；用于判断「对象是否有内容」。 */
+function leafFields(fields: readonly DebugField[]): DebugField[] {
+  const out: DebugField[] = [];
+  for (const field of fields) {
+    if (field.children !== undefined) out.push(...leafFields(field.children));
+    else out.push(field);
+  }
+  return out;
+}
+
+/** true = 必填未满足（叶子必填为空；必填对象至少要有一个子字段有值）。 */
+function requiredMissing(fields: readonly DebugField[], draft: Record<string, string>): boolean {
+  return fields.some((field) => {
+    if (field.children !== undefined) {
+      const anyFilled = leafFields(field.children).some((leaf) => (draft[leaf.path] ?? "").trim().length > 0);
+      if (field.required && !anyFilled) return true;
+      return requiredMissing(field.children, draft);
+    }
+    return field.required && (draft[field.path] ?? "").trim().length === 0;
+  });
 }
 
 /** 值的展示文本：字符串原样，其余 JSON 化（存进草稿 / 输入框）。 */
@@ -123,16 +178,35 @@ function displayValue(value: unknown): string {
   }
 }
 
-/** 对象参数字典 → 草稿（表单模式的初始值）。 */
+/** 对象参数字典 → 草稿（表单模式的初始值；叶子字段的 default）。 */
 function draftOf(fields: readonly DebugField[]): Record<string, string> {
   const draft: Record<string, string> = {};
   for (const field of fields) {
-    if (field.defaultValue !== undefined) draft[field.name] = displayValue(field.defaultValue);
+    if (field.children !== undefined) Object.assign(draft, draftOf(field.children));
+    else if (field.defaultValue !== undefined) draft[field.path] = displayValue(field.defaultValue);
   }
   return draft;
 }
 
-/** 校验单个字段的文本，返回解析后的值或错误文案。 */
+/** JSON 参数（已解析）→ 草稿：只回填 schema 里已知的叶子字段。 */
+function draftFromArgs(
+  fields: readonly DebugField[],
+  source: Record<string, unknown>,
+  draft: Record<string, string>,
+): Record<string, string> {
+  for (const field of fields) {
+    const raw = source[field.name];
+    if (raw === undefined) continue;
+    if (field.children !== undefined) {
+      if (isPlainObject(raw)) draftFromArgs(field.children, raw, draft);
+      continue;
+    }
+    draft[field.path] = displayValue(raw);
+  }
+  return draft;
+}
+
+/** 校验单个叶子字段的文本，返回解析后的值或错误文案。 */
 function parseField(field: DebugField, text: string): { ok: true; value?: unknown } | { ok: false; error: string } {
   const trimmed = text.trim();
   if (field.baseType === "string") return { ok: true, value: text };
@@ -170,37 +244,66 @@ function parseField(field: DebugField, text: string): { ok: true; value?: unknow
   }
 }
 
-/** 表单草稿 → 调用参数（必填 / 类型错误全部收集）。 */
+/**
+ * 表单草稿 → 调用参数（递归收集必填 / 类型错误）。
+ *
+ * - 叶子字段：空且可选 → 跳过；必填为空 → 记错误；
+ * - object（带 children）：递归构造子对象；必填但一个子字段都没填 → 记「必填对象未填写任何字段」。
+ */
 function buildArguments(
   fields: readonly DebugField[],
   draft: Record<string, string>,
 ): { ok: true; value: Record<string, unknown> } | { ok: false; errors: string[]; fieldErrors: Record<string, string> } {
-  const errors: string[] = [];
   const fieldErrors: Record<string, string> = {};
+  const value = buildObject(fields, draft, fieldErrors);
+  const missing = Object.keys(fieldErrors).filter(
+    (path) => fieldErrors[path] === "必填参数未填写" || fieldErrors[path] === "必填对象未填写任何字段",
+  );
+  const invalid = Object.keys(fieldErrors).filter(
+    (path) => fieldErrors[path] !== "必填参数未填写" && fieldErrors[path] !== "必填对象未填写任何字段",
+  );
+  const errors: string[] = [];
+  if (invalid.length > 0) errors.push(`参数格式不正确：${invalid.map((path) => `${path}（${fieldErrors[path]}）`).join("；")}`);
+  if (missing.length > 0) errors.push(`必填参数未填写：${missing.join("、")}`);
+  if (errors.length > 0) return { ok: false, errors, fieldErrors };
+  return { ok: true, value };
+}
+
+/** buildArguments 的递归实现（把已填字段收进对象）。 */
+function buildObject(
+  fields: readonly DebugField[],
+  draft: Record<string, string>,
+  fieldErrors: Record<string, string>,
+): Record<string, unknown> {
   const value: Record<string, unknown> = {};
   for (const field of fields) {
-    const text = draft[field.name] ?? "";
+    if (field.children !== undefined) {
+      const child = buildObject(field.children, draft, fieldErrors);
+      if (Object.keys(child).length > 0) value[field.name] = child;
+      else if (field.required) fieldErrors[field.path] = "必填对象未填写任何字段";
+      continue;
+    }
+    const text = draft[field.path] ?? "";
     if (field.required && text.trim().length === 0) {
-      fieldErrors[field.name] = "必填参数未填写";
+      fieldErrors[field.path] = "必填参数未填写";
       continue;
     }
     if (text.trim().length === 0) continue;
     const parsed = parseField(field, text);
     if (!parsed.ok) {
-      fieldErrors[field.name] = parsed.error;
+      fieldErrors[field.path] = parsed.error;
       continue;
     }
     if (parsed.value !== undefined) value[field.name] = parsed.value;
   }
-  const missing = Object.keys(fieldErrors).filter((name) => fieldErrors[name] === "必填参数未填写");
-  if (missing.length > 0) errors.push(`必填参数未填写：${missing.join("、")}`);
-  const invalid = Object.keys(fieldErrors).filter((name) => fieldErrors[name] !== "必填参数未填写");
-  if (invalid.length > 0) errors.push(`参数格式不正确：${invalid.map((name) => `${name}（${fieldErrors[name]}）`).join("；")}`);
-  if (errors.length > 0) return { ok: false, errors, fieldErrors };
-  return { ok: true, value };
+  return value;
 }
 
-/** JSON 模式文本 → 调用参数（对象形状 / 必填 / 已知字段类型）。 */
+/**
+ * JSON 模式文本 → 调用参数（对象形状 / 必填 / 已知字段类型；递归校验嵌套 object）。
+ *
+ * 返回的 `warnings` 是不在 schema 里的未知键（含嵌套路径），只提示不拦截。
+ */
 function parseJsonArguments(
   fields: readonly DebugField[],
   text: string,
@@ -214,37 +317,93 @@ function parseJsonArguments(
   if (!isPlainObject(parsed)) return { ok: false, errors: ["arguments 必须是 JSON 对象（例如 { \"key\": \"value\" }）"] };
   const value = parsed as Record<string, unknown>;
   const errors: string[] = [];
-  const byName = new Map(fields.map((field) => [field.name, field]));
-  for (const field of fields) {
-    if (field.required && value[field.name] === undefined) errors.push(`缺少必填参数：${field.name}`);
-  }
-  for (const [name, raw] of Object.entries(value)) {
-    const field = byName.get(name);
-    if (field === undefined) continue;
-    if (raw === null) continue;
-    if (field.baseType === "number" && (typeof raw !== "number" || !Number.isFinite(raw))) {
-      errors.push(`${name}：应为 number`);
-    } else if (field.baseType === "integer" && (typeof raw !== "number" || !Number.isInteger(raw))) {
-      errors.push(`${name}：应为 integer`);
-    } else if (field.baseType === "string" && typeof raw !== "string") {
-      errors.push(`${name}：应为 string`);
-    } else if (field.baseType === "boolean" && typeof raw !== "boolean") {
-      errors.push(`${name}：应为 boolean`);
-    } else if (field.baseType === "array" && !Array.isArray(raw)) {
-      errors.push(`${name}：应为数组`);
-    } else if (field.baseType === "object" && !isPlainObject(raw)) {
-      errors.push(`${name}：应为对象`);
-    } else if (field.baseType === "enum" && !(field.enumValues ?? []).some((candidate) => displayValue(candidate) === displayValue(raw))) {
-      errors.push(`${name}：不在允许值内（${(field.enumValues ?? []).map(displayValue).join(" / ")}）`);
-    }
-  }
+  const warnings: string[] = [];
+  validateObject(fields, value, "", errors, warnings);
   if (errors.length > 0) return { ok: false, errors };
-  const unknown = Object.keys(value).filter((name) => !byName.has(name));
   return {
     ok: true,
     value,
-    warnings: unknown.length > 0 ? [`未知参数（schema 里没有，服务器可能忽略）：${unknown.join("、")}`] : [],
+    warnings: warnings.length > 0 ? [`未知参数（schema 里没有，服务器可能忽略）：${warnings.join("、")}`] : [],
   };
+}
+
+/** 递归校验一个对象值（必填 / 叶子类型 / 未知键）。 */
+function validateObject(
+  fields: readonly DebugField[],
+  value: Record<string, unknown>,
+  prefix: string,
+  errors: string[],
+  warnings: string[],
+): void {
+  const byName = new Map(fields.map((field) => [field.name, field]));
+  for (const field of fields) {
+    if (field.required && value[field.name] === undefined) errors.push(`缺少必填参数：${field.path}`);
+  }
+  for (const [name, raw] of Object.entries(value)) {
+    const field = byName.get(name);
+    if (field === undefined) {
+      warnings.push(prefix.length > 0 ? `${prefix}.${name}` : name);
+      continue;
+    }
+    if (raw === null) continue;
+    if (field.children !== undefined) {
+      if (!isPlainObject(raw)) {
+        errors.push(`${field.path}：应为对象`);
+        continue;
+      }
+      validateObject(field.children, raw, field.path, errors, warnings);
+      continue;
+    }
+    if (field.baseType === "number" && (typeof raw !== "number" || !Number.isFinite(raw))) {
+      errors.push(`${field.path}：应为 number`);
+    } else if (field.baseType === "integer" && (typeof raw !== "number" || !Number.isInteger(raw))) {
+      errors.push(`${field.path}：应为 integer`);
+    } else if (field.baseType === "string" && typeof raw !== "string") {
+      errors.push(`${field.path}：应为 string`);
+    } else if (field.baseType === "boolean" && typeof raw !== "boolean") {
+      errors.push(`${field.path}：应为 boolean`);
+    } else if (field.baseType === "array" && !Array.isArray(raw)) {
+      errors.push(`${field.path}：应为数组`);
+    } else if (field.baseType === "object" && !isPlainObject(raw)) {
+      errors.push(`${field.path}：应为对象`);
+    } else if (field.baseType === "enum" && !(field.enumValues ?? []).some((candidate) => displayValue(candidate) === displayValue(raw))) {
+      errors.push(`${field.path}：不在允许值内（${(field.enumValues ?? []).map(displayValue).join(" / ")}）`);
+    }
+  }
+}
+
+/** 草稿 → 最佳努力 JSON：切到 JSON 模式时用（不校验、不报错，空值跳过）。 */
+function draftToValue(fields: readonly DebugField[], draft: Record<string, string>): Record<string, unknown> {
+  const value: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (field.children !== undefined) {
+      const child = draftToValue(field.children, draft);
+      if (Object.keys(child).length > 0) value[field.name] = child;
+      continue;
+    }
+    const text = draft[field.path] ?? "";
+    if (text.trim().length === 0) continue;
+    const parsed = parseField(field, text);
+    value[field.name] = parsed.ok && parsed.value !== undefined ? parsed.value : text;
+  }
+  return value;
+}
+
+/** 「填入示例」的递归实现：按 default / enum 首项 / 类型占位填叶子字段。 */
+function fillExampleInto(fields: readonly DebugField[], out: Record<string, string>): void {
+  for (const field of fields) {
+    if (field.children !== undefined) {
+      fillExampleInto(field.children, out);
+      continue;
+    }
+    if (field.defaultValue !== undefined) out[field.path] = displayValue(field.defaultValue);
+    else if (field.enumValues !== undefined && field.enumValues.length > 0) out[field.path] = displayValue(field.enumValues[0]);
+    else if (field.baseType === "boolean") out[field.path] = "true";
+    else if (field.baseType === "integer" || field.baseType === "number") out[field.path] = "1";
+    else if (field.baseType === "array") out[field.path] = "[]";
+    else if (field.baseType === "object") out[field.path] = "{}";
+    else out[field.path] = "";
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -424,30 +583,22 @@ export function McpDebugDialog({
   // 执行完成后把结果滚进视野（参数区保持展开，结果在下方）。
   useEffect(() => {
     if (result === undefined) return;
-    resultRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+    resultRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [result]);
 
-  const setField = (name: string, value: string) => {
-    setDraft((prev) => ({ ...prev, [name]: value }));
+  const setField = (path: string, value: string) => {
+    setDraft((prev) => ({ ...prev, [path]: value }));
     setFieldErrors((prev) => {
-      if (prev[name] === undefined) return prev;
+      if (prev[path] === undefined) return prev;
       const next = { ...prev };
-      delete next[name];
+      delete next[path];
       return next;
     });
   };
 
   const fillExample = () => {
     const next: Record<string, string> = {};
-    for (const field of fields) {
-      if (field.defaultValue !== undefined) next[field.name] = displayValue(field.defaultValue);
-      else if (field.enumValues !== undefined && field.enumValues.length > 0) next[field.name] = displayValue(field.enumValues[0]);
-      else if (field.baseType === "boolean") next[field.name] = "true";
-      else if (field.baseType === "integer" || field.baseType === "number") next[field.name] = "1";
-      else if (field.baseType === "array") next[field.name] = "[]";
-      else if (field.baseType === "object") next[field.name] = "{}";
-      else next[field.name] = "";
-    }
+    fillExampleInto(fields, next);
     setDraft(next);
     setFieldErrors({});
   };
@@ -456,8 +607,7 @@ export function McpDebugDialog({
   const switchMode = (nextMode: "form" | "json") => {
     if (nextMode === mode) return;
     if (nextMode === "json") {
-      const built = buildArguments(fields, draft);
-      setJsonText(JSON.stringify(built.ok ? built.value : draft, null, 2));
+      setJsonText(JSON.stringify(draftToValue(fields, draft), null, 2));
       setMode("json");
       setErrors([]);
       setFieldErrors({});
@@ -468,11 +618,7 @@ export function McpDebugDialog({
       setErrors(parsed.errors);
       return;
     }
-    const nextDraft = { ...draft };
-    for (const field of fields) {
-      const value = parsed.value[field.name];
-      if (value !== undefined) nextDraft[field.name] = displayValue(value);
-    }
+    const nextDraft = draftFromArgs(fields, parsed.value, { ...draft });
     setDraft(nextDraft);
     setWarnings(parsed.warnings);
     setMode("form");
@@ -541,9 +687,8 @@ export function McpDebugDialog({
   const paramCount = fields.length;
   const requiredCount = fields.filter((field) => field.required).length;
   const jsonErrorCount = errors.length > 0;
-  const requiredMissing =
-    mode === "form" && fields.some((field) => field.required && (draft[field.name] ?? "").trim().length === 0);
-  const runDisabled = running || requiredMissing;
+  const missingRequired = mode === "form" && requiredMissing(fields, draft);
+  const runDisabled = running || missingRequired;
 
   return (
     <div className="skp-modal-overlay" onClick={onClose}>
@@ -616,11 +761,11 @@ export function McpDebugDialog({
                 <div className="skp-dbg-params">
                   {fields.map((field) => (
                     <DebugFieldRow
-                      key={field.name}
+                      key={field.path}
                       field={field}
-                      value={draft[field.name] ?? ""}
-                      error={fieldErrors[field.name]}
-                      onChange={(value) => setField(field.name, value)}
+                      draft={draft}
+                      fieldErrors={fieldErrors}
+                      onChange={setField}
                     />
                   ))}
                 </div>
@@ -705,19 +850,60 @@ export function McpDebugDialog({
   );
 }
 
-/** 一个参数行：名称 / 类型 / 必填 / 说明 + 对应控件。 */
+/**
+ * 一个参数行：名称 / 类型 / 必填 / 说明 + 对应控件。
+ *
+ * object 且 schema 里有 `properties` → 递归渲染成带缩进的子表单卡片；
+ * 叶子字段按类型渲染控件（enum 下拉 / boolean 开关 / array·object JSON 文本 / 文本）。
+ */
 function DebugFieldRow({
   field,
-  value,
-  error,
+  draft,
+  fieldErrors,
   onChange,
 }: {
   field: DebugField;
-  value: string;
-  error?: string;
-  onChange(value: string): void;
+  draft: Record<string, string>;
+  fieldErrors: Record<string, string>;
+  onChange(path: string, value: string): void;
 }) {
-  const id = `skp-dbg-field-${field.name}`;
+  const id = `skp-dbg-field-${field.path.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+  const value = draft[field.path] ?? "";
+  const error = fieldErrors[field.path];
+  const label = (
+    <div className="skp-dbg-field-label">
+      <code className="skp-dbg-field-name" title={field.path}>
+        {field.name}
+      </code>
+      <span className="skp-test-stat">{field.typeLabel}</span>
+      <span className={field.required ? "skp-tag skp-tag-warn" : "skp-tag skp-tag-flat"}>
+        {field.required ? "必填" : "可选"}
+      </span>
+      {field.description !== undefined && <span className="skp-dbg-field-desc">{field.description}</span>}
+    </div>
+  );
+
+  // object（有 properties）：递归子表单卡片，子字段缩进一层。
+  if (field.children !== undefined) {
+    return (
+      <div className={error !== undefined ? "skp-dbg-group skp-dbg-group-error" : "skp-dbg-group"}>
+        <div className="skp-dbg-group-head">{label}</div>
+        <div className="skp-dbg-group-body">
+          {field.children.map((child) => (
+            <DebugFieldRow
+              key={child.path}
+              field={child}
+              draft={draft}
+              fieldErrors={fieldErrors}
+              onChange={onChange}
+            />
+          ))}
+        </div>
+        {error !== undefined && <div className="skp-dbg-group-error-text">{error}</div>}
+      </div>
+    );
+  }
+
   const control = (() => {
     if (field.baseType === "enum") {
       const options = (field.enumValues ?? []).map((raw, index) => ({
@@ -731,9 +917,9 @@ function DebugFieldRow({
           ariaLabel={`${field.name} 允许值`}
           options={[{ value: "", label: "（未选择）" }, ...options]}
           onChange={(next) => {
-            if (next === "") return onChange("");
+            if (next === "") return onChange(field.path, "");
             const raw = (field.enumValues ?? [])[Number(next)];
-            if (raw !== undefined) onChange(displayValue(raw));
+            if (raw !== undefined) onChange(field.path, displayValue(raw));
           }}
         />
       );
@@ -747,7 +933,7 @@ function DebugFieldRow({
               id={id}
               type="checkbox"
               checked={checked}
-              onChange={(event) => onChange(event.target.checked ? "true" : "false")}
+              onChange={(event) => onChange(field.path, event.target.checked ? "true" : "false")}
             />
             <span className="skp-switch-track" />
           </span>
@@ -763,7 +949,7 @@ function DebugFieldRow({
           value={value}
           spellCheck={false}
           placeholder={field.baseType === "array" ? "[]" : "{}"}
-          onChange={(event) => onChange(event.target.value)}
+          onChange={(event) => onChange(field.path, event.target.value)}
         />
       );
     }
@@ -774,20 +960,14 @@ function DebugFieldRow({
         value={value}
         inputMode={field.baseType === "integer" || field.baseType === "number" ? "numeric" : undefined}
         placeholder={field.baseType === "integer" ? "整数" : field.baseType === "number" ? "数字" : "文本"}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => onChange(field.path, event.target.value)}
       />
     );
   })();
+
   return (
     <div className={error !== undefined ? "skp-dbg-field skp-dbg-field-error" : "skp-dbg-field"}>
-      <div className="skp-dbg-field-label">
-        <code className="skp-dbg-field-name">{field.name}</code>
-        <span className="skp-test-stat">{field.typeLabel}</span>
-        <span className={field.required ? "skp-tag skp-tag-warn" : "skp-tag skp-tag-flat"}>
-          {field.required ? "必填" : "可选"}
-        </span>
-        {field.description !== undefined && <span className="skp-dbg-field-desc">{field.description}</span>}
-      </div>
+      {label}
       <div className="skp-dbg-field-control">{control}</div>
       {error !== undefined && <div className="skp-dbg-field-error-text">{error}</div>}
     </div>
