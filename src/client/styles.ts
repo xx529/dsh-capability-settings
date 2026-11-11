@@ -1076,14 +1076,15 @@ button.skp-dock-rail-fail:hover{filter:brightness(.9);}
 .skp-dbg-section-title{font-size:12px;font-weight:600;color:var(--skp-text);flex:none;}
 .skp-dbg-spacer{flex:1 1 auto;}
 .skp-dbg-params{display:flex;flex-direction:column;border-top:1px solid var(--skp-border);}
-.skp-dbg-field{display:grid;grid-template-columns:minmax(0,260px) minmax(0,1fr);column-gap:14px;row-gap:4px;padding:9px 0;border-bottom:1px solid var(--skp-border);align-items:start;}
-.skp-dbg-field-label{grid-column:1;grid-row:1;display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0;}
+.skp-dbg-field{display:grid;grid-template-columns:minmax(0,260px) minmax(0,1fr);column-gap:14px;row-gap:4px;padding:9px 0;border-bottom:1px solid var(--skp-border);align-items:center;}
+.skp-dbg-field-label{grid-column:1;grid-row:1;display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0;align-self:center;}
+.skp-dbg-field:has(.skp-dbg-textarea) .skp-dbg-field-label{align-self:start;padding-top:9px;}
 .skp-dbg-field-name{font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:12.5px;color:var(--skp-text);}
 .skp-dbg-help{position:relative;display:inline-flex;flex:none;}
 .skp-dbg-help-btn{width:16px;height:16px;padding:0;border:1px solid var(--skp-border-strong);border-radius:50%;background:var(--skp-surface);color:var(--skp-text-3);font:inherit;font-size:10px;line-height:1;cursor:help;display:inline-flex;align-items:center;justify-content:center;flex:none;}
 .skp-dbg-help-btn:hover,.skp-dbg-help-btn:focus-visible{color:var(--skp-accent);border-color:var(--skp-accent);outline:none;}
 .skp-dbg-help-pop{position:fixed;z-index:130;max-height:min(320px,60vh);overflow:auto;padding:8px 10px;border:1px solid var(--skp-border);border-radius:8px;background:var(--skp-surface);color:var(--skp-text-2);font-size:11px;line-height:17px;box-shadow:0 8px 24px rgba(0,0,0,.28);white-space:pre-wrap;overflow-wrap:anywhere;}
-.skp-dbg-field-control{grid-column:2;grid-row:1;min-width:0;display:flex;flex-direction:column;gap:4px;}
+.skp-dbg-field-control{grid-column:2;grid-row:1;min-width:0;min-height:38px;display:flex;flex-direction:column;gap:4px;justify-content:center;}
 .skp-dbg-field-error-text{grid-column:1 / -1;grid-row:3;font-size:10.5px;color:var(--skp-error);}
 .skp-dbg-group{border:1px solid var(--skp-border);border-radius:9px;margin:2px 0;background:color-mix(in srgb,var(--skp-fill) 55%,transparent);}
 .skp-dbg-group-head{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:8px 10px;border-bottom:1px solid var(--skp-border);}
@@ -1096,7 +1097,7 @@ button.skp-dock-rail-fail:hover{filter:brightness(.9);}
 .skp-dbg-array-item{display:grid;grid-template-columns:34px minmax(0,1fr) 26px;align-items:center;column-gap:8px;padding:6px 0;border-bottom:1px solid var(--skp-border);}
 .skp-dbg-array-item:last-child{border-bottom:0;}
 .skp-dbg-array-index{font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:10.5px;color:var(--skp-text-3);}
-.skp-dbg-array-control{min-width:0;display:flex;flex-direction:column;gap:4px;}
+.skp-dbg-array-control{min-width:0;min-height:38px;display:flex;flex-direction:column;gap:4px;justify-content:center;}
 .skp-dbg-array-item-error{grid-column:2;font-size:10.5px;color:var(--skp-error);}
 .skp-dbg-icon-btn{flex:none;border:0;background:none;color:var(--skp-text-3);font-size:12px;cursor:pointer;padding:4px;line-height:1;border-radius:6px;}
 .skp-dbg-icon-btn:hover{background:var(--skp-hover);color:var(--skp-error);}
@@ -1106,7 +1107,7 @@ button.skp-dock-rail-fail:hover{filter:brightness(.9);}
 .skp-dbg-array-item-body{padding-left:8px;}
 .skp-dbg-field-error .skp-input,.skp-dbg-field-error .skp-dd-btn{border-color:var(--skp-error)!important;}
 .skp-dbg-textarea{min-height:56px;resize:vertical;}
-.skp-dbg-switch{display:flex;align-items:center;gap:8px;cursor:pointer;min-height:34px;}
+.skp-dbg-switch{display:flex;align-items:center;gap:8px;cursor:pointer;min-height:38px;}
 .skp-dbg-switch-text{font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:11.5px;color:var(--skp-text-3);}
 .skp-dbg-json{width:100%;min-height:220px;font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:11.5px;line-height:1.7;}
 .skp-dbg-empty{padding:10px 0 14px;font-size:12px;color:var(--skp-text-3);}
