@@ -3,6 +3,21 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.18.8] - 2026-11-13
+
+### 修复
+
+- **首屏能力配置弹窗切换 Tab 时整框上下跳动**（反馈：从 Skills 切到 MCP / Tools / Prompt，
+  弹窗位置不停变化，影响交互）：根因是弹窗用 `align-items:center` 垂直居中，而高度
+  随当前 Tab 的内容数量变化，内容一矮（Tools 8 张卡 / Prompt 2 张卡）整框就被往上推。
+  现在改为**顶部定锚**：遮罩层 `align-items:flex-start`，上沿固定为
+  `clamp(72px, 15vh, 168px)`，弹窗与面板最大高度按 `calc(100vh - 上沿 - 24px)` 计算，
+  只有下沿随内容伸缩；内容超高时卡片网格内部滚动（面板 `max-height:inherit`，不越出弹窗）。
+  - 验证 `notes/verify/v26-modal-anchor-gui.mjs` 7/7：真实组件 + Chromium 1920×1080，
+    四个 Tab 上沿均为 162px（旧实现 179.5 / 281.5 / 332.5 / 384.5，差 205px），
+    下沿 Skills 883 / MCP 679 / Tools 577 / Prompt 473，最高内容不越视口；
+    1440×900 / 1280×720 / 1680×1050 复测无页面级溢出（1280×720 为网格内部滚动）。
+
 ## [1.18.7] - 2026-11-11
 
 ### 修复

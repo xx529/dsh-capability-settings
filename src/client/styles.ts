@@ -369,10 +369,14 @@ export const SKP_CSS = `
 .skp-dock-entry-decision{position:relative;color:var(--dsw-alias-label-secondary,#5b6472);}
 .skp-dock-entry-decision svg{display:block;}
 .skp-dock-entry-guide-dot{position:absolute;top:3px;right:3px;width:4px;height:4px;border-radius:50%;background:var(--dsw-alias-state-business-primary,#4176e6);}
-/* 配置弹窗：背景模糊 + 居中大弹层（替代旧的下拉展开） */
-.skp-dock-modal-backdrop{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--dsw-alias-bg-mask-1,rgba(0,0,0,.55));-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);}
-.skp-dock-modal{display:flex;flex-direction:column;width:min(1120px,100%);max-height:min(84vh,760px);min-height:0;}
-.skp-dock-panel.skp-dock-panel-modal{width:100%;max-height:min(84vh,760px);min-height:0;padding:20px 24px;gap:10px;border-radius:18px;box-shadow:var(--dsw-shadow-lv3,0 12px 32px rgba(15,20,30,.16));}
+/* 配置弹窗：背景模糊 + **顶部定锚**大弹层（替代旧的下拉展开）。
+   弹窗上沿固定在视口上方同一个位置，只有下沿随当前 Tab 的内容数量伸缩：
+   切换 Skills / MCP / Tools / Prompt 时框体不再整体上下跳动。
+   旧实现用 align-items:center 垂直居中，内容一矮（Tools 8 张卡 / Prompt 2 张卡）
+   整框就被往上推，交互时点不到同一个位置。高度上限仍按视口计算，超高时网格内部滚动。 */
+.skp-dock-modal-backdrop{--skp-cap-modal-top:clamp(72px,15vh,168px);position:fixed;inset:0;z-index:200;display:flex;align-items:flex-start;justify-content:center;padding:var(--skp-cap-modal-top) 24px 24px;background:var(--dsw-alias-bg-mask-1,rgba(0,0,0,.55));-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);}
+.skp-dock-modal{display:flex;flex-direction:column;width:min(1120px,100%);max-height:calc(100vh - var(--skp-cap-modal-top) - 24px);min-height:0;}
+.skp-dock-panel.skp-dock-panel-modal{width:100%;max-height:inherit;min-height:0;padding:20px 24px;gap:10px;border-radius:18px;box-shadow:var(--dsw-shadow-lv3,0 12px 32px rgba(15,20,30,.16));}
 .skp-dock-panel-modal .skp-dock-head{min-height:32px;}
 .skp-dock-panel-modal .skp-dock-title{font-size:17px;}
 .skp-dock-panel-modal .skp-dock-subtitle{font-size:11.5px;}
