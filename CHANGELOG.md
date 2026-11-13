@@ -3,6 +3,23 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.18.10] - 2026-11-13
+
+### 修复
+
+- **能力面板全局视图看不到 `dsh-doc`，但首屏会话能力面板能看到**（反馈：全局
+  Skills 搜索 `dsh-doc` 显示「没有匹配」）：根因是 preset 层技能只存在于绑定该
+  预设的 agent scope，面板全局视图走的是无 scope 的 `snapshot({cwd})`，看不到
+  preset 行。
+  - 面板全局视图新增 `hostPanelRows`：从 `agents.list()` 的 live agent scope 补
+    宿主注入行（只收 `hostInjected`、按名字去重、最多 20 个 scope），与首屏会话
+    视图统一；全局列表搜索可见，开关仍置灰，可见性编辑隐藏。
+  - 全局面板点开 `dsh-doc` 详情时，`skills.get` 会按名字在 live agent scope 里
+    找一个能看见它的 scope 再读（只读，不改变任何状态），正文/资源不再 not-found。
+  - 验证 `node notes/verify/host-injected.mjs` 13/13（新增「面板全局视图补 preset
+    宿主技能」「面板全局视图可读 preset 宿主技能详情」）；`pnpm typecheck`、
+    `pnpm build` 通过。
+
 ## [1.18.9] - 2026-11-13
 
 ### 修复

@@ -193,6 +193,20 @@ export interface SkillRegistryBridge {
      * registry 不可用 / snapshot 失败返回 undefined（调用方保持旧行为）。
      */
     hostInjectedNames(agent: unknown, sessionId: string | undefined, cwd?: string): Promise<Set<string> | undefined>;
+    /**
+     * 面板**全局视图**的宿主注入行（v26 统一入口）。
+     *
+     * `dsh-doc` 这类 preset 层技能只存在于绑定该预设的 agent scope 里，无 scope 的
+     * `snapshot({cwd})` 看不到。面板全局视图又要与首屏会话能力视图一致（能看到、
+     * 但不能改），所以这里从 `agents.list()` 的 live agent scope 补宿主行：
+     * 只收 `hostInjected` 行，按名字去重，不改任何状态。
+     */
+    hostPanelRows(input: {
+        cwd?: string;
+        diskRows: SkillSummaryView[];
+        projectDisabled: ReadonlySet<string>;
+        existing: readonly SkillSummaryView[];
+    }): Promise<SkillSummaryView[]>;
     /** 名字在当前视图里的性质（写拦截用；registry 不可用返回 undefined）。 */
     inspectName(name: string, options: {
         cwd?: string;

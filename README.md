@@ -448,6 +448,9 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   详情照常展示（来源标签显示「宿主」），但**全局默认 / 工作区默认 / 当前对话 /
   可见性**开关一律置灰；`skills.setSessionEnabled`、项目默认与可见性写入在宿主侧
   也直接返回业务失败，不会注册 shadow。第三方插件运行时注入的技能不受影响。
+  面板**全局视图**与首屏会话能力视图已统一：`dsh-doc` 这类只存在于 preset agent
+  scope 的宿主技能，会从 live agent scope 补进全局列表（只收宿主行、按名字去重），
+  详情正文同样可按名字找到 agent scope 读取；仍然只读、不可开关。
 - **面板行开关 = 本项目默认启停**：写统一存储
   `<dshHome>/dsh-capability-settings/capability-overrides.json` 里
   `projects.<工作区>.skills` 列表（与 `mcp` 列表并列、互不影响），新建对话按它

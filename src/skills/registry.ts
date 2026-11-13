@@ -216,6 +216,20 @@ export interface SkillRegistryBridge {
    * registry 不可用 / snapshot 失败返回 undefined（调用方保持旧行为）。
    */
   hostInjectedNames(agent: unknown, sessionId: string | undefined, cwd?: string): Promise<Set<string> | undefined>;
+  /**
+   * 面板**全局视图**的宿主注入行（v26 统一入口）。
+   *
+   * `dsh-doc` 这类 preset 层技能只存在于绑定该预设的 agent scope 里，无 scope 的
+   * `snapshot({cwd})` 看不到。面板全局视图又要与首屏会话能力视图一致（能看到、
+   * 但不能改），所以这里从 `agents.list()` 的 live agent scope 补宿主行：
+   * 只收 `hostInjected` 行，按名字去重，不改任何状态。
+   */
+  hostPanelRows(input: {
+    cwd?: string;
+    diskRows: SkillSummaryView[];
+    projectDisabled: ReadonlySet<string>;
+    existing: readonly SkillSummaryView[];
+  }): Promise<SkillSummaryView[]>;
   /** 名字在当前视图里的性质（写拦截用；registry 不可用返回 undefined）。 */
   inspectName(name: string, options: { cwd?: string; sessionId?: string }): Promise<RegistryNameVerdict | undefined>;
   /** 详情 fallback（磁盘读不到时调用）。 */
@@ -814,6 +828,47 @@ export function createSkillRegistryBridge(deps: SkillRegistryBridgeDeps): SkillR
     return names;
   }
 
+  /** 面板全局视图的宿主注入行（从 live agent scope 补 preset 层）。 */
+  async function hostPanelRows(input: {
+    cwd?: string;
+    diskRows: SkillSummaryView[];
+    projectDisabled: ReadonlySet<string>;
+    existing: readonly SkillSummaryView[];
+  }): Promise<SkillSummaryView[]> {
+    const skills = service();
+    if (skills === undefined || typeof skills.snapshot !== "function") return [];
+    const seen = new Set<string>([...input.diskRows, ...input.existing].map((row) => row.name));
+    let agents: any[] = [];
+    try {
+      const listed = deps.ctx?.get?.("agents")?.list?.();
+      agents = Array.isArray(listed) ? listed : [];
+    } catch {
+      agents = [];
+    }
+    const rows: SkillSummaryView[] = [];
+    // 上限防抖：真实环境 live agent 通常个位数；异常多时也只补前 20 个 scope。
+    for (const agent of agents.slice(0, 20)) {
+      if (agent?.id === undefined) continue;
+      const agentCwd = typeof agent?.session?.header?.cwd === "string" ? agent.session.header.cwd : input.cwd;
+      try {
+        const scoped = await merge({
+          ...(agentCwd !== undefined ? { cwd: agentCwd } : {}),
+          sessionId: agent.id,
+          diskRows: [],
+          projectDisabled: input.projectDisabled,
+        });
+        for (const row of scoped) {
+          if (row.hostInjected !== true || seen.has(row.name)) continue;
+          seen.add(row.name);
+          rows.push(row);
+        }
+      } catch {
+        /* 单个 scope 失败不影响其它 preset 行 */
+      }
+    }
+    return rows;
+  }
+
   /** 名字在当前视图里的性质（写拦截用）。 */
   async function inspectName(
     name: string,
@@ -914,14 +969,58 @@ export function createSkillRegistryBridge(deps: SkillRegistryBridgeDeps): SkillR
    * 2. 仍取不到（preset 层）用 read-before-shadow 缓存的 path 读磁盘正文；
    * 3. 都没有才返回 undefined（调用方按 not-found 处理），绝不把占位条目当真实内容。
    */
+  /**
+   * 在全局面板（无 sessionId）里按名字找一个能看见该技能的 live agent scope。
+   *
+   * 只服务 preset 层注入技能（如 `dsh-doc`）：它们没有磁盘副本，也不在无 scope
+   * 的全局快照里。只读；失败返回 undefined。
+   */
+  async function findScopeForSkill(name: string, cwd?: string): Promise<{ agent: unknown; cwd?: string } | undefined> {
+    const skills = service();
+    if (skills === undefined || typeof skills.snapshot !== "function") return undefined;
+    let agents: any[] = [];
+    try {
+      const listed = deps.ctx?.get?.("agents")?.list?.();
+      agents = Array.isArray(listed) ? listed : [];
+    } catch {
+      agents = [];
+    }
+    for (const agent of agents.slice(0, 20)) {
+      if (agent?.id === undefined) continue;
+      const agentCwd = typeof agent?.session?.header?.cwd === "string" ? agent.session.header.cwd : cwd;
+      const snapshot = await safeSnapshot(skills, {
+        ...(agentCwd !== undefined ? { cwd: agentCwd } : {}),
+        scope: agent,
+      });
+      if (snapshot?.skills.some((entry) => entry?.name === name)) {
+        return { agent, ...(agentCwd !== undefined ? { cwd: agentCwd } : {}) };
+      }
+    }
+    return undefined;
+  }
+
   async function getDefinition(input: { name: string; cwd?: string; sessionId?: string }): Promise<HostSkillDefinition | undefined> {
     const skills = service();
     if (skills === undefined) return undefined;
-    const agent = agentFor(input.sessionId);
-    const scoped = await safeGet(skills, input.name, {
-      cwd: input.cwd,
+    let agent = agentFor(input.sessionId);
+    let cwd = input.cwd;
+    let scoped = await safeGet(skills, input.name, {
+      cwd,
       ...(agent !== undefined ? { scope: agent } : {}),
     });
+    // 全局面板没有 session：preset 层技能只在绑定该预设的 agent scope 里可见。
+    // 按名字找一个 live agent scope 再读一次（只读，不改变任何状态）。
+    if ((scoped === undefined || isOwnShadowDefinition(scoped)) && agent === undefined) {
+      const scope = await findScopeForSkill(input.name, input.cwd);
+      if (scope !== undefined) {
+        agent = scope.agent;
+        cwd = scope.cwd ?? cwd;
+        scoped = await safeGet(skills, input.name, {
+          ...(cwd !== undefined ? { cwd } : {}),
+          scope: agent,
+        });
+      }
+    }
     if (scoped !== undefined && !isOwnShadowDefinition(scoped)) return scoped;
     if (scoped !== undefined) {
       const globalDefinition = await safeGet(skills, input.name, { cwd: input.cwd });
@@ -1237,6 +1336,7 @@ export function createSkillRegistryBridge(deps: SkillRegistryBridgeDeps): SkillR
     globalInjected,
     injectedNames,
     hostInjectedNames,
+    hostPanelRows,
     inspectName,
     readDetail,
     getDefinition,
