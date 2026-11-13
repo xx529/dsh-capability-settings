@@ -315,6 +315,7 @@ function enumerateGlobalTools(
       // 单元级归属聚合：取最高优先级依据；不同依据 = mixed（诊断）。
       const priority: Record<string, number> = {
         builtin: 7,
+        config: 7,
         runtime: 6,
         literal: 5,
         table: 4,

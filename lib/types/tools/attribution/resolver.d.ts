@@ -13,7 +13,11 @@
  *   - **T0 尽早挂**：tools 服务一可用就挂（不等面板首次查询），但扫描/缓存仍
  *     惰性启动，不拖慢宿主启动；
  *   - 身份映射：`fiber.name → 包 id`（loader entries）与「包根 realpath → 包 id」
- *     （解决 `link:`/`@local/*` 帧路径不含 `node_modules` 的老问题）。
+ *     （解决 `link:`/`@local/*` 帧路径不含 `node_modules` 的老问题）；宿主包的
+ *     fiber 名（插件导出名，如 `tool-subagent`）同样登记——同一宿主插件包的
+ *     provider 实例（`config.toolName` 改名）靠它归到宿主只读单元；
+ *   - 宿主声明兜底：宿主 loader 条目的 `config.toolName` → 宿主包（T1'，
+ *     `matchedBy=config`），覆盖 T0 挂上之前已注册的实例工具。
  *
  * @module dsh-capability-settings/tools/attribution/resolver
  */

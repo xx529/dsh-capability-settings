@@ -10,6 +10,7 @@
 /** 归属依据（additive；旧值 `prefix` / `exact` / `source` 继续被识别）。 */
 export type AttributionMatchedBy =
   | "builtin"
+  | "config"
   | "runtime"
   | "literal"
   | "namespace"

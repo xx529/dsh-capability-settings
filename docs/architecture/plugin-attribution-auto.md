@@ -871,7 +871,37 @@ attribution?: {
 
 ---
 
-## 16. 参考
+## 16. v26.1 修订：宿主插件实例（provider 变体）的工具归属
+
+**问题（用户反馈）**：`subagent_codex` / `subagent_claude_code` 在 dsh-context 里归
+`tool-subagent`，本插件归「来源未识别」。根因是宿主工具归属的**宿主分支只有硬编码
+清单**（`src/shared/plugin-attribution.ts` 的 `HOST_BUILTIN_EXACT` /
+`HOST_BUILTIN_UNIT_RULES` 只有 `subagent` / `subagent_fork` /
+`list_subagent_models`），而这两个工具不在任何包源码字面量里：它们来自
+`@deepseek-ai/dsh-tool-subagent` 的**额外实例**——profile 的 cordis patch
+（`@deepseek-ai/dsh-subagent-codex` / `-claude-code` 各自 `insert` 一次）用
+`config.toolName` 改的名；同时 T0/T1/T3 刻意排除 `@deepseek-ai/*`，于是
+`resolveTool()` 只能返回 unknown。
+
+**修订（与 dsh-context 一致：运行时优先 + 声明兜底）**
+
+| 层 | 位置 | 行为 |
+|---|---|---|
+| T0 身份 | `src/tools/attribution/resolver.ts` `rebuildFiberMap` + `runtime.ts` `identityPackage` | loader 条目是宿主包时，把 `entry.ctx.fiber.name`（cordis `Fiber.name` = 插件导出名，如 `tool-subagent`）也映射到该宿主包；`internal/get` 身份命中宿主包 → `hostInjected=true`。注册栈里的宿主帧仍不作为第三方归属依据。 |
+| T1' 声明 | `resolver.ts` `rebuildHostDeclaredTools` + `resolveTool` | 宿主 loader 条目的 `options.config.toolName` → 该宿主包（`matchedBy="config"`，UI「宿主声明」）；只收 `@deepseek-ai/*`、跳过 disabled 条目。覆盖 T0 挂监听前已注册的实例工具，不随宿主升级失效。 |
+| 契约 | `AttributionMatchedBy`（host / client） | 新增 `"config"`；manager 单元归并优先级与 `builtin` 同为 7，不触发 `mixed`。 |
+
+**边界**
+
+- 宿主单元仍恒启用、只读，`setSessionEnabled` / `setGlobalEnabled` 继续拒绝；
+- 未声明的 `subagent_*` 不猜（不按前缀归类），第三方 loader 条目的
+  `config.toolName` 不参与宿主声明；
+- T0 只对**本插件挂监听后**的注册生效；之前注册的宿主实例工具靠 T1'，第三方工具
+  仍按原降级路径处理（现状不变）；
+- 测试：`notes/verify/v14-attribution-host-instance.mjs`（H1 运行时 / H2 声明兜底 /
+  H3 manager 集成与只读 / H4 负例），已纳入 `notes/verify/run-all.sh`。
+
+## 17. 参考
 
 - 证据：`docs/research/plugin-attribution-heuristics.md`（§0 摘要 / §2.1 loader·包根 API / §2.3 tools/change 同步性 / §3 静态扫描实测 / §4 运行时栈 / §5 相似度 / §7 缓存 / §10 风险 / §11 待验证）
 - 现状：`src/shared/plugin-attribution.ts`（TOOL_RULES/MCP_NAMESPACE_RULES/内建清单）、`src/tools/{manager,types,global-state,restrict}.ts`、`src/session-state.ts`、`src/mcp/runtime.ts`、`src/index.ts`

@@ -3,6 +3,32 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 修复
+
+- **宿主插件 provider 实例的工具落「来源未识别」**（反馈：dsh-context 把
+  `subagent_claude_code` / `subagent_codex` 归到 `tool-subagent` 工具簇，本插件
+  识别不出来）：根因是宿主工具归属只认硬编码清单（`subagent` / `subagent_fork` /
+  `list_subagent_models`），而这两个工具来自 `@deepseek-ai/dsh-tool-subagent` 的
+  **额外实例**——`@deepseek-ai/dsh-subagent-codex` / `-claude-code` 的 cordis patch
+  把同一个包再插一次，用 `config.toolName` 改名，包源码里没有字面量；T0/T1/T3 又
+  刻意排除 `@deepseek-ai/*`，最终 `resolveTool()` 返回 unknown。
+  - **T0 运行时身份**：loader 条目是宿主包时，把 `ctx.fiber.name`（cordis
+    `Fiber.name` = 插件导出名，如 `tool-subagent`）也映射到该宿主包；注册后即归
+    `@deepseek-ai/dsh-tool-subagent` 只读宿主单元（`runtime` / `hostInjected`）。
+  - **T1' loader 声明兜底**：宿主 loader 条目的 `options.config.toolName` 直接归到
+    该宿主包（新增 `matchedBy="config"`，UI 来源判定「宿主声明」），覆盖本插件挂
+    监听之前就注册好的实例工具，不依赖手写名单、不随宿主升级失效。
+  - 宿主单元合并 `subagent` / `subagent_fork` / `list_subagent_models` 与两个
+    provider 工具，恒启用、只读；`setSessionEnabled` / `setGlobalEnabled` 继续拒绝。
+  - 不按名字前缀猜：未声明的 `subagent_*` 仍归「来源未识别」；第三方条目的
+    `config.toolName` 不会被当宿主声明。
+  - 验证：`node notes/verify/v14-attribution-host-instance.mjs` 7/7（已纳入
+    `notes/verify/run-all.sh`）；`pnpm typecheck`、`pnpm build` 通过；
+    `v14-attribution-t0` 5/5、`v14-attribution-resolver` 8/8、`v14-unit-migration`
+    4/4、`host-injected` 与 `v13-*` 既有用例与改动前基线一致（无新增失败）。
+
 ## [1.18.11] - 2026-11-13
 
 ### 修复

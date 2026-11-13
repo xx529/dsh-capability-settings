@@ -499,11 +499,17 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 
 1. 工具名以 `mcp__` 开头 → **MCP 域**（永远是；插件自己注册的 `mcp__figma__*`
    也归 MCP，不进入 Tools）；
-2. 命中宿主内建清单 → **只读「宿主」单元**（v26 起展示，按宿主包分组：
-   `edit/read/write` → `dsh-tool-fs`、`glob/grep` → `dsh-tool-fs-search`、
+2. 命中宿主内建清单（或宿主插件实例）→ **只读「宿主」单元**（v26 起展示，按
+   宿主包分组：`edit/read/write` → `dsh-tool-fs`、`glob/grep`→`dsh-tool-fs-search`、
    `bash` → `dsh-tool-bash-persistent`；其余内建工具归 `dsh-tool-builtins`。
    这些单元恒启用、不可开关、不参与 `tools.restrict`；宿主不提供"危险等级"标注，
-   清单由本插件自维护，**升级宿主版本后需复核**）；
+   清单由本插件自维护，**升级宿主版本后需复核**）。
+   同一宿主插件包的**额外实例**不再需要手写清单：cordis patch 用 `config.toolName`
+   给工具改名（`@deepseek-ai/dsh-subagent-codex` / `-claude-code` 把
+   `@deepseek-ai/dsh-tool-subagent` 再插一次，生成 `subagent_codex` /
+   `subagent_claude_code`），T0 运行时身份（fiber 名 → 宿主包）优先归属；监听挂上
+   之前就注册好的实例工具用宿主 loader 条目的 `config.toolName` 兜底，统一并入
+   该宿主包只读单元（与 `subagent` / `subagent_fork` / `list_subagent_models` 同组）；
 3. 命中插件映射表 → Tools 插件单元；
 4. 其余（非 mcp、非内建、无映射）→ 合并进唯一的 **「来源未识别」** 单元
    （`未识别` 琥珀标签；可开关、计入分母，但**不进 Jev 候选**——它可能混入未来
@@ -524,12 +530,19 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
      第三方帧（最靠近真实调用方）并跳过交叉校验识别出的拦截器包（置信度
      `medium`，UI 标「推测」）。
    帧路径先走「包根 realpath 前缀」映射（覆盖 `link:`/`@local/*` 的真实路径帧），
-   再走 `node_modules/<pkg>`；丢弃宿主帧（`app.asar` / `@deepseek-ai/*`）与
-   `dsh-mcp-client` bridge 帧；`mcp__*` 永不写工具归属（只从身份信号派生插件
-   自注册命名空间）；零文件 IO、单次约 µs 级；连续失败 3 次自动禁用本进程 T0。
+   再走 `node_modules/<pkg>`；**注册栈里的**宿主帧（`app.asar` / `@deepseek-ai/*`）
+   与 `dsh-mcp-client` bridge 帧不作为第三方归属；但 `ctx.fiber.name`（插件导出名，
+   如 `tool-subagent`）能映射到宿主包时，按 `hostInjected` 只读宿主单元归属
+   ——这是 `subagent_codex` / `subagent_claude_code` 这类 provider 实例工具的主路径；
+   `mcp__*` 永不写工具归属（只从身份信号派生插件自注册命名空间）；零文件 IO、
+   单次约 µs 级；连续失败 3 次自动禁用本进程 T0。
 2. **T1 包扫描（冷启动回填）**：按插件包根扫源码字面量（只读 `.js/.mjs/.cjs`，
    跳 artifacts/test/`.d.ts`/node_modules，单文件/单包/总量限额）——工具名在
    **唯一**一个插件包里出现 → 归该包；多命中不猜（标 ambiguous）。
+   **T1' 宿主 loader 声明（只读宿主单元兜底）**：宿主包（`@deepseek-ai/*`）的
+   loader 条目带 `config.toolName` 时，该名字直接归到这个宿主包（`matchedBy=config`，
+   UI「宿主声明」）。用于 T0 挂上之前就注册好的 provider 实例工具，按条目现算、
+   不依赖手写名单；第三方条目的 `config.toolName` 不参与。
 3. **T2 MCP 命名空间**：`mcp__<ns>__*` 的 `<ns>` 在唯一插件包内出现 → 该包
    （T0' 运行时命名空间优先）；`figma` 这类插件自注册命名空间不再依赖硬编码。
 4. **T3 名字相似度（仅兜底）**：包名 token ∩ 工具名 token，score ≥0.5 且
@@ -537,12 +550,12 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
    「来源为自动推测，关闭前请核对下方工具清单」；推测单元仍可开关。
    仍无法归属 → **「来源未识别」**（不猜，不进 Jev 候选）。
 
-归属结果显示在 Tools / MCP 详情的「来源判定」：运行时捕获 / 包扫描 / 人工映射 /
-名字推测 / 命名空间 / 未识别（运行时捕获带「高置信」= 调用方身份，「中置信 +
-推测」= 注册栈兜底）；`tools.list.attributionSettling=true` 表示后台扫描未收敛
+归属结果显示在 Tools / MCP 详情的「来源判定」：运行时捕获 / 包扫描 / 宿主声明 /
+人工映射 / 名字推测 / 命名空间 / 未识别（运行时捕获带「高置信」= 调用方身份，
+「中置信 + 推测」= 注册栈兜底；宿主声明 = 宿主 loader 条目的 `config.toolName`）；`tools.list.attributionSettling=true` 表示后台扫描未收敛
 （列表不阻塞，前端可延迟静默刷新一次）。**已知边界**：本插件挂监听之前注册的
-工具、异步注册（身份过期 → 注册栈兜底）、包根不可得、扫描超时/多命中 → 逐层降级，
-最差等于改造前的「人工表 + 来源未识别」；`enableAutoAttribution: false` 可退回
+第三方工具（宿主工具有 loader 声明可兜底）、异步注册（身份过期 → 注册栈兜底）、
+包根不可得、扫描超时/多命中 → 逐层降级，最差等于改造前的「人工表 + 来源未识别」；`enableAutoAttribution: false` 可退回
 纯人工表行为（不挂监听、不扫描、不写缓存）。
 
 > **为什么不是纯栈归属**：平台上有插件会包装 `tools.register` 做自己的工具来源

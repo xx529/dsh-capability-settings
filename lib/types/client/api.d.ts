@@ -472,7 +472,7 @@ export interface ClientMcpUsageView {
     limit: number;
 }
 /** 归属依据（新增值为 task-32 additive；`source` 兼容 v13 R4 的 MCP 来源判定）。 */
-export type ClientAttributionMatchedBy = "builtin" | "runtime" | "literal" | "table" | "similarity" | "namespace" | "prefix" | "exact" | "source" | "unknown";
+export type ClientAttributionMatchedBy = "builtin" | "config" | "runtime" | "literal" | "table" | "similarity" | "namespace" | "prefix" | "exact" | "source" | "unknown";
 /** 一条归属判定（Tools 单元 / MCP 运行时实例共用）。 */
 export interface ClientAttributionInfo {
     /** 命中依据；未知/旧宿主缺失回落 `"unknown"`。 */

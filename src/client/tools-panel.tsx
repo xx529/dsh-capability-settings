@@ -99,6 +99,8 @@ function attributionLabel(unit: ClientToolsUnit): string {
   switch (unit.attribution.matchedBy) {
     case "builtin":
       return "宿主内建";
+    case "config":
+      return "宿主声明";
     case "runtime":
       return "运行时捕获";
     case "literal":
@@ -143,6 +145,7 @@ function attributionDetail(unit: ClientToolsUnit): string | undefined {
   if (attribution.ambiguous === true) parts.push("存在多个候选");
   if (attribution.mixed === true) parts.push("多来源合并");
   if (attribution.matchedBy === "runtime" && attribution.confidence === "medium") parts.push("注册栈兜底");
+  if (attribution.matchedBy === "config") parts.push("宿主 loader 条目声明的工具名");
   const confidence = attribution.confidence;
   if (typeof confidence === "number" && Number.isFinite(confidence)) {
     // 旧数字口径：0–1 → 百分比（adapter 已归一到 0–1）。

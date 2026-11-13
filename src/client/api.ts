@@ -480,6 +480,7 @@ export interface ClientMcpUsageView {
 /** 归属依据（新增值为 task-32 additive；`source` 兼容 v13 R4 的 MCP 来源判定）。 */
 export type ClientAttributionMatchedBy =
   | "builtin"
+  | "config"
   | "runtime"
   | "literal"
   | "table"

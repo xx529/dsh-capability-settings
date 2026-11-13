@@ -1266,6 +1266,7 @@ function toSessionBulkResult(value: unknown): SessionBulkSuccess {
 /** 已知的归属依据取值（task-32 additive；未知值统一回落 `unknown`）。 */
 const ATTRIBUTION_MATCHED_BY = new Set<ClientAttributionInfo["matchedBy"]>([
   "builtin",
+  "config",
   "runtime",
   "literal",
   "table",

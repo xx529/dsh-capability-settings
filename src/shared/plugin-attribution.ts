@@ -247,7 +247,12 @@ interface HostBuiltinUnitRule {
  * 注册来源的权威判断，也没有任何开关/restrict 语义。
  *
  * 版本敏感：宿主升级新增内建工具时，未命中精确/前缀规则的会落到 generic 单元，
- * 不会消失，也不会被误当成第三方插件。
+ * 不会消失，也不会被当成第三方插件。
+ *
+ * **不覆盖宿主插件实例工具**：同一个宿主插件包被 cordis patch 以
+ * `config.toolName` 再插一次时（`subagent_codex` / `subagent_claude_code`），
+ * 名字不在本表——由 resolver 的运行时身份（fiber 名 → 宿主包）与 loader 声明
+ * 兜底（`matchedBy=config`），不要往这里堆名字。
  */
 const HOST_BUILTIN_UNIT_RULES: readonly HostBuiltinUnitRule[] = [
   // 文件 / 搜索 / shell（用户截图里的那组）
