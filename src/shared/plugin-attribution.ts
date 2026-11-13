@@ -218,7 +218,7 @@ const HOST_BUILTIN_PREFIXES: readonly string[] = [
 ];
 
 /**
- * 是否宿主内建工具（不可作为插件工具开关，也不进入任何域）。
+ * 是否宿主内建工具（v26 起仍会以只读「宿主」单元展示，但永不参与开关）。
  *
  * @param name 完整工具名
  */
@@ -226,6 +226,83 @@ export function isHostBuiltinTool(name: string): boolean {
   if (typeof name !== "string" || name.length === 0) return false;
   if (HOST_BUILTIN_EXACT.has(name)) return true;
   return HOST_BUILTIN_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
+
+/** 无法精确归属的宿主内建工具统一落到这个只读单元。 */
+export const HOST_BUILTIN_GENERIC_UNIT = "@deepseek-ai/dsh-tool-builtins";
+
+/** 一条宿主内建工具 → 宿主包/只读单元的展示映射（不参与 restrict）。 */
+interface HostBuiltinUnitRule {
+  match: "exact" | "prefix";
+  pattern: string;
+  unit: string;
+}
+
+/**
+ * 宿主内建工具 → 只读宿主单元（v26）。
+ *
+ * 截图里的核心工具按宿主包分组展示（`edit/read/write` → `dsh-tool-fs`、
+ * `glob/grep` → `dsh-tool-fs-search`、`bash` → `dsh-tool-bash-persistent`）；
+ * 其余内建工具归入 `dsh-tool-builtins` 一个只读单元。规则只服务展示，*不是*
+ * 注册来源的权威判断，也没有任何开关/restrict 语义。
+ *
+ * 版本敏感：宿主升级新增内建工具时，未命中精确/前缀规则的会落到 generic 单元，
+ * 不会消失，也不会被误当成第三方插件。
+ */
+const HOST_BUILTIN_UNIT_RULES: readonly HostBuiltinUnitRule[] = [
+  // 文件 / 搜索 / shell（用户截图里的那组）
+  { match: "exact", pattern: "bash", unit: "@deepseek-ai/dsh-tool-bash-persistent" },
+  { match: "exact", pattern: "pwsh", unit: "@deepseek-ai/dsh-tool-pwsh" },
+  { match: "exact", pattern: "read", unit: "@deepseek-ai/dsh-tool-fs" },
+  { match: "exact", pattern: "write", unit: "@deepseek-ai/dsh-tool-fs" },
+  { match: "exact", pattern: "edit", unit: "@deepseek-ai/dsh-tool-fs" },
+  { match: "exact", pattern: "read_image", unit: "@deepseek-ai/dsh-tool-fs" },
+  { match: "exact", pattern: "glob", unit: "@deepseek-ai/dsh-tool-fs-search" },
+  { match: "exact", pattern: "grep", unit: "@deepseek-ai/dsh-tool-fs-search" },
+  // 其余「一包一组」的宿主工具（命中则分组更清楚，未命中走 generic）
+  { match: "exact", pattern: "web_search", unit: "@deepseek-ai/dsh-tool-web" },
+  { match: "exact", pattern: "web_fetch", unit: "@deepseek-ai/dsh-tool-web" },
+  { match: "exact", pattern: "skill", unit: "@deepseek-ai/dsh-tool-skill" },
+  { match: "exact", pattern: "todo_write", unit: "@deepseek-ai/dsh-tool-todo" },
+  { match: "exact", pattern: "ask_user_question", unit: "@deepseek-ai/dsh-tool-ask-user" },
+  { match: "exact", pattern: "subagent", unit: "@deepseek-ai/dsh-tool-subagent" },
+  { match: "exact", pattern: "subagent_fork", unit: "@deepseek-ai/dsh-tool-subagent" },
+  { match: "exact", pattern: "list_subagent_models", unit: "@deepseek-ai/dsh-tool-subagent" },
+  { match: "exact", pattern: "workflow", unit: "@deepseek-ai/dsh-tool-workflow" },
+  { match: "exact", pattern: "ralph", unit: "@deepseek-ai/dsh-tool-ralph" },
+  { match: "exact", pattern: "create_goal", unit: "@deepseek-ai/dsh-tool-goal" },
+  { match: "exact", pattern: "get_goal", unit: "@deepseek-ai/dsh-tool-goal" },
+  { match: "exact", pattern: "update_goal", unit: "@deepseek-ai/dsh-tool-goal" },
+  { match: "exact", pattern: "cordis_inspect_list", unit: "@deepseek-ai/dsh-tool-cordis" },
+  { match: "exact", pattern: "cordis_inspect_query", unit: "@deepseek-ai/dsh-tool-cordis" },
+  { match: "exact", pattern: "list_mcp_resources", unit: "@deepseek-ai/dsh-mcp-resources" },
+  { match: "exact", pattern: "list_mcp_resource_templates", unit: "@deepseek-ai/dsh-mcp-resources" },
+  { match: "exact", pattern: "read_mcp_resource", unit: "@deepseek-ai/dsh-mcp-resources" },
+  // 成组注册的宿主工具
+  { match: "prefix", pattern: "job_", unit: "@deepseek-ai/dsh-tool-jobs" },
+  { match: "prefix", pattern: "schedule_", unit: "@deepseek-ai/dsh-tool-schedule" },
+  { match: "prefix", pattern: "session_", unit: "@deepseek-ai/dsh-tool-session" },
+  { match: "prefix", pattern: "terminal_", unit: "@deepseek-ai/dsh-tool-terminal" },
+  { match: "prefix", pattern: "team_task_", unit: "@deepseek-ai/dsh-experimental-tool-agent-team" },
+];
+
+/**
+ * 宿主内建工具 → 只读展示单元 id（精确优先；前缀取最长；未命中 generic）。
+ *
+ * @param name 完整工具名
+ */
+export function hostBuiltinUnitOf(name: string): string {
+  if (typeof name !== "string" || name.length === 0) return HOST_BUILTIN_GENERIC_UNIT;
+  for (const rule of HOST_BUILTIN_UNIT_RULES) {
+    if (rule.match === "exact" && rule.pattern === name) return rule.unit;
+  }
+  let best: HostBuiltinUnitRule | undefined;
+  for (const rule of HOST_BUILTIN_UNIT_RULES) {
+    if (rule.match !== "prefix" || !hasSeparatorBoundary(rule.pattern)) continue;
+    if (!name.startsWith(rule.pattern)) continue;
+    if (best === undefined || rule.pattern.length > best.pattern.length) best = rule;
+  }
+  return best?.unit ?? HOST_BUILTIN_GENERIC_UNIT;
 }
 
 /**

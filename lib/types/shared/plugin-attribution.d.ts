@@ -77,11 +77,19 @@ export declare function attributeMcpNamespace(namespace: string): McpNamespaceRu
  */
 export declare function displayNameOfSource(source: string): string;
 /**
- * 是否宿主内建工具（不可作为插件工具开关，也不进入任何域）。
+ * 是否宿主内建工具（v26 起仍会以只读「宿主」单元展示，但永不参与开关）。
  *
  * @param name 完整工具名
  */
 export declare function isHostBuiltinTool(name: string): boolean;
+/** 无法精确归属的宿主内建工具统一落到这个只读单元。 */
+export declare const HOST_BUILTIN_GENERIC_UNIT = "@deepseek-ai/dsh-tool-builtins";
+/**
+ * 宿主内建工具 → 只读展示单元 id（精确优先；前缀取最长；未命中 generic）。
+ *
+ * @param name 完整工具名
+ */
+export declare function hostBuiltinUnitOf(name: string): string;
 /**
  * 契约禁止出现在 `restrict({deny})` 里的保留工具名。
  *

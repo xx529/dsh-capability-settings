@@ -3,6 +3,25 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.18.11] - 2026-11-13
+
+### 修复
+
+- **Tools 域看不到宿主内建工具**（反馈：`bash` / `edit` / `read` / `grep` / `write`
+  这类宿主工具在能力面板 Tools 里完全不出现，只有第三方插件单元）：此前
+  `isHostBuiltinTool` 命中后直接排除，`excludedBuiltinCount` 只做诊断计数。
+  - 现在宿主内建工具进入 Tools 域的**只读「宿主」单元**，按宿主包分组展示
+    （`edit/read/write` → `dsh-tool-fs`、`glob/grep` → `dsh-tool-fs-search`、
+    `bash` → `dsh-tool-bash-persistent`；其余归 `dsh-tool-builtins`），与截图中的
+    `tool-fs` / `tool-fs-search` / `tool-bash-persistent` 分组一致。
+  - 这些单元恒启用、`lockedReason` = 宿主原因，不参与可见性 / 默认关闭 /
+    `tools.restrict`；会话/全局开关与 overrides 写路径继续拒绝，Jev 里展示但不可选。
+  - 归属新增 `builtin` 依据（UI 文案「宿主内建」）；`excludedBuiltinCount` 保留诊断
+    字段，v26 起恒 0。
+  - 验证 `node notes/verify/host-injected.mjs` 14/14（新增「Tools 宿主内建工具按宿主包
+    只读展示」：fs 单元 edit/read/write、fs-search 单元 grep、bash 单元 bash）；
+    `pnpm typecheck`、`pnpm build` 通过。
+
 ## [1.18.10] - 2026-11-13
 
 ### 修复

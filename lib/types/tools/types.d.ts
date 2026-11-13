@@ -67,7 +67,7 @@ export interface ToolsUnitView {
      * 继续被识别（人工表 T4 仍发旧值，保证旧客户端文案不变）。
      */
     attribution: {
-        matchedBy: "runtime" | "literal" | "namespace" | "table" | "similarity" | "prefix" | "exact" | "source" | "unknown";
+        matchedBy: "builtin" | "runtime" | "literal" | "namespace" | "table" | "similarity" | "prefix" | "exact" | "source" | "unknown";
         /** 命中的模式原文（未识别缺省）。 */
         pattern?: string;
         /** 包名（已识别才有；= 规范 unit id）。 */

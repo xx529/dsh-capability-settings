@@ -97,6 +97,8 @@ function baseName(path: string): string {
 /** 归属依据的人话标签（task-32：运行时/包扫描/人工映射/名字推测/命名空间/未识别）。 */
 function attributionLabel(unit: ClientToolsUnit): string {
   switch (unit.attribution.matchedBy) {
+    case "builtin":
+      return "宿主内建";
     case "runtime":
       return "运行时捕获";
     case "literal":
@@ -778,7 +780,7 @@ export function ToolsView({
                 </div>
 
                 <p className="skp-note" style={NOTE_STYLE}>
-                  插件级开关，不提供单工具开关；无法 restrict 的插件开关置灰并说明原因；宿主内建基础工具不进入本域。
+                  插件级开关，不提供单工具开关；无法 restrict 的插件开关置灰并说明原因；宿主内建工具按宿主包只读展示，恒启用、不可开关。
                 </p>
               </div>
             )}

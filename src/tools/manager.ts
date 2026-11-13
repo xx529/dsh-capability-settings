@@ -30,7 +30,7 @@ import { errMessage } from "../shared/errors.js";
 import type { CapabilityDefaults } from "../overrides/types.js";
 import { INVISIBLE_CAPABILITY_ERROR } from "../shared/visibility.js";
 import { HOST_INJECTED_REASON } from "../shared/host-injected.js";
-import { attributeTool, isHostBuiltinTool } from "../shared/plugin-attribution.js";
+import { attributeTool, hostBuiltinUnitOf, isHostBuiltinTool } from "../shared/plugin-attribution.js";
 import { parseMcpToolName } from "../mcp/usage.js";
 import type { SessionStateMeta, SessionStateStore } from "../session-state.js";
 import {
@@ -101,7 +101,7 @@ interface ToolsEnumeration {
   }>;
   /** 全局工具总数（诊断）。 */
   totalGlobalTools: number;
-  /** 被判定为宿主内建而排除的条数（诊断；不下发名单）。 */
+  /** 被判定为宿主内建、但**未**以只读单元展示的条数（v26 起恒 0；保留诊断字段）。 */
   excludedBuiltinCount: number;
   /** 当前全局视图里的全部工具名。 */
   names: ReadonlySet<string>;
@@ -226,7 +226,8 @@ function truncateCodepoints(text: string, limit: number): string {
 /**
  * 枚举全局工具视图 → 按插件聚合成开关单元（纯函数，无副作用）。
  *
- * 归属顺序（方案 §2.1，按序短路）：`mcp__*` → 宿主内建 → 插件映射 → 未识别。
+ * 归属顺序（方案 §2.1，按序短路）：`mcp__*` → 宿主内建（只读宿主单元）→ 插件
+ * 映射 → 未识别。
  *
  * @param access 全局 tools 服务访问器（`() => ctx.root.get("tools")`）
  */
@@ -270,14 +271,19 @@ function enumerateGlobalTools(
     names.add(name);
     // 规则 1：任何可解析的 mcp__<ns>__<tool> 恒归 MCP 域（Tools 永不出现）。
     if (parseMcpToolName(name) !== undefined) continue;
-    // 规则 2：宿主内建工具不入任何域（连只读行都不给）。
-    if (isHostBuiltinTool(name)) {
-      excludedBuiltinCount += 1;
-      continue;
-    }
-    // 规则 3/4：自动归属（T0→T1→T4→T3）命中 → 该插件单元；否则合并进唯一的
-    // 「来源未识别」单元（unit id = 规范 npm 包名，展示名去 scope）。
-    const attribution = resolve(name);
+    // 规则 2：宿主内建工具 → 只读「宿主」单元（v26 起不再直接丢弃）。
+    // 分组只服务展示：core 工具按宿主包，未命中精确/前缀规则的落到 generic；
+    // 这些单元在 list/computeTargets 里恒启用且不参与 restrict。
+    const builtin = isHostBuiltinTool(name);
+    const attribution: ToolAttribution = builtin
+      ? {
+          packageId: hostBuiltinUnitOf(name),
+          display: displayNameOfPackage(hostBuiltinUnitOf(name)),
+          matchedBy: "builtin",
+          confidence: "high",
+          hostInjected: true,
+        }
+      : resolve(name);
     const packageId = attribution.packageId;
     const unit = packageId !== undefined ? packageId : UNATTRIBUTED_UNIT;
     const display =
@@ -308,6 +314,7 @@ function enumerateGlobalTools(
     } else {
       // 单元级归属聚合：取最高优先级依据；不同依据 = mixed（诊断）。
       const priority: Record<string, number> = {
+        builtin: 7,
         runtime: 6,
         literal: 5,
         table: 4,

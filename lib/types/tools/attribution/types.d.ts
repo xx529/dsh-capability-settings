@@ -7,7 +7,7 @@
  * @module dsh-capability-settings/tools/attribution/types
  */
 /** 归属依据（additive；旧值 `prefix` / `exact` / `source` 继续被识别）。 */
-export type AttributionMatchedBy = "runtime" | "literal" | "namespace" | "table" | "similarity" | "prefix" | "exact" | "source" | "unknown";
+export type AttributionMatchedBy = "builtin" | "runtime" | "literal" | "namespace" | "table" | "similarity" | "prefix" | "exact" | "source" | "unknown";
 /** 置信度（UI 决定是否标「推测」）。 */
 export type AttributionConfidence = "high" | "medium" | "low";
 /**

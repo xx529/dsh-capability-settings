@@ -81,6 +81,7 @@ export interface ToolsUnitView {
    */
   attribution: {
     matchedBy:
+      | "builtin"
       | "runtime"
       | "literal"
       | "namespace"
