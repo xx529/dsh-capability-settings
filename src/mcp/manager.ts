@@ -34,6 +34,7 @@ import { GLOBAL_MCP_FILE_NAME, globalMcpDirs, projectMcpFile } from "./paths.js"
 import type { OverridesManager } from "../overrides/manager.js";
 import type { CapabilityDefaults } from "../overrides/types.js";
 import { INVISIBLE_CAPABILITY_ERROR } from "../shared/visibility.js";
+import { HOST_INJECTED_REASON } from "../shared/host-injected.js";
 import type { ImportsManager } from "../imports/manager.js";
 import type { McpListResult, McpScope, McpServerEntry, McpServerView, McpStatusView } from "./types.js";
 import type { McpLoader } from "./loader.js";
@@ -65,6 +66,8 @@ export interface McpManagerDeps {
     source?: string;
     origin: "entry" | "fiber" | "namespace";
     config?: Record<string, unknown>;
+    /** true = 注入方是宿主包（`@deepseek-ai/*`）：只读展示，不可开关。 */
+    hostInjected?: boolean;
   }>;
 }
 
@@ -659,6 +662,7 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
         const view = ensure(injected.serverName, injected.origin);
         // R4：命名空间合成行 = 无实例、无配置（详情文案据此标「工具命名空间合成」）。
         if (injected.origin === "namespace") view.synthesized = true;
+        if (injected.hostInjected === true) view.hostInjected = true;
         if (injected.source !== undefined) {
           // source 保留原文，channel 是映射表归一后的展示名（两者都放视图里）。
           view.source = injected.source;
@@ -723,6 +727,20 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
     const servers: McpRuntimeServerView[] = [];
     for (const view of groups.values()) {
       view.restrictable = view.tools.length > 0;
+      // 宿主注入实例：运行基线，只读展示；忽略默认关闭 / 可见性 / 会话开关。
+      if (view.hostInjected === true) {
+        view.enabledInSession = true;
+        view.disabledInProject = false;
+        view.disabledGlobally = false;
+        view.visibleInWorkspace = true;
+        try {
+          view.calls = deps.usage?.count?.(view.serverName) ?? 0;
+        } catch {
+          view.calls = 0;
+        }
+        servers.push(view);
+        continue;
+      }
       const capability = capabilities.get(view.serverName);
       // 全局默认关闭 = **原始**全局名单成员；工作区视图与 disabledInProject 组合出
       // 「已覆盖全局默认」（见 types.ts 字段注释）。
@@ -760,6 +778,24 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
   }
 
   /**
+   * 当前运行时发现结果里的**宿主注入** serverName 集合。
+   *
+   * 注入方可能是 `@deepseek-ai/*` bundle / 宿主 fiber；这类实例只读展示，
+   * 不允许写全局默认 / 工作区默认 / 会话开关。
+   */
+  function hostInjectedServers(): Set<string> {
+    const names = new Set<string>();
+    try {
+      for (const injected of deps.scanInjected?.() ?? []) {
+        if (injected.hostInjected === true) names.add(injected.serverName);
+      }
+    } catch {
+      /* 发现器失败：按无宿主实例处理（保持旧行为） */
+    }
+    return names;
+  }
+
+  /**
    * 设置某个 session 的手动能力开关（内存内）：项目条目按需挂载/卸载，
    * 全局配置条目与外部注入实例用 `tools.restrict` 屏蔽/恢复其工具。
    */
@@ -775,6 +811,10 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
     }
     if (typeof input.target !== "string" || input.target.length === 0) {
       return { ok: false, errors: ["target is required"] };
+    }
+    // 宿主注入实例是运行基线：任何作用域都不接受开关（只读展示）。
+    if (input.kind === "server" && hostInjectedServers().has(input.target)) {
+      return { ok: false, errors: [HOST_INJECTED_REASON] };
     }
     // v21：不可见能力的会话开关一律拒绝（全局层实例 / 外部注入实例；项目条目
     // 不受可见性影响，仍可开关）。
@@ -811,15 +851,21 @@ export function createMcpManager(deps: McpManagerDeps, loader: McpLoader, overri
       (entry) => entry !== null && typeof entry === "object" && typeof entry.target === "string" && entry.target.length > 0,
     );
     if (entries.length === 0) return { ok: true };
+    // 宿主注入实例：批量路径直接跳过（不写入、不重挂）。
+    const hostServers = hostInjectedServers();
+    const writableEntries = entries.filter(
+      (entry) => (entry as { kind?: unknown }).kind !== "server" || !hostServers.has(entry.target),
+    );
+    if (writableEntries.length === 0) return { ok: true };
     // v21：批量路径跳过不可见能力（单条路径返回业务失败；批量不因个别不可见整批失败）。
-    const serverTargets = entries.filter((entry) => (entry as { kind?: unknown }).kind === "server");
-    let visibleEntries = entries;
+    const serverTargets = writableEntries.filter((entry) => (entry as { kind?: unknown }).kind === "server");
+    let visibleEntries = writableEntries;
     if (serverTargets.length > 0 && overrides !== undefined) {
       const names = [
         ...new Set(serverTargets.flatMap((entry) => [entry.target, sanitizeServerName(entry.target)])),
       ];
       const capabilities = await capabilityDefaultsOf(input.cwd, names);
-      visibleEntries = entries.filter(
+      visibleEntries = writableEntries.filter(
         (entry) =>
           (entry as { kind?: unknown }).kind !== "server" ||
           capabilities.get(entry.target)?.visible !== false ||

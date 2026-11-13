@@ -42,7 +42,7 @@ export interface CapabilitySnapshot {
     };
 }
 /** 卡片底部的来源标签配色（项目蓝 / 全局绿 / 内置琥珀 / 插件紫 / 预设灰 / 外部橙 / 未识别琥珀）。 */
-type TagTone = "project" | "global" | "bundled" | "plugin" | "preset" | "external" | "unattributed";
+type TagTone = "project" | "global" | "bundled" | "plugin" | "preset" | "external" | "unattributed" | "host";
 export interface SkillRow {
     id: string;
     kind: "skill";
@@ -55,6 +55,8 @@ export interface SkillRow {
     channel?: string;
     /** true = 宿主 registry 注入行（来源标签 + 渠道小标签，内容只读但可在会话启停）。 */
     injected?: boolean;
+    /** true = 宿主注入（`@deepseek-ai/*` / 宿主预设 / 随包）：只读，不可在会话开关。 */
+    hostInjected?: boolean;
     enabled: boolean;
     disabled: boolean;
     meta?: string;
@@ -74,6 +76,8 @@ export interface McpRow {
     writeKind: "project" | "server";
     /** restrict 无法生效的外部实例（按会话注入）。 */
     locked: boolean;
+    /** true = 宿主注入实例：只读展示，不可在会话开关。 */
+    hostInjected?: boolean;
     /** 插件展示名（v13 R4：第二枚标签；缺省 = 无插件来源）。 */
     channel?: string;
     /** true = 命名空间合成行（详情/卡片可加「合成」说明）。 */
@@ -108,6 +112,8 @@ export interface ToolRow {
     defaultEnabled: boolean;
     /** 不可开关原因（正常缺省）。 */
     lockedReason?: string;
+    /** true = 宿主注入单元：只读展示，不可在会话开关。 */
+    hostInjected?: boolean;
 }
 export type Row = SkillRow | McpRow | ToolRow;
 /** 能力面板域 Tab（`onManage` 可指定打开哪个 Tab，由 src/client.ts 接线）。 */

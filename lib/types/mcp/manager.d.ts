@@ -42,6 +42,8 @@ export interface McpManagerDeps {
         source?: string;
         origin: "entry" | "fiber" | "namespace";
         config?: Record<string, unknown>;
+        /** true = 注入方是宿主包（`@deepseek-ai/*`）：只读展示，不可开关。 */
+        hostInjected?: boolean;
     }>;
 }
 /** 一次写操作的最小入参（scope + 目标文件定位）。 */

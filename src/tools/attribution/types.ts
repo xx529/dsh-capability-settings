@@ -49,6 +49,11 @@ export interface ToolAttribution {
   ambiguous?: boolean;
   /** 人读一句（诊断用；UI 文案以 matchedBy 为主）。 */
   evidence?: string;
+  /**
+   * true = 归属到宿主包（`@deepseek-ai/*`）：只读展示，不参与任何开关。
+   * 该字段只由宿主包字面量扫描 / 运行时身份产生，**不会**由相似度兜底设置。
+   */
+  hostInjected?: boolean;
 }
 
 /** MCP 命名空间 → 插件归属（R4 channel 用）。 */

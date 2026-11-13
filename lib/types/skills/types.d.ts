@@ -96,6 +96,14 @@ export interface InjectedSkillFields {
     contentReadOnly?: true;
     /** 仅 injected 行：本项目默认是否禁用（来自 overrides；含全局默认层的有效语义）。 */
     disabledInProject?: boolean;
+    /**
+     * true = 宿主注入（DSH 随包 `bundled` / 宿主预制 `preset` / `@deepseek-ai/*`
+     * 插件运行时注册）。
+     *
+     * 语义：所有工作区默认需要，只读展示；全局默认 / 每工作区默认 / 当前对话
+     * 都不可写，Jev / 派生动态选择也不把它当作可开关候选。
+     */
+    hostInjected?: boolean;
     /** 名字在全局默认关闭名单（`capability-global-overrides.json` 的 `skills`）里。 */
     globalDefaultDisabled?: boolean;
     /** 名字在本项目 `enabledSkills` 里（工作区重新打开，覆盖全局默认）。 */

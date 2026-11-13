@@ -83,6 +83,7 @@ import {
 } from "./visibility.js";
 import { SkillContent, skillRefOf } from "./skill-content.js";
 import { isGlobalSkillSource } from "../shared/skill-sources.js";
+import { HOST_INJECTED_LABEL, HOST_INJECTED_REASON } from "../shared/host-injected.js";
 import { locateSkillRoot, rerootEntries, stripCommonTopFolder } from "../shared/skill-locate.js";
 import { unzip } from "./unzip.js";
 import { base64ToBytes, buildZip, downloadBytes } from "./zip.js";
@@ -410,13 +411,16 @@ function injectedOriginText(item: Pick<ClientSkillSummary, "origin" | "channel" 
 /** 注入行的只读原因条文案（详情页顶部）。 */
 function injectedReadonlyNote(item: ClientSkillSummary): string {
   const channel = item.channel !== undefined && item.channel.length > 0 ? item.channel : "插件";
-  if (item.origin === "bundled") {
-    return "内容只读 · DSH 内置 Skills（无磁盘副本）；可在列表 / 本页启用或禁用，不可编辑或删除。";
+  const base =
+    item.origin === "bundled"
+      ? "内容只读 · DSH 内置 Skills（无磁盘副本）。"
+      : item.origin === "preset"
+        ? `内容只读 · 由 Agent 预设「${channel}」提供（无磁盘副本，仅绑定该预设的对话可见）。`
+        : `内容只读 · 由插件 ${channel} 运行时注册（无磁盘副本）。`;
+  if (item.hostInjected === true) {
+    return `${base} 宿主注入：所有工作区默认需要，仅展示，不能在全局 / 工作区 / 当前对话中开关。`;
   }
-  if (item.origin === "preset") {
-    return `内容只读 · 由 Agent 预设「${channel}」提供（无磁盘副本，仅绑定该预设的对话可见）；可在本页启用或禁用，不可编辑或删除。`;
-  }
-  return `内容只读 · 由插件 ${channel} 运行时注册（无磁盘副本）；可在列表 / 本页启用或禁用，不可编辑或删除。`;
+  return `${base} 可在列表 / 本页启用或禁用，不可编辑或删除。`;
 }
 
 /** 行左标签的排序与文案：scope → 格式 → 关系（最多 3 个）。 */
@@ -426,14 +430,16 @@ function skillTags(item: ClientSkillSummary, hasGlobal: boolean): Array<{ key: s
     // 注入行没有「全局/项目」磁盘归属：来源标签（内置/插件/预设）+ 格式 + 渠道名。
     tags.push({
       key: "origin",
-      label: originLabel(item),
-      className: originTagClass(item),
+      label: item.hostInjected === true ? HOST_INJECTED_LABEL : originLabel(item),
+      className: item.hostInjected === true ? "skp-tag skp-tag-host" : originTagClass(item),
       title:
-        item.origin === "bundled"
-          ? "DSH 随包提供的 Skills（只读）"
-          : item.origin === "preset"
-            ? "由当前 Agent 预设渠道提供，只在绑定该预设的对话里可见"
-            : "由插件在运行时注册的 Skills（只读）",
+        item.hostInjected === true
+          ? HOST_INJECTED_REASON
+          : item.origin === "bundled"
+            ? "DSH 随包提供的 Skills（只读）"
+            : item.origin === "preset"
+              ? "由当前 Agent 预设渠道提供，只在绑定该预设的对话里可见"
+              : "由插件在运行时注册的 Skills（只读）",
     });
     tags.push({
       key: "format",
@@ -652,6 +658,10 @@ function skillSwitchDisabled(
 ): { disabled: boolean; title: string } {
   /** true = 内容只读但开关可写（注入行）：readOnly 不拦启停。 */
   const contentOnlyReadOnly = item.readOnly && item.injected !== true;
+  // 宿主注入（随包 / 宿主预设 / 官方插件）= 运行基线：所有作用域都只读。
+  if (item.hostInjected === true) {
+    return { disabled: true, title: HOST_INJECTED_REASON };
+  }
   if (scope === "global") {
     if (item.canToggleGlobal === false) {
       return {
@@ -989,7 +999,7 @@ function SkillsView({
       {list.map((item) => {
         const key = skillRowKey(item);
         const isProject = isProjectSource(item.source);
-        const visibilityEditable = scope === "global" && !isProject;
+        const visibilityEditable = scope === "global" && !isProject && item.hostInjected !== true;
         const entry = visibilityOf(item.name);
         const invisible = visibilityEditable && isRowInvisible(item, entry, projects);
         const overrideState: WorkspaceOverrideState =
@@ -1062,7 +1072,11 @@ function SkillsView({
           )}
           {visibleInjected.length > 0 && (
             <>
-              {renderGroupHead("插件注入", injectedItems.length, "只读 · 可启停")}
+              {renderGroupHead(
+                "插件注入",
+                injectedItems.length,
+                visibleInjected.every((item) => item.hostInjected === true) ? "只读 · 宿主不可启停" : "只读 · 可启停",
+              )}
               {renderRows(visibleInjected, "插件注入的 Skills")}
             </>
           )}
@@ -1160,7 +1174,7 @@ function SkillsView({
               workspaces={projects}
               onSelectWorkspace={onSelectWorkspace}
               visibility={
-                scope === "global" && !isProjectSource(selectedItem.source)
+                scope === "global" && !isProjectSource(selectedItem.source) && selectedItem.hostInjected !== true
                   ? {
                       api,
                       entry: visibilityOf(selectedItem.name),
@@ -1548,8 +1562,15 @@ function SkillDetail({
           tags={
             injected ? (
               <>
-                <span className={originTagClass(summary)} title="注入来源类别（内置 / 插件 / 预设渠道）">
-                  {originLabel(summary)}
+                <span
+                  className={summary.hostInjected === true ? "skp-tag skp-tag-host" : originTagClass(summary)}
+                  title={
+                    summary.hostInjected === true
+                      ? HOST_INJECTED_REASON
+                      : "注入来源类别（内置 / 插件 / 预设渠道）"
+                  }
+                >
+                  {summary.hostInjected === true ? HOST_INJECTED_LABEL : originLabel(summary)}
                 </span>
                 <span className="skp-tag skp-tag-flat">{summary.format === "directory" ? "目录" : ".md"}</span>
                 {summary.channel !== undefined && summary.channel.length > 0 && (
@@ -1781,7 +1802,7 @@ const SkillListRow = memo(function SkillListRow({
   const isInjected = item.injected === true;
   const state = invocationState(item);
   /** 只有「全局视图里的全局条目」编辑可见性；项目自己的条目不参与。 */
-  const visibilityEditable = scope === "global" && !isProject;
+  const visibilityEditable = scope === "global" && !isProject && item.hostInjected !== true;
   const mode = item.visibilityMode ?? visibilityModeOf(visibilityEntry);
   const visibleCount = item.visibleWorkspaceCount ?? visibleWorkspaceCountOf(visibilityEntry, projects);
   // 开关勾选态：全局视图 = 全局默认；工作区视图 = 有效默认；项目磁盘行 = 调用状态。

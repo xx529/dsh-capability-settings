@@ -47,6 +47,13 @@ export interface ToolsUnitView {
      * 「N 个工具 · 插件注入」占位描述。
      */
     description?: string;
+    /**
+     * true = 宿主注入（所属包为 `@deepseek-ai/*`，或工具由宿主运行时注册）。
+     *
+     * 语义：仅只读展示，所有开关（会话 / 全局默认 / 每工作区默认 / 可见性）
+     * 一律不可写；列表里恒为启用。宿主包包含 DSH 自带的 bundle 与官方插件。
+     */
+    hostInjected?: boolean;
     /** plugin = 已识别插件；unattributed = 来源未识别。 */
     kind: "plugin" | "unattributed";
     /** 该单元当前可见的全部工具。 */

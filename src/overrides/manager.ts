@@ -58,6 +58,7 @@ import {
 import type { SkillDefaultSets } from "../shared/skill-defaults.js";
 import { mcpDefaultSets as mcpDefaultSetsOf } from "../shared/mcp-defaults.js";
 import type { McpDefaultSets } from "../shared/mcp-defaults.js";
+import { HOST_INJECTED_REASON } from "../shared/host-injected.js";
 import {
   emptyVisibilitySets,
   invisibleKeysForWorkspace,
@@ -117,6 +118,14 @@ export interface OverridesManagerDeps {
    * 缺省 = 无旧文件（只用新名单）。
    */
   toolsGlobalDisabled?: () => ReadonlySet<string> | Promise<ReadonlySet<string>>;
+  /**
+   * 写路径的宿主注入判定（Skills / MCP / Tools 共用）。
+   *
+   * 返回 true ≈ 该 key 是宿主注入能力（`@deepseek-ai/*` / 随包 / 宿主预设）：
+   * 全局默认、项目默认、可见性一律拒绝写入（只读展示、所有工作区默认需要）。
+   * 缺省 = 不判定（旧装配 / 单测）。
+   */
+  isHostKey?: (domain: CapabilityDomain, key: string, cwd?: string) => Promise<boolean> | boolean;
 }
 
 /** toggle 的入参（B2 起支持可选的 `enabled`）。 */
@@ -472,6 +481,7 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
     const disabled = (input as { disabled?: unknown }).disabled;
     if (typeof disabled !== "boolean") return { ok: false, errors: ['"disabled" must be a boolean'] };
     const listDomain = domain as "skills" | "mcp" | "tools";
+    if (await isHostKey(listDomain, key)) return { ok: false, errors: [HOST_INJECTED_REASON] };
 
     const file = globalOverridesFile(deps.dshHome);
     try {
@@ -514,6 +524,10 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
       keys.push(key);
     }
     if (keys.length === 0) return { ok: true, applied: 0 };
+    // 宿主注入能力是运行基线：批量写入里出现就先整批拒绝，避免半写。
+    for (const key of keys) {
+      if (await isHostKey(domain, key)) return { ok: false, errors: [HOST_INJECTED_REASON] };
+    }
     const file = globalOverridesFile(deps.dshHome);
     try {
       return await withFileLock(file, async () => {
@@ -698,6 +712,10 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
     const key = typeof rawKey === "string" ? rawKey.trim() : "";
     if (key.length === 0) return { ok: false, errors: ["key must not be empty"] };
     if (key.length > 256) return { ok: false, errors: [`invalid capability key "${key}": too long (max 256)`] };
+    // 宿主注入能力是运行基线：不参与可见性（所有工作区默认需要）。
+    if (await isHostKey(domain, key)) {
+      return { ok: false, errors: [HOST_INJECTED_REASON] };
+    }
     const mode = (input as { mode?: unknown }).mode;
     if (mode !== "all" && mode !== "selected" && mode !== "none") {
       return { ok: false, errors: ['"mode" must be "all" | "selected" | "none"'] };
@@ -834,6 +852,16 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
     return normalizeOverridesSet(draft);
   }
 
+  /** 该 key 是否为宿主注入能力（失败按 false，保持旧行为）。 */
+  async function isHostKey(domain: CapabilityDomain, key: string, cwd?: string): Promise<boolean> {
+    if (deps.isHostKey === undefined) return false;
+    try {
+      return (await deps.isHostKey(domain, key, cwd)) === true;
+    } catch {
+      return false;
+    }
+  }
+
   /**
    * 切换某个能力在本项目的默认关闭状态（B2 / v20.2 / v21 三域三态）。
    *
@@ -853,6 +881,9 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
     if (key.length === 0) return { ok: false, errors: ["key must not be empty"] };
     if (!DOMAIN_KEYS.includes(input.domain)) {
       return { ok: false, errors: [`unknown domain "${String(input.domain)}"`] };
+    }
+    if (await isHostKey(input.domain, key, input.cwd)) {
+      return { ok: false, errors: [HOST_INJECTED_REASON] };
     }
     const loc = locationFor(input.cwd);
     if (loc === undefined) return { ok: false, errors: ["project scope requires a workspace path"] };

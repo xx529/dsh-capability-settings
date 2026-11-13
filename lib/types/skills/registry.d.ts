@@ -108,6 +108,8 @@ export interface ClassifiedInjectedRow {
     registrySource: string;
     resourceBaseKind?: RegistryResourceBaseKind;
     path?: string;
+    /** true = 宿主注入（DSH 随包 / 宿主预设 / `@deepseek-ai/*` 插件）：只读展示、不可开关。 */
+    hostInjected?: boolean;
 }
 /** 合并入参（磁盘行用于同名去重，projectDisabled 用于 disabledInProject）。 */
 export interface InjectedMergeInput {
@@ -184,6 +186,13 @@ export interface SkillRegistryBridge {
     globalInjected(ttlMs?: number): Promise<SkillSummaryView[]>;
     /** 当前 scope 视图里属于注入条目的名字集合（项目默认只作用于这些名字）。 */
     injectedNames(agent: unknown, sessionId: string | undefined, cwd?: string): Promise<Set<string> | undefined>;
+    /**
+     * 当前 scope 视图里属于**宿主注入**的注入条目名（随包 / 宿主预设 / 官方插件）。
+     *
+     * 这些名字是运行基线：会话默认投影、显式开关、Jev / 派生选择都必须跳过。
+     * registry 不可用 / snapshot 失败返回 undefined（调用方保持旧行为）。
+     */
+    hostInjectedNames(agent: unknown, sessionId: string | undefined, cwd?: string): Promise<Set<string> | undefined>;
     /** 名字在当前视图里的性质（写拦截用；registry 不可用返回 undefined）。 */
     inspectName(name: string, options: {
         cwd?: string;

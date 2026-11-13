@@ -237,6 +237,13 @@ export interface McpRuntimeServerView {
      */
     source?: string;
     /**
+     * true = 宿主注入（注入方为 `@deepseek-ai/*` 包 / 宿主 fiber）。
+     *
+     * 语义：运行基线，所有工作区默认需要；只读展示，不参与全局默认 /
+     * 每工作区默认 / 可见性 / 当前对话开关。
+     */
+    hostInjected?: boolean;
+    /**
      * 发现路径：loader 条目 / 动态 fiber / 工具命名空间合成（R4 additive）。
      *
      * `"namespace"` = 没有 mcp-client 实例，由全局工具视图 `mcp__<ns>__*` 合成

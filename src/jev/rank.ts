@@ -585,6 +585,7 @@ export function toRankItem(capability: JevCapability, noul: number | null): JevR
   if (capability.channel !== undefined) item.channel = capability.channel;
   if (capability.provider !== undefined) item.provider = capability.provider;
   if (capability.contentReadOnly === true) item.contentReadOnly = true;
+  if (capability.hostInjected === true) item.hostInjected = true;
   // Tools 单元的工具数（additive；卡片/决策行的「N 个工具」标签用）。
   if (capability.toolCount !== undefined) item.toolCount = capability.toolCount;
   return item;

@@ -24,12 +24,14 @@ import { join } from "node:path";
 import { parseMcpToolName } from "../../mcp/usage.js";
 import { attributeMcpNamespace, attributeTool, isHostBuiltinTool } from "../../shared/plugin-attribution.js";
 import type { McpNamespaceRule } from "../../shared/plugin-attribution.js";
+import { isHostOwnedPackage } from "../../shared/host-injected.js";
 import { createAttributionCache, type AttributionCache } from "./cache.js";
 import { createRuntimeAttributor, type RuntimeAttributor } from "./runtime.js";
 import {
   DEFAULT_SCAN_LIMITS,
   isHostPackage,
   rankSimilarity,
+  resolveHostPackageRoots,
   resolvePackageRoots,
   scanPackages,
   type PackageRoot,
@@ -128,7 +130,7 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
   const ctx = deps.ctx;
 
   /** 运行时捕获（T0；**不含** `mcp__*`）。 */
-  const runtime = new Map<string, { package: string; at: number; confidence: "high" | "medium" }>();
+  const runtime = new Map<string, { package: string; at: number; confidence: "high" | "medium"; hostInjected?: boolean }>();
   /** 运行时捕获的插件自注册 MCP 命名空间（T0'；只接受身份信号）。 */
   const runtimeNamespace = new Map<string, string>();
   /** 交叉校验识别出的注册拦截器包（兜底路径跳过；持久化到缓存）。 */
@@ -139,8 +141,12 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
   let dirPackages: Array<{ dir: string; packageId: string }> = [];
   /** 字面量 → 候选包集合（T1）。 */
   const literalOwners = new Map<string, Set<string>>();
+  /** 宿主包字面量 → 候选包集合（只用于「宿主注入」只读单元，不参与普通归属）。 */
+  const hostLiteralOwners = new Map<string, Set<string>>();
   /** 命名空间 → 候选包集合（T2）。 */
   const namespaceOwners = new Map<string, Set<string>>();
+  /** 宿主包命名空间 → 候选包集合（MCP 视图的来源判定用）。 */
+  const hostNamespaceOwners = new Map<string, Set<string>>();
   /** 已扫描的包（T3 用；键 = 规范包名）。 */
   const packages = new Map<string, PackageScanResult>();
   /** 包根（刷新时复用；只内存，不写缓存）。 */
@@ -181,21 +187,27 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
     for (const [packageId, result] of scans) packages.set(normalizePackageId(packageId), result);
     literalOwners.clear();
     namespaceOwners.clear();
+    hostLiteralOwners.clear();
+    hostNamespaceOwners.clear();
     for (const [packageId, result] of packages) {
-      if (isHostPackage(packageId)) continue;
+      // 宿主包单独建索引：它们的工具只用于「宿主注入」只读单元，不能被当成
+      // 第三方插件（否则相似度/字面量会误归属到用户插件）。
+      const host = isHostOwnedPackage(packageId);
+      const literals = host ? hostLiteralOwners : literalOwners;
+      const namespaces = host ? hostNamespaceOwners : namespaceOwners;
       for (const literal of result.literals) {
-        let owners = literalOwners.get(literal);
+        let owners = literals.get(literal);
         if (owners === undefined) {
           owners = new Set<string>();
-          literalOwners.set(literal, owners);
+          literals.set(literal, owners);
         }
         owners.add(packageId);
       }
       for (const namespace of result.namespaceHints) {
-        let owners = namespaceOwners.get(namespace);
+        let owners = namespaces.get(namespace);
         if (owners === undefined) {
           owners = new Set<string>();
-          namespaceOwners.set(namespace, owners);
+          namespaces.set(namespace, owners);
         }
         owners.add(packageId);
       }
@@ -218,9 +230,19 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
     fiberToPackage.clear();
     for (const packageId of packages.keys()) {
       const normalized = normalizePackageId(packageId);
+      // 宿主包先跳过：它们的展示名（去 scope）可能与第三方裸包名相同
+      // （如第三方 `dsh-terminal-panel` vs 宿主 `@deepseek-ai/dsh-terminal-panel`），
+      // 不能把裸名映射到宿主包。
+      if (isHostOwnedPackage(normalized)) continue;
       fiberToPackage.set(normalized, normalized);
       const display = displayNameOfPackage(normalized);
       if (!fiberToPackage.has(display)) fiberToPackage.set(display, normalized);
+    }
+    // 宿主包只登记**完整包名**（fiber 名/loader 条目名是完整名的场景）。
+    for (const packageId of packages.keys()) {
+      const normalized = normalizePackageId(packageId);
+      if (!isHostOwnedPackage(normalized)) continue;
+      if (!fiberToPackage.has(normalized)) fiberToPackage.set(normalized, normalized);
     }
     try {
       const loader = ctx?.loader ?? ctx?.get?.("loader");
@@ -230,7 +252,13 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
       for (const entry of entries as Array<{ options?: { name?: unknown }; ctx?: { fiber?: { name?: unknown } }; fiber?: { name?: unknown } }>) {
         const name = typeof entry?.options?.name === "string" ? entry.options.name : "";
         const packageId = normalizePackageId(name);
-        if (packageId.length === 0 || isHostPackage(packageId)) continue;
+        if (packageId.length === 0 || isHostPackage(packageId)) {
+          // 宿主包只登记完整包名，不登记 fiber/展示名（避免裸名撞第三方包）。
+          if (isHostOwnedPackage(packageId)) {
+            if (!fiberToPackage.has(packageId)) fiberToPackage.set(packageId, packageId);
+          }
+          continue;
+        }
         const fiberName = entry?.ctx?.fiber?.name ?? entry?.fiber?.name;
         if (typeof fiberName === "string" && fiberName.length > 0) fiberToPackage.set(fiberName, packageId);
         fiberToPackage.set(packageId, packageId);
@@ -305,7 +333,12 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
       onSuspect: addSuspect,
       onCapture: (capture): void => {
         for (const tool of capture.tools) {
-          runtime.set(tool, { package: capture.packageName, at: capture.at, confidence: capture.confidence });
+          runtime.set(tool, {
+            package: capture.packageName,
+            at: capture.at,
+            confidence: capture.confidence,
+            ...(capture.hostInjected === true ? { hostInjected: true } : {}),
+          });
         }
         // T0'：命名空间只认**身份信号**（high）；`mcp__*` 不写工具归属。
         if (capture.confidence === "high") {
@@ -398,6 +431,7 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
         package: entry.package,
         at: typeof entry.at === "number" ? entry.at : 0,
         confidence: entry.confidence === "medium" ? "medium" : "high",
+        ...(isHostOwnedPackage(entry.package) ? { hostInjected: true } : {}),
       });
     }
   }
@@ -438,19 +472,23 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
     const force = options.force === true;
     settling = true;
     try {
+      // 第三方插件包与宿主包分开发现，但都进入同一个扫描/缓存索引：
+      // `packages` 里混合存放，`applyScans` 按包名把宿主包拆到 host 索引。
       const discovered = await resolvePackageRoots(ctx);
-      roots = discovered;
+      const hostDiscovered = await resolveHostPackageRoots(ctx);
+      const allRoots = [...discovered, ...hostDiscovered];
+      roots = allRoots;
       // 包描述与扫描结果解耦：扫描超时/失败也保留（readPackageMeta 与 version 同读）。
       descriptionByPackage.clear();
-      for (const root of discovered) {
+      for (const root of allRoots) {
         const description = root.description?.trim();
         if (description === undefined || description.length === 0) continue;
         const packageId = normalizePackageId(root.packageId);
         if (packageId.length > 0) descriptionByPackage.set(packageId, description);
       }
-      await rebuildDirMap(discovered);
+      await rebuildDirMap(allRoots);
       rebuildFiberMap();
-      const targets = force ? discovered : discovered.filter((root) => !packages.has(normalizePackageId(root.packageId)));
+      const targets = force ? allRoots : allRoots.filter((root) => !packages.has(normalizePackageId(root.packageId)));
       if (targets.length === 0) {
         scanDone = true;
         settling = false;
@@ -545,6 +583,7 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
         display: displayNameOfPackage(captured.package),
         matchedBy: "runtime",
         confidence: captured.confidence,
+        ...(captured.hostInjected === true ? { hostInjected: true } : {}),
       };
     }
     const table = tableToolAttribution(toolName);
@@ -564,6 +603,21 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
         noteConflict(toolName, table.packageId ?? "?", packageId);
       }
       return result;
+    }
+    // 宿主包字面量：只用于识别「宿主注入」只读单元。必须在人工表 / 相似度之前，
+    // 否则宿主工具会被同名第三方插件（相似度/旧表）抢走。
+    const hostOwners = hostLiteralOwners.get(toolName);
+    if (hostOwners !== undefined && hostOwners.size === 1) {
+      const packageId = [...hostOwners][0] as string;
+      counters.literalHits += 1;
+      return {
+        packageId,
+        display: displayNameOfPackage(packageId),
+        matchedBy: "literal",
+        confidence: "high",
+        pattern: toolName,
+        hostInjected: true,
+      };
     }
     if (table !== undefined) {
       counters.tableHits += 1;
@@ -624,6 +678,19 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
       counters.namespaceHits += 1;
       return { packageId, display: displayNameOfPackage(packageId), matchedBy: "namespace", confidence: "high", pattern: namespace };
     }
+    // 宿主包命中的命名空间：MCP 视图仍可用作来源展示（但不会进入 Tools 域）。
+    const hostOwners = hostNamespaceOwners.get(namespace);
+    if (hostOwners !== undefined && hostOwners.size === 1) {
+      const packageId = [...hostOwners][0] as string;
+      counters.namespaceHits += 1;
+      return {
+        packageId,
+        display: displayNameOfPackage(packageId),
+        matchedBy: "namespace",
+        confidence: "high",
+        pattern: namespace,
+      };
+    }
     const table = tableNamespaceAttribution(namespace);
     if (table !== undefined) counters.namespaceHits += 1;
     return table;
@@ -640,7 +707,9 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
       enabled,
       settling: settlingNow(),
       runtimeDisabled: runtimeAttributor?.disabled() === true,
-      packages: packages.size,
+      // 宿主包在同一个 packages 索引里，但快照的「包数」只统计第三方插件包
+      // （v14 契约：宿主包不参与第三方归属统计）。
+      packages: [...packages.keys()].filter((packageId) => !isHostOwnedPackage(packageId)).length,
       literals: literalOwners.size,
       runtime: runtime.size,
       namespace: runtimeNamespace.size,

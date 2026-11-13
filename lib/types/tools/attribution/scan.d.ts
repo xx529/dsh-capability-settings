@@ -25,6 +25,14 @@ export interface PackageRoot {
      * 同一次读取，因此即使包源码扫描超时失败也仍然可用。
      */
     description?: string;
+    /**
+     * true = 宿主包（`@deepseek-ai/*`）。
+     *
+     * 宿主包也会被扫描：它们的工具不进入普通插件归属，而是单独索引为
+     * 「宿主注入」单元（只读展示、不可开关）。扫描范围仍只取 loader 条目，
+     * 不扫 profile 依赖全集。
+     */
+    host?: boolean;
 }
 /** 扫描限额（D8 性能预算）。 */
 export interface ScanLimits {
@@ -60,11 +68,17 @@ export declare function isHostPackage(packageId: string): boolean;
 /**
  * 发现可扫描的第三方插件包根（D6）。
  *
- * 首选宿主 `pluginPackages.packageOf(name, baseUrl)?.dir`（官方消费范例
- * `dsh-tool-cordis`）；拿不到的条目回退 `createRequire(baseUrl).resolve.paths(name)`
- * 探测；仍拿不到 → 跳过该包（仅 T0/T3 覆盖）。自身包与宿主包一律排除。
+ * 自身包与宿主包（`@deepseek-ai/*`）一律排除；宿主包另见
+ * {@link resolveHostPackageRoots}。
  */
 export declare function resolvePackageRoots(ctx: any): Promise<PackageRoot[]>;
+/**
+ * 发现宿主包根（`@deepseek-ai/*`，只读识别用）。
+ *
+ * 只从 loader 条目里取，不扫 profile 依赖全集；宿主包的工具会单独索引为
+ * 「宿主注入」单元，不参与第三方插件归属 / 相似度。
+ */
+export declare function resolveHostPackageRoots(ctx: any): Promise<PackageRoot[]>;
 /** 从源码文本提取字面量（纯字符串正则，不执行代码）。 */
 export declare function extractLiterals(source: string): {
     literals: string[];

@@ -118,7 +118,7 @@ export interface JevRankInput {
     draft: string;
 }
 /** 一条能力在会话里的可应用原因（不可应用时写进 `reason`）。 */
-export type JevApplySkipReason = "unknown-id" | "hard-disabled" | "not-restrictable" | "not-toggleable" | "shadowed" | "already-applied";
+export type JevApplySkipReason = "unknown-id" | "hard-disabled" | "not-restrictable" | "not-toggleable" | "host-injected" | "shadowed" | "already-applied";
 /**
  * 注入来源的展示字段（additive；磁盘行不带）。
  *
@@ -134,6 +134,8 @@ export interface JevCapabilitySourceFields {
     provider?: string;
     /** true = 内容只读（启用/禁用仍可）。 */
     contentReadOnly?: boolean;
+    /** true = 宿主注入（`@deepseek-ai/*` / 随包 / 宿主预设）：只读展示，不可开关。 */
+    hostInjected?: boolean;
 }
 /** rank 结果里的一行（前端勾选/排序用）。 */
 export interface JevRankItem extends JevCapabilitySourceFields {

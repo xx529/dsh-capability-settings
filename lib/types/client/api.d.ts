@@ -99,6 +99,11 @@ export interface ClientSkillSummary extends ClientVisibilityFields {
     origin?: ClientSkillOrigin;
     /** 展示用注入方名（「DSH 内置（Office）」/ `dsh-to-figma` / preset id）。 */
     channel?: string;
+    /**
+     * true = 宿主注入（DSH 随包 `bundled` / 宿主预设 `preset` / `@deepseek-ai/*`
+     * 插件）。所有工作区默认需要，只读展示，任何开关都不可写。
+     */
+    hostInjected?: boolean;
     /** registry provider id（诊断用；不参与路由）。 */
     provider?: string;
     /** registry 原始 source（bundled / custom / runtime / 插件自定义 source）。 */
@@ -503,6 +508,11 @@ export interface ClientMcpRuntimeServer extends ClientVisibilityFields {
     /** 来源：注入它的插件显示名 / loader 条目 id；识别不到时缺省。 */
     source?: string;
     /**
+     * true = 宿主注入（注入方为 `@deepseek-ai/*` 包 / 宿主 fiber）。
+     * 只读展示：全局默认 / 工作区默认 / 可见性 / 当前对话都不可写。
+     */
+    hostInjected?: boolean;
+    /**
      * 发现路径：loader 条目 / 动态 fiber / 工具命名空间合成
      * （v13 R4；旧宿主只回 entry / fiber，按 `!=="entry"` 回落即可）。
      */
@@ -724,6 +734,13 @@ export interface ClientToolsUnit extends ClientVisibilityFields {
     description?: string;
     /** plugin = 已识别插件；unattributed = 来源未识别。 */
     kind: "plugin" | "unattributed";
+    /**
+     * true = 宿主注入（`@deepseek-ai/*` 包 / 宿主运行时注册）。
+     *
+     * 只读展示：所有开关（会话 / 全局默认 / 每工作区默认 / 可见性）都禁用，
+     * 列表里恒为启用。缺省 = false（旧宿主按第三方插件处理）。
+     */
+    hostInjected?: boolean;
     /** 该单元当前可见的全部工具。 */
     tools: ClientToolBrief[];
     /** 工具数（卡片描述与 Jev toolCount 用）。 */
@@ -1212,6 +1229,8 @@ export interface JevRankItem {
     provider?: string;
     /** true = 内容只读（启用/禁用仍可）。 */
     contentReadOnly?: boolean;
+    /** true = 宿主注入（`@deepseek-ai/*` / 随包 / 宿主预设）：只读展示，不可开关。 */
+    hostInjected?: boolean;
     /** 0..1 的 noul 分数；无答案记 0。 */
     score: number;
     /** 能力本身可启用（与 session 活性无关）。 */
@@ -1251,7 +1270,7 @@ export type JevRankResult = {
     errors: string[];
 };
 /** `apply` 跳过原因。 */
-export type JevApplySkipReason = "unknown-id" | "hard-disabled" | "not-restrictable" | "not-toggleable" | "shadowed" | "already-applied";
+export type JevApplySkipReason = "unknown-id" | "hard-disabled" | "not-restrictable" | "not-toggleable" | "host-injected" | "shadowed" | "already-applied";
 /** 一条应用计划项（宿主按 id 重解析，不信任 name/target）。 */
 export interface JevApplyPlanItem {
     id: string;

@@ -480,6 +480,7 @@ export function createPanelApi(deps: AdapterDeps): CapabilityPanelApi {
                 serverName: typeof server.serverName === "string" ? server.serverName : "",
                 ...toVisibilityFields(server),
                 ...(typeof server.source === "string" && server.source.length > 0 ? { source: server.source } : {}),
+                ...(server.hostInjected === true ? { hostInjected: true } : {}),
                 origin:
                   server.origin === "entry"
                     ? ("entry" as const)
@@ -1158,6 +1159,7 @@ function toToolsList(value: unknown): ClientToolsList {
         unit: unit.unit,
         ...toVisibilityFields(unit),
         name: typeof unit.name === "string" && unit.name.length > 0 ? unit.name : unit.unit,
+        ...(unit.hostInjected === true ? { hostInjected: true } : {}),
         kind: unit.kind === "unattributed" ? "unattributed" : "plugin",
         tools,
         toolCount:
@@ -1422,6 +1424,7 @@ function toSummary(value: Record<string, unknown>): ClientSkillSummary {
     ...(typeof value.canToggleInSession === "boolean" ? { canToggleInSession: value.canToggleInSession } : {}),
     ...(value.activationPending === true ? { activationPending: true } : {}),
     ...(injected ? { injected: true } : {}),
+    ...(value.hostInjected === true ? { hostInjected: true } : {}),
     ...(origin !== undefined ? { origin } : {}),
     ...(typeof value.channel === "string" && value.channel.length > 0 ? { channel: value.channel } : {}),
     ...(typeof value.provider === "string" && value.provider.length > 0 ? { provider: value.provider } : {}),

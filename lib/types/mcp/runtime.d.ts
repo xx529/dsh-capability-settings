@@ -38,6 +38,11 @@ export interface InjectedMcpInstance {
     origin: "entry" | "fiber" | "namespace";
     /** 桥接层配置原样（`{transport, serverName, command, args, env, url, headers…}`）。 */
     config?: Record<string, unknown>;
+    /**
+     * true = 注入方是宿主（`@deepseek-ai/*` 包 / 宿主 fiber）：只读展示，不可开关。
+     * 识别不到来源时缺省（保持旧的可开关行为）。
+     */
+    hostInjected?: boolean;
 }
 /**
  * 扫 cordis 插件注册表，找出**动态挂载**的 mcp-client fiber。

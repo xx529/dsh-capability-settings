@@ -72,6 +72,7 @@ import {
   type VisibilityWorkspace,
   type WorkspaceOverrideState,
 } from "./visibility.js";
+import { HOST_INJECTED_LABEL, HOST_INJECTED_REASON } from "../shared/host-injected.js";
 
 /** 复合行 id：同一个 key 可能同时存在于 project 与 global 两个作用域。 */
 function rowId(server: Pick<ClientMcpServer, "scope" | "key">): string {
@@ -297,6 +298,20 @@ function disabledInWorkspaceOf(server: ClientMcpRuntimeServer): boolean {
  */
 function ExternalSourceTags({ server }: { server: ClientMcpRuntimeServer }) {
   const channel = externalChannelOf(server);
+  if (server.hostInjected === true) {
+    return (
+      <>
+        <span className="skp-tag skp-tag-host" title={HOST_INJECTED_REASON}>
+          {HOST_INJECTED_LABEL}
+        </span>
+        {server.source !== undefined && server.source.length > 0 && (
+          <span className="skp-tag skp-tag-channel" title={server.source}>
+            {server.source}
+          </span>
+        )}
+      </>
+    );
+  }
   if (channel !== undefined) {
     return (
       <>
@@ -413,7 +428,7 @@ function McpExternalRowImpl({
   /** 当前视图的默认关闭态：全局视图看全局默认；工作区视图看本工作区有效默认。 */
   const defaultOff = scope === "global" ? globalOff : disabledInWorkspaceOf(server);
   /** 工具在全局注册表可见才可写（两种作用域同一判据；agent 作用域注入的不可）。 */
-  const canToggle = server.restrictable;
+  const canToggle = server.restrictable && server.hostInjected !== true;
   const checked = !defaultOff;
   const dot = checked ? { className: "skp-dot skp-dot-enabled", style: undefined } : { className: "skp-dot", style: { background: "var(--skp-warn)" } };
   const toolText = server.tools.length > 0 ? `${server.tools.length} 个工具` : "工具数未知";
@@ -441,17 +456,19 @@ function McpExternalRowImpl({
           : undefined;
   const switchTitle = invisible
     ? "该实例对所有工作区都不可见：不参与默认开关；先在「可见范围」里打开可见性"
-    : !canToggle
-    ? EXTERNAL_TOGGLE_BLOCKED_TITLE
-    : scope === "global"
-      ? checked
-        ? "关闭：写入全局默认关闭名单（所有工作区新建对话默认不启用；不改注入方配置、不卸载共享实例）"
-        : "打开：从全局默认关闭名单移除（恢复所有工作区默认启用）"
-      : checked
-        ? "关闭：仅此工作区默认不启用（写工作区覆盖，其它工作区不受影响）"
-        : globalOff
-          ? "打开：本工作区显式重新打开（覆盖全局默认关闭，写 enabledMcp）"
-          : "打开：仅此工作区默认启用（写工作区覆盖）";
+    : server.hostInjected === true
+      ? HOST_INJECTED_REASON
+      : !canToggle
+        ? EXTERNAL_TOGGLE_BLOCKED_TITLE
+        : scope === "global"
+          ? checked
+            ? "关闭：写入全局默认关闭名单（所有工作区新建对话默认不启用；不改注入方配置、不卸载共享实例）"
+            : "打开：从全局默认关闭名单移除（恢复所有工作区默认启用）"
+          : checked
+            ? "关闭：仅此工作区默认不启用（写工作区覆盖，其它工作区不受影响）"
+            : globalOff
+              ? "打开：本工作区显式重新打开（覆盖全局默认关闭，写 enabledMcp）"
+              : "打开：仅此工作区默认启用（写工作区覆盖）";
   return (
     <li className={selected ? "skp-row-wrap skp-row-wrap-active" : "skp-row-wrap"}>
       <button type="button" className={selected ? "skp-row skp-row-active" : "skp-row"} style={{ minHeight: 72 }} onClick={() => onSelect(server)}>
@@ -465,8 +482,8 @@ function McpExternalRowImpl({
           <span className="skp-row-title" title={server.serverName}>
             {server.serverName}
           </span>
-          <span className="skp-tag skp-tag-warn" title="不是本插件配置文件里的条目：由其它插件 / profile 运行时注入（配置只读、默认开关可写）">
-            外部注入
+          <span className="skp-tag skp-tag-warn" title={server.hostInjected === true ? HOST_INJECTED_REASON : "不是本插件配置文件里的条目：由其它插件 / profile 运行时注入（配置只读、默认开关可写）"}>
+            {server.hostInjected === true ? "宿主注入" : "外部注入"}
           </span>
         </span>
         <span className="skp-row-meta">
@@ -480,7 +497,7 @@ function McpExternalRowImpl({
               {stateTag.label}
             </span>
           )}
-          {scope === "global" && (
+          {scope === "global" && server.hostInjected !== true && (
             <VisibilityRowMeta
               entry={visibilityEntry}
               workspaces={projects}
@@ -764,7 +781,7 @@ export function McpView({
    */
   const toggleExternal = async (server: ClientMcpRuntimeServer) => {
     const id = `external:${server.serverName}`;
-    if (busyKey !== undefined || !server.restrictable) return;
+    if (busyKey !== undefined || !server.restrictable || server.hostInjected === true) return;
     const checked = scope === "global" ? server.disabledGlobally !== true : !disabledInWorkspaceOf(server);
     setBusyKey(id);
     setDefaultError(undefined);
@@ -1609,7 +1626,7 @@ function McpExternalDetail({
                   </dd>
                 </>
               )}
-              {scope === "global" && (
+              {scope === "global" && server.hostInjected !== true && (
                 <VisibilityDetailFields
                   api={panelApi}
                   domain="mcp"
@@ -1623,33 +1640,41 @@ function McpExternalDetail({
               )}
               <dt>全局默认</dt>
               <dd>
-                {globalOff
-                  ? "关闭（在「全局」作用域用列表行尾开关恢复；不改注入方配置、不卸载共享实例）"
-                  : "启用"}
+                {server.hostInjected === true
+                  ? "宿主注入：不参与全局默认开关"
+                  : globalOff
+                    ? "关闭（在「全局」作用域用列表行尾开关恢复；不改注入方配置、不卸载共享实例）"
+                    : "启用"}
               </dd>
               <dt>本工作区</dt>
               <dd>
-                {!workspaceOff
-                  ? globalOff
-                    ? "已覆盖全局默认：本工作区显式重新打开"
-                    : "继承全局默认（启用）"
-                  : globalOff
-                    ? "继承全局默认（关闭）"
-                    : "本工作区默认关闭"}
+                {server.hostInjected === true
+                  ? "所有工作区默认启用（运行基线）"
+                  : !workspaceOff
+                    ? globalOff
+                      ? "已覆盖全局默认：本工作区显式重新打开"
+                      : "继承全局默认（启用）"
+                    : globalOff
+                      ? "继承全局默认（关闭）"
+                      : "本工作区默认关闭"}
               </dd>
               <dt>默认开关</dt>
               <dd>
-                {server.restrictable
-                  ? "列表行尾开关可写：全局视图 = 全局默认（独立文件，所有工作区生效）；工作区视图 = 本工作区默认（可覆盖全局默认）。均不卸载共享实例。"
-                  : EXTERNAL_TOGGLE_BLOCKED_TITLE}
+                {server.hostInjected === true
+                  ? HOST_INJECTED_REASON
+                  : server.restrictable
+                    ? "列表行尾开关可写：全局视图 = 全局默认（独立文件，所有工作区生效）；工作区视图 = 本工作区默认（可覆盖全局默认）。均不卸载共享实例。"
+                    : EXTERNAL_TOGGLE_BLOCKED_TITLE}
               </dd>
               <dt>本次运行调用</dt>
               <dd>{server.calls > 0 ? `${server.calls} 次` : "还没有调用记录"}</dd>
               <dt>管理</dt>
               <dd>
-                {isSynthesized(server)
-                  ? "工具命名空间无法在这里编辑或卸载；请在注入方管理（默认开关仍可写）。"
-                  : "配置由注入方管理；能力面板不提供编辑/删除/卸载，但默认开关可写。"}
+                {server.hostInjected === true
+                  ? "由宿主提供；能力面板只读展示，不提供编辑 / 删除 / 卸载或开关。"
+                  : isSynthesized(server)
+                    ? "工具命名空间无法在这里编辑或卸载；请在注入方管理（默认开关仍可写）。"
+                    : "配置由注入方管理；能力面板不提供编辑/删除/卸载，但默认开关可写。"}
               </dd>
             </dl>
           </div>

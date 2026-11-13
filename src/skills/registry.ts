@@ -37,6 +37,7 @@ import { parseSkill, serializeSkill } from "./disk.js";
 import { invocationPolicy } from "./types.js";
 import type { RegistryResourceBaseKind, SkillFormat, SkillOrigin, SkillSpec, SkillSummaryView } from "./types.js";
 import type { TransferResult } from "./transfer.js";
+import { HOST_INJECTED_REASON, isHostOwnedPackage, isHostOwnedPath, isHostOwnedSource } from "../shared/host-injected.js";
 
 // ---------------------------------------------------------------------------
 // 与 shadow 机制共用的常量（session.ts 从这里 import，避免字符串两处分叉）
@@ -125,6 +126,8 @@ export interface ClassifiedInjectedRow {
   registrySource: string;
   resourceBaseKind?: RegistryResourceBaseKind;
   path?: string;
+  /** true = 宿主注入（DSH 随包 / 宿主预设 / `@deepseek-ai/*` 插件）：只读展示、不可开关。 */
+  hostInjected?: boolean;
 }
 
 /** 合并入参（磁盘行用于同名去重，projectDisabled 用于 disabledInProject）。 */
@@ -206,6 +209,13 @@ export interface SkillRegistryBridge {
   globalInjected(ttlMs?: number): Promise<SkillSummaryView[]>;
   /** 当前 scope 视图里属于注入条目的名字集合（项目默认只作用于这些名字）。 */
   injectedNames(agent: unknown, sessionId: string | undefined, cwd?: string): Promise<Set<string> | undefined>;
+  /**
+   * 当前 scope 视图里属于**宿主注入**的注入条目名（随包 / 宿主预设 / 官方插件）。
+   *
+   * 这些名字是运行基线：会话默认投影、显式开关、Jev / 派生选择都必须跳过。
+   * registry 不可用 / snapshot 失败返回 undefined（调用方保持旧行为）。
+   */
+  hostInjectedNames(agent: unknown, sessionId: string | undefined, cwd?: string): Promise<Set<string> | undefined>;
   /** 名字在当前视图里的性质（写拦截用；registry 不可用返回 undefined）。 */
   inspectName(name: string, options: { cwd?: string; sessionId?: string }): Promise<RegistryNameVerdict | undefined>;
   /** 详情 fallback（磁盘读不到时调用）。 */
@@ -612,6 +622,16 @@ export function createSkillRegistryBridge(deps: SkillRegistryBridgeDeps): SkillR
       provider,
       registrySource: source,
     };
+    // 宿主注入判定：随包 `bundled` / 预设层 `preset` / `@deepseek-ai/*` 包路径。
+    // 这三类都属于运行基线（所有工作区默认需要），面板只展示、不提供开关。
+    const hostInjected =
+      origin === "bundled" ||
+      origin === "preset" ||
+      isHostOwnedPackage(provider) ||
+      isHostOwnedSource(source) ||
+      isHostOwnedSource(channel) ||
+      isHostOwnedPath(entry.path);
+    if (hostInjected) row.hostInjected = true;
     if (typeof entry.whenToUse === "string" && entry.whenToUse.length > 0) row.whenToUse = entry.whenToUse;
     const baseKind = resourceBaseKindOf(entry);
     if (baseKind !== undefined) row.resourceBaseKind = baseKind;
@@ -622,12 +642,10 @@ export function createSkillRegistryBridge(deps: SkillRegistryBridgeDeps): SkillR
   /** 分类行 → 面板摘要行（注入行的 source 恒为 "external"，不带 root）。 */
   function toSummaryView(row: ClassifiedInjectedRow, disabledInProject: boolean): SkillSummaryView {
     /**
-     * 全局开关可写性：preset 自带 provider 的条目与本插件 shadow 同层且 rank
-     * 更低，无法关闭 ⇒ 标记 false + 原因，让 UI 禁用开关（契约 §2.2）。
-     * 其它注入行（runtime / bundled / 插件 provider）落在 global 层，可被
-     * agent 层 shadow 覆盖。
+     * 全局开关可写性：宿主注入行（随包 / 宿主预设 / 官方插件）是运行基线，
+     * 任何层都不能关；其余注入行落在 global 层，可被 agent 层 shadow 覆盖。
      */
-    const canToggleGlobal = row.origin !== "preset";
+    const hostInjected = row.hostInjected === true;
     return {
       name: row.name,
       description: row.description,
@@ -638,6 +656,7 @@ export function createSkillRegistryBridge(deps: SkillRegistryBridgeDeps): SkillR
       readOnly: true,
       ...(row.path !== undefined ? { path: row.path } : {}),
       injected: true,
+      ...(hostInjected ? { hostInjected: true } : {}),
       origin: row.origin,
       channel: row.channel,
       provider: row.provider,
@@ -645,7 +664,11 @@ export function createSkillRegistryBridge(deps: SkillRegistryBridgeDeps): SkillR
       ...(row.resourceBaseKind !== undefined ? { resourceBaseKind: row.resourceBaseKind } : {}),
       contentReadOnly: true,
       disabledInProject,
-      ...(canToggleGlobal ? {} : { canToggleGlobal: false, globalToggleBlockedReason: PRESET_GLOBAL_TOGGLE_BLOCKED_REASON }),
+      ...(hostInjected
+        ? { canToggleGlobal: false, globalToggleBlockedReason: HOST_INJECTED_REASON }
+        : row.origin === "preset"
+          ? { canToggleGlobal: false, globalToggleBlockedReason: PRESET_GLOBAL_TOGGLE_BLOCKED_REASON }
+          : {}),
     };
   }
 
@@ -761,6 +784,30 @@ export function createSkillRegistryBridge(deps: SkillRegistryBridgeDeps): SkillR
       if (!isUsableSummary(entry) || isOwnShadow(entry)) continue;
       const row = classify(entry, globalByName, { agent, sessionId: sessionId !== undefined && agent !== undefined ? sessionId : undefined });
       if (row === undefined) continue;
+      if (sessionId !== undefined && agent !== undefined) cacheMeta(scope, row);
+      names.add(row.name);
+    }
+    return names;
+  }
+
+  /** 当前 scope 视图里的宿主注入技能名（只读展示；不可开关）。 */
+  async function hostInjectedNames(agent: unknown, sessionId: string | undefined, cwd?: string): Promise<Set<string> | undefined> {
+    const skills = service();
+    if (skills === undefined || typeof skills.snapshot !== "function") return undefined;
+    const globalSnapshot = await safeSnapshot(skills, { cwd });
+    if (globalSnapshot === undefined) return undefined;
+    const viewSnapshot =
+      sessionId !== undefined && agent !== undefined
+        ? await safeSnapshot(skills, { cwd, scope: agent })
+        : globalSnapshot;
+    if (viewSnapshot === undefined) return undefined;
+    const globalByName = byName(globalSnapshot.skills);
+    const scope = scopeKeyOf(sessionId !== undefined && agent !== undefined ? sessionId : undefined);
+    const names = new Set<string>();
+    for (const entry of viewSnapshot.skills) {
+      if (!isUsableSummary(entry) || isOwnShadow(entry)) continue;
+      const row = classify(entry, globalByName, { agent, sessionId: sessionId !== undefined && agent !== undefined ? sessionId : undefined });
+      if (row === undefined || row.hostInjected !== true) continue;
       if (sessionId !== undefined && agent !== undefined) cacheMeta(scope, row);
       names.add(row.name);
     }
@@ -1189,6 +1236,7 @@ export function createSkillRegistryBridge(deps: SkillRegistryBridgeDeps): SkillR
     merge,
     globalInjected,
     injectedNames,
+    hostInjectedNames,
     inspectName,
     readDetail,
     getDefinition,

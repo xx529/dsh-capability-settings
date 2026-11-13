@@ -29,6 +29,7 @@
 import { errMessage } from "../shared/errors.js";
 import type { CapabilityDefaults } from "../overrides/types.js";
 import { INVISIBLE_CAPABILITY_ERROR } from "../shared/visibility.js";
+import { HOST_INJECTED_REASON } from "../shared/host-injected.js";
 import { attributeTool, isHostBuiltinTool } from "../shared/plugin-attribution.js";
 import { parseMcpToolName } from "../mcp/usage.js";
 import type { SessionStateMeta, SessionStateStore } from "../session-state.js";
@@ -85,6 +86,8 @@ interface ToolsEnumeration {
     unit: string;
     name: string;
     kind: "plugin" | "unattributed";
+    /** true = 宿主注入（`@deepseek-ai/*`）：只读展示，不参与任何开关。 */
+    hostInjected: boolean;
     /** 单元级归属（聚合多条工具结果；`mixed` 表示依据不一致）。 */
     attribution: ToolsUnitView["attribution"];
     /** 轻量视图（name + 截断 description）：`tools.list` / deny 计算用。 */
@@ -288,6 +291,7 @@ function enumerateGlobalTools(
         unit,
         name: display,
         kind,
+        hostInjected: attribution.hostInjected === true,
         tools: [],
         details: [],
         attribution: {
@@ -327,6 +331,7 @@ function enumerateGlobalTools(
         entry.attribution = { ...entry.attribution, mixed: true };
       }
       if (attribution.conflictsWithTable === true) entry.attribution = { ...entry.attribution, conflictsWithTable: true };
+      if (attribution.hostInjected === true) entry.hostInjected = true;
     }
     const fullDescription = typeof raw?.description === "string" && raw.description.length > 0 ? raw.description : undefined;
     // 轻量视图（list）：description 截断到 200 码点。
@@ -428,6 +433,8 @@ function computeTargets(
   const targets: Array<{ unit: string; name: string }> = [];
   const targetTools: HostToolBrief[][] = [];
   for (const unit of enumeration.units) {
+    // 宿主注入能力是运行基线：所有工作区默认需要，任何默认/会话状态都不能把它关掉。
+    if (unit.hostInjected) continue;
     if (effectiveEnabledFor(unit.unit, toggles, defaults, globallyDisabled)) continue;
     targets.push({ unit: unit.unit, name: unit.name });
     targetTools.push(unit.tools);
@@ -845,6 +852,30 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
     let hiddenCount = 0;
     const units: ToolsUnitView[] = [];
     for (const unit of enumeration.units) {
+      // 插件用途描述（package.json description）：扫描未完成 / 包根读不到时缺省；
+      // 不阻塞列表（Jev 侧有占位兜底）。
+      const description = deps.resolver?.packageDescription?.(unit.unit);
+      const briefTools = unit.tools.map((tool) => ({ ...tool }));
+      if (unit.hostInjected) {
+        // 宿主注入：只读展示、恒启用。忽略并清空可见性/默认/显式覆盖的投影，
+        // 面板与运行时都不能把它关掉（所有工作区默认需要）。
+        units.push({
+          unit: unit.unit,
+          name: unit.name,
+          kind: unit.kind,
+          hostInjected: true,
+          ...(description !== undefined && description.trim().length > 0 ? { description: description.trim() } : {}),
+          tools: briefTools,
+          toolCount: unit.tools.length,
+          attribution: { ...unit.attribution },
+          defaultEnabled: true,
+          enabled: true,
+          enabledInSession: true,
+          explicit: false,
+          lockedReason: HOST_INJECTED_REASON,
+        });
+        continue;
+      }
       const key = unitKeyOf(unit.unit);
       const explicit = toggles?.has(key) === true;
       const capability = defaults.get(unit.unit);
@@ -869,15 +900,12 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
           : effectiveDefault;
       const enabled = explicit ? toggles?.get(key) === true : effectiveDefault;
       const restriction = record?.restrictions.find((entry) => entry.unit === unit.unit);
-      // 插件用途描述（package.json description）：扫描未完成 / 包根读不到时缺省；
-      // 不阻塞列表（Jev 侧有占位兜底）。
-      const description = deps.resolver?.packageDescription?.(unit.unit);
       units.push({
         unit: unit.unit,
         name: unit.name,
         kind: unit.kind,
         ...(description !== undefined && description.trim().length > 0 ? { description: description.trim() } : {}),
-        tools: unit.tools.map((tool) => ({ ...tool })),
+        tools: briefTools,
         toolCount: unit.tools.length,
         attribution: { ...unit.attribution },
         defaultEnabled,
@@ -972,12 +1000,18 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
     await hydrateToggles(sessionId, metaOf(record));
     const enumeration = enumerateGlobalTools(globalTools, deps.resolver?.resolveTool ?? ((name) => tableToolAttribution(name) ?? { matchedBy: "unknown", confidence: "low" }));
     const known = new Map(enumeration.units.map((unit) => [unit.unit, unit]));
+    /** 宿主注入单元：先摘出去（全局/工作区默认都不允许写）。 */
+    const hostUnits = new Set(enumeration.units.filter((unit) => unit.hostInjected).map((unit) => unit.unit));
     // v21：不可见单元不能写会话开关（混合请求时跳过不可见项；全不可见 ⇒ 业务失败）。
-    const requestedUnits = [
+    const requestedAll = [
       ...new Set(
         payload.units.filter((unit): unit is string => typeof unit === "string" && unit.length > 0 && known.has(unit)),
       ),
     ];
+    if (requestedAll.length > 0 && requestedAll.every((unit) => hostUnits.has(unit))) {
+      return { ok: false, errors: [HOST_INJECTED_REASON] };
+    }
+    const requestedUnits = requestedAll.filter((unit) => !hostUnits.has(unit));
     // v21.2：live 会话用冻结快照判定可见性（创建后的全局可见性变更不影响本会话，
     // 会话级开关仍可正常写）；冷会话按当前配置。
     let defaults: Map<string, CapabilityDefaults>;
@@ -1063,16 +1097,24 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
     const enumeration = enumerateGlobalTools(globalTools, deps.resolver?.resolveTool ?? ((name) => tableToolAttribution(name) ?? { matchedBy: "unknown", confidence: "low" }));
     if (enumeration.errors.length > 0) return { ok: false, errors: [...enumeration.errors] };
     const known = new Set(enumeration.units.map((unit) => unit.unit));
+    const hostUnits = new Set(enumeration.units.filter((unit) => unit.hostInjected).map((unit) => unit.unit));
     const requested: string[] = [];
     const seen = new Set<string>();
+    let hostRequested = false;
     for (const raw of payload.units) {
       if (typeof raw !== "string") continue;
       const unit = unitOfKey(raw) ?? raw.trim();
       if (unit.length === 0 || seen.has(unit) || !known.has(unit)) continue;
       seen.add(unit);
+      if (hostUnits.has(unit)) {
+        hostRequested = true;
+        continue;
+      }
       requested.push(unit);
     }
-    if (requested.length === 0) return { ok: true, applied: 0 };
+    if (requested.length === 0) {
+      return hostRequested ? { ok: false, errors: [HOST_INJECTED_REASON] } : { ok: true, applied: 0 };
+    }
     // v21：全局兜底写入 `capability-global-overrides.json` 的 `tools`（旧
     // tools-global.json 只读兼容）；旧装配回退旧 store。
     const result =

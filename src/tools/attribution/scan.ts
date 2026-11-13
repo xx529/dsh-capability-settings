@@ -15,6 +15,7 @@ import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 
 import { normalizePackageId, SELF_PACKAGE } from "./unit-id.js";
+import { isHostOwnedPackage } from "../../shared/host-injected.js";
 
 /** 一个可扫描的插件包根。 */
 export interface PackageRoot {
@@ -31,6 +32,14 @@ export interface PackageRoot {
    * 同一次读取，因此即使包源码扫描超时失败也仍然可用。
    */
   description?: string;
+  /**
+   * true = 宿主包（`@deepseek-ai/*`）。
+   *
+   * 宿主包也会被扫描：它们的工具不进入普通插件归属，而是单独索引为
+   * 「宿主注入」单元（只读展示、不可开关）。扫描范围仍只取 loader 条目，
+   * 不扫 profile 依赖全集。
+   */
+  host?: boolean;
 }
 
 /** 扫描限额（D8 性能预算）。 */
@@ -157,13 +166,16 @@ async function readDirMtime(dir: string): Promise<number> {
 }
 
 /**
- * 发现可扫描的第三方插件包根（D6）。
+ * 发现可扫描的包根（内部实现；`hostOnly` 区分宿主包 / 第三方插件）。
  *
  * 首选宿主 `pluginPackages.packageOf(name, baseUrl)?.dir`（官方消费范例
  * `dsh-tool-cordis`）；拿不到的条目回退 `createRequire(baseUrl).resolve.paths(name)`
- * 探测；仍拿不到 → 跳过该包（仅 T0/T3 覆盖）。自身包与宿主包一律排除。
+ * 探测；仍拿不到 → 跳过该包（仅 T0/T3 覆盖）。
+ *
+ * - `hostOnly=false`：第三方插件包（排除自身 / mcp 桥接 / `@deepseek-ai/*`）；
+ * - `hostOnly=true`：只收 `@deepseek-ai/*` 宿主包，用于「宿主注入」只读单元。
  */
-export async function resolvePackageRoots(ctx: any): Promise<PackageRoot[]> {
+async function resolveRoots(ctx: any, hostOnly: boolean): Promise<PackageRoot[]> {
   const roots = new Map<string, PackageRoot>();
   let entries: any[] = [];
   try {
@@ -195,7 +207,11 @@ export async function resolvePackageRoots(ctx: any): Promise<PackageRoot[]> {
     const name = typeof entry?.options?.name === "string" ? entry.options.name : "";
     if (name.length === 0) continue;
     const packageId = normalizePackageId(name);
-    if (isHostPackage(packageId) || roots.has(packageId)) continue;
+    const host = isHostOwnedPackage(packageId);
+    if (host !== hostOnly) continue;
+    // 自身 / mcp 桥接层没有面板工具：无论哪种模式都跳过。
+    if (!host && isHostPackage(packageId)) continue;
+    if (roots.has(packageId)) continue;
     const baseUrl: unknown = entry?.ctx?.baseUrl ?? entry?.baseUrl ?? entry?.options?.baseUrl;
     let dir: string | undefined;
     try {
@@ -230,9 +246,30 @@ export async function resolvePackageRoots(ctx: any): Promise<PackageRoot[]> {
       version: meta.version,
       mtimeMs: await readDirMtime(dir),
       ...(meta.description !== undefined ? { description: meta.description } : {}),
+      ...(host ? { host: true } : {}),
     });
   }
   return [...roots.values()];
+}
+
+/**
+ * 发现可扫描的第三方插件包根（D6）。
+ *
+ * 自身包与宿主包（`@deepseek-ai/*`）一律排除；宿主包另见
+ * {@link resolveHostPackageRoots}。
+ */
+export async function resolvePackageRoots(ctx: any): Promise<PackageRoot[]> {
+  return resolveRoots(ctx, false);
+}
+
+/**
+ * 发现宿主包根（`@deepseek-ai/*`，只读识别用）。
+ *
+ * 只从 loader 条目里取，不扫 profile 依赖全集；宿主包的工具会单独索引为
+ * 「宿主注入」单元，不参与第三方插件归属 / 相似度。
+ */
+export async function resolveHostPackageRoots(ctx: any): Promise<PackageRoot[]> {
+  return resolveRoots(ctx, true);
 }
 
 /** 递归收集一个包根下的待扫文件（跳过 SKIP_DIRS）。 */

@@ -27,6 +27,7 @@
 
 import { attributeMcpNamespace } from "../shared/plugin-attribution.js";
 import { parseMcpToolName } from "./usage.js";
+import { isHostOwnedPackage, isHostOwnedSource } from "../shared/host-injected.js";
 
 /** 桥接层包名（loader 条目 name / fiber runtime name 都按它匹配）。 */
 const BRIDGE_PACKAGE = "dsh-mcp-client";
@@ -45,6 +46,11 @@ export interface InjectedMcpInstance {
   origin: "entry" | "fiber" | "namespace";
   /** 桥接层配置原样（`{transport, serverName, command, args, env, url, headers…}`）。 */
   config?: Record<string, unknown>;
+  /**
+   * true = 注入方是宿主（`@deepseek-ai/*` 包 / 宿主 fiber）：只读展示，不可开关。
+   * 识别不到来源时缺省（保持旧的可开关行为）。
+   */
+  hostInjected?: boolean;
 }
 
 /** 是否像 `@deepseek-ai/dsh-mcp-client` 这个桥接层。 */
@@ -105,6 +111,7 @@ export function scanInjectedMcpFibers(ctx: any): InjectedMcpInstance[] {
         serverName,
         origin: "fiber",
         ...(name !== undefined && !isBridgeName(name) ? { source: name } : {}),
+        ...(isHostOwnedSource(name) ? { hostInjected: true } : {}),
         config,
       });
     }
@@ -132,7 +139,14 @@ export function scanInjectedMcpEntries(ctx: any): InjectedMcpInstance[] {
       const serverName = config?.serverName;
       if (typeof serverName !== "string" || serverName.length === 0) continue;
       const id = typeof options.id === "string" ? options.id : undefined;
-      found.push({ serverName, origin: "entry", ...(id !== undefined ? { source: id } : {}), config });
+      const fiberName = entry?.ctx?.fiber?.name ?? entry?.fiber?.name;
+      found.push({
+        serverName,
+        origin: "entry",
+        ...(id !== undefined ? { source: id } : {}),
+        ...(isHostOwnedSource(fiberName) ? { hostInjected: true } : {}),
+        config,
+      });
     }
   } catch {
     /* loader 不可用：只靠 fiber 扫描 */
@@ -179,9 +193,16 @@ export function scanInjectedMcpNamespaces(
     // 动态 resolver（T0' 运行时命名空间 / T2 包扫描 / 表兜底）；缺省退回人工表。
     const resolved = resolveNamespace?.(serverName);
     const display = resolved?.display ?? attributeMcpNamespace(serverName)?.display;
+    // 命中宿主包（`@deepseek-ai/*`）→ 只读展示；无法识别保持旧行为。
+    const hostInjected = isHostOwnedPackage(resolved?.packageId) || isHostOwnedPackage(display);
     // 命中 → source 直接放展示名（视图层据此出「插件 + 名称」两枚标签）；
     // 未命中 → 不带 source（视图层标「未识别」，不猜）。
-    found.push({ serverName, origin: "namespace", ...(display !== undefined ? { source: display } : {}) });
+    found.push({
+      serverName,
+      origin: "namespace",
+      ...(display !== undefined ? { source: display } : {}),
+      ...(hostInjected ? { hostInjected: true } : {}),
+    });
   }
   return found;
 }
@@ -198,9 +219,20 @@ export function scanInjectedMcpInstances(
 ): Map<string, InjectedMcpInstance> {
   const merged = new Map<string, InjectedMcpInstance>();
   for (const instance of scanInjectedMcpFibers(ctx)) merged.set(instance.serverName, instance);
-  for (const instance of scanInjectedMcpEntries(ctx)) merged.set(instance.serverName, instance);
+  for (const instance of scanInjectedMcpEntries(ctx)) {
+    const previous = merged.get(instance.serverName);
+    merged.set(instance.serverName, {
+      ...instance,
+      // 任一发现路径确认宿主注入 ⇒ 保持只读，不被后到路径覆盖掉。
+      ...(previous?.hostInjected === true ? { hostInjected: true } : {}),
+    });
+  }
   for (const instance of scanInjectedMcpNamespaces(ctx, new Set(merged.keys()), resolveNamespace)) {
-    merged.set(instance.serverName, instance);
+    const previous = merged.get(instance.serverName);
+    merged.set(instance.serverName, {
+      ...instance,
+      ...(previous?.hostInjected === true ? { hostInjected: true } : {}),
+    });
   }
   return merged;
 }

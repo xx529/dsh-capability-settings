@@ -3,6 +3,36 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 修复
+
+- **宿主注入的 Tools / Skills / MCP 仍可被开关**（反馈：`@deepseek-ai/dsh-terminal-panel`
+  的 `user_terminal_*`、宿主预设技能 `dsh-doc` 在面板/首屏仍显示可操作开关）：
+  - **Tools**：宿主包（`@deepseek-ai/*`）纳入归属扫描并单独建索引；工具名命中
+    宿主包字面量时归到宿主单元并标记 `hostInjected`，优先于人工表与「名字推测」
+    （修复 `user_terminal_*` 被同名第三方插件 `dsh-terminal-panel` 抢归属的问题）。
+    宿主单元恒 `enabled=true`、`lockedReason` = 宿主原因，不参与可见性 / 默认 /
+    `tools.restrict`；`tools.setSessionEnabled` / `setGlobalEnabled` 直接拒绝。
+  - **Skills**：`origin=bundled|preset` 或注入路径落在 `@deepseek-ai/*` / `app.asar`
+    的注入技能标记 `hostInjected`；面板与首屏开关置灰，`skills.setSessionEnabled`
+    单条/批量、会话默认投影都拒绝；Jev 能力决策里仍展示但标记为不可选
+    （`host-injected`），派生动态选择不会选中；历史遗留的关闭记录会被清理而不是
+    继续注册 shadow。
+  - **MCP**：注入方为 `@deepseek-ai/*` 包 / 宿主 fiber 的外部实例标记
+    `hostInjected`；全局默认 / 工作区默认 / 可见性 / 当前对话开关全部置灰，
+    `mcp.setSessionEnabled` / 批量写入与 session-bulk 跳过；Jev 里展示但不可选。
+  - 三域的全局默认 / 项目默认 / 可见性写路径统一加宿主守卫
+    （`overrides` 的 `toggle` / `globalToggle` / `globalToggleMany` /
+    `setVisibility` 返回业务失败），UI 仍是主拦截层。
+  - 设计同步：新增「宿主」青蓝标签（面板 / 首屏 / Jev 决策来源标签）。
+  - 验证 `node notes/verify/host-injected.mjs` 11/11：
+    `Tools 宿主包字面量归属`、`Tools 宿主单元只读锁定`、`Tools 宿主单元拒绝会话开关`、
+    `Tools 宿主单元拒绝全局默认`、`Skills 宿主预设技能 hostInjected`、
+    `Skills 第三方技能仍可开关`、`MCP 宿主注入识别`、`MCP 第三方注入保持可开关`、
+    `Overrides 拒绝宿主项目默认 / 全局默认 / 可见性` 全 PASS；
+    `pnpm typecheck`、`pnpm build` 通过。
+
 ## [1.18.8] - 2026-11-13
 
 ### 修复

@@ -33,6 +33,7 @@
 
 import type { RuntimeSignal } from "./types.js";
 import { normalizePackageId, SELF_PACKAGE } from "./unit-id.js";
+import { isHostOwnedPackage } from "../../shared/host-injected.js";
 
 /** 运行时捕获依赖。 */
 export interface RuntimeAttributorDeps {
@@ -69,6 +70,8 @@ export interface RuntimeCapture {
   /** `high` = 调用方身份；`medium` = 注册栈兜底。 */
   confidence: "high" | "medium";
   signal: RuntimeSignal;
+  /** true = 注册方是宿主包（`@deepseek-ai/*`）：面板只读展示，不参与开关。 */
+  hostInjected?: boolean;
 }
 
 /** 运行时归属器。 */
@@ -321,8 +324,8 @@ export function createRuntimeAttributor(deps: RuntimeAttributorDeps): RuntimeAtt
     }
   }
 
-  /** 身份信号 → 包 id（fiber 名优先，其次访问点栈；宿主/自身一律不可用）。 */
-  function identityPackage(record: AccessRecord): string | undefined {
+  /** 身份信号 → 包 id（fiber 名优先，其次访问点栈；宿主身份只认 fiber）。 */
+  function identityPackage(record: AccessRecord): { packageId: string; hostInjected: boolean } | undefined {
     let byFiber: string | undefined;
     if (record.fiber !== undefined) {
       try {
@@ -335,26 +338,34 @@ export function createRuntimeAttributor(deps: RuntimeAttributorDeps): RuntimeAtt
     const candidate = byFiber ?? byStack;
     if (candidate === undefined) return undefined;
     const packageId = normalizePackageId(candidate);
-    if (isHostLikePackage(packageId, selfPackage)) return undefined;
-    return packageId;
+    if (isHostLikePackage(packageId, selfPackage)) {
+      // 栈里的宿主帧可能只是框架（dsh-tools / cordis），不能据此归属；
+      // 只有 fiber 身份（最近具名祖先 = 真实注册插件）能证明宿主归属。
+      if (byFiber !== undefined && isHostOwnedPackage(packageId) && normalizePackageId(byFiber) === packageId) {
+        return { packageId, hostInjected: true };
+      }
+      return undefined;
+    }
+    return { packageId, hostInjected: false };
   }
 
   /** 本次注册方（身份优先；兜底取注册栈最后一个第三方帧并跳过拦截器）。 */
-  function resolveOwner(): { packageId: string; confidence: "high" | "medium"; signal: RuntimeSignal } | undefined {
+  function resolveOwner(): { packageId: string; confidence: "high" | "medium"; signal: RuntimeSignal; hostInjected: boolean } | undefined {
     const stack = captureStack();
     if (access !== undefined) {
-      const packageId = identityPackage(access);
-      if (packageId === undefined) return undefined;
+      const identity = identityPackage(access);
+      if (identity === undefined) return undefined;
+      const { packageId } = identity;
       ownerSeen.add(packageId);
       // 交叉校验：注册栈里排在拦截器位置的包（只在身份可信时才敢判定）。
       const interceptorCandidate = packagesInStack(stack, selfPackage, deps.packageOfPath)[0];
       if (interceptorCandidate !== undefined && interceptorCandidate !== packageId) noteDisagreement(interceptorCandidate);
-      return { packageId, confidence: "high", signal: "access" };
+      return { packageId, confidence: "high", signal: "access", hostInjected: identity.hostInjected };
     }
     const candidates = packagesInStack(stack, selfPackage, deps.packageOfPath);
     const fallback = candidates[candidates.length - 1];
     if (fallback === undefined || isInterceptor(fallback)) return undefined;
-    return { packageId: fallback, confidence: "medium", signal: "register-stack" };
+    return { packageId: fallback, confidence: "medium", signal: "register-stack", hostInjected: false };
   }
 
   /** 捕获一次（异常全吞；连续 3 次失败禁用 T0）。 */
@@ -401,6 +412,7 @@ export function createRuntimeAttributor(deps: RuntimeAttributorDeps): RuntimeAtt
           at: Date.now(),
           confidence: owner.confidence,
           signal: owner.signal,
+          ...(owner.hostInjected ? { hostInjected: true } : {}),
         });
       } catch {
         /* 回调失败不影响注册流程 */

@@ -67,6 +67,7 @@ import {
 import type { SkillDefaultSets } from "../shared/skill-defaults.js";
 import type { CapabilityDefaults } from "../overrides/types.js";
 import { INVISIBLE_CAPABILITY_ERROR } from "../shared/visibility.js";
+import { HOST_INJECTED_REASON } from "../shared/host-injected.js";
 import { SHADOW_DESCRIPTION, SHADOW_METADATA_KEY } from "./registry.js";
 import type { ClassifiedInjectedRow, SkillRegistryBridge } from "./registry.js";
 import type { SkillSummaryView } from "./types.js";
@@ -238,6 +239,13 @@ interface SessionRecord {
   /** 本项目默认禁用名单（最近一次读取的快照；B2 起 = 有效默认 = 全局 ∪ 项目 − 项目启用）。 */
   projectDefaults: Set<string>;
   /**
+   * 当前 scope 里属于宿主注入的技能名（随包 / 宿主预设 / 官方插件）。
+   *
+   * 这些名字是运行基线：`desiredEnabled` 恒为 true，默认投影 / 显式开关都
+   * 不得关闭；集合在每次 list / 创建投影时从 registry 刷新。
+   */
+  hostInjected: Set<string>;
+  /**
    * v21 能力默认快照（可见性 + 每工作区默认 + 项目三态）：名字 → 默认态。
    * `desiredEnabled` 与列表投影都从这里取。
    */
@@ -376,6 +384,7 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
       explicit: new Map(),
       explicitHydrated: false,
       projectDefaults: new Set(),
+      hostInjected: new Set(),
       capabilities: new Map(),
       defaultsFrozen: false,
       projectPending: new Set(),
@@ -423,10 +432,31 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
   }
 
   /**
+   * 刷新并返回本会话的宿主注入技能名集合。
+   *
+   * 失败返回上一次快照（缺省空集），绝不阻塞列表 / 创建路径。
+   */
+  async function hostInjectedOf(record: SessionRecord): Promise<Set<string>> {
+    const registry = deps.registry;
+    if (registry === undefined) return record.hostInjected;
+    const sessionId = typeof record.agent?.id === "string" ? record.agent.id : undefined;
+    try {
+      const names = await registry.hostInjectedNames(record.agent, sessionId, record.cwd);
+      if (names !== undefined) record.hostInjected = names;
+    } catch {
+      /* registry 暂不可用：保留上次快照 */
+    }
+    return record.hostInjected;
+  }
+
+  /**
    * 意图状态：**不可见 ⇒ 强制关**（会话显式也不能打开）；否则显式开关优先，
    * 再跟随工作区默认（可见性 + 每工作区默认 + 项目三态）。
+   *
+   * 宿主注入能力是运行基线：恒为启用，任何默认 / 显式关闭都视为无效。
    */
   function desiredEnabled(record: SessionRecord, name: string): boolean {
+    if (record.hostInjected.has(name)) return true;
     const capability = record.capabilities.get(name);
     if (capability !== undefined && !capability.visible) return false;
     const explicit = record.explicit.get(name);
@@ -626,6 +656,8 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
    */
   async function ensureShadow(record: SessionRecord, name: string, viaProject: boolean): Promise<ShadowResult> {
     if (disposed) return { ok: false, errors: ["skill session registry disposed"] };
+    // 宿主注入能力不可关闭：即使调用方构造了同名的默认/显式关闭，也不注册 shadow。
+    if (record.hostInjected.has(name)) return { ok: false, errors: [HOST_INJECTED_REASON] };
     const existing = record.shadows.get(name) ?? record.projectShadows.get(name);
     // 幂等分支：已有 shadow（含项目默认驱动）时只需桶归位，无需再读目录。
     if (existing !== undefined) {
@@ -645,6 +677,11 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
       } catch {
         meta = undefined;
       }
+    }
+    // read-before-shadow 已确认是宿主注入 ⇒ 不注册 shadow（含创建路径的默认投影）。
+    if (meta?.hostInjected === true) {
+      record.hostInjected.add(name);
+      return { ok: false, errors: [HOST_INJECTED_REASON] };
     }
     const result = registerShadowCore(record, name, viaProject);
     if (!result.ok) return result;
@@ -821,11 +858,13 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
     await hydrateExplicit(record);
     const registry = deps.registry;
     if (registry === undefined) return { ok: true };
+    // 宿主注入能力是运行基线：从默认关闭名单里剔除（兼容历史遗留的关闭记录）。
+    const hostNames = await hostInjectedOf(record);
     // v21.2：默认快照在**会话创建时冻结**（首次投影）。之后全局默认 / 可见性 /
     // 项目覆盖变化不再影响本会话（只写配置、只影响新会话）；这里直接复用快照。
     let disabled: string[];
     if (record.defaultsFrozen) {
-      disabled = [...record.projectDefaults];
+      disabled = [...record.projectDefaults].filter((name) => !hostNames.has(name));
     } else {
       // v21：禁用名单 = 旧有效默认关闭名单 ∪ 可见性 / 每工作区默认关掉的名字。
       // 后者可能不在任何默认名单里（mode/selected、workspaces[ws].defaultEnabled=false），
@@ -837,6 +876,7 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
       record.capabilities = new Map(capabilities);
       disabled = [];
       for (const name of namesToResolve) {
+        if (hostNames.has(name)) continue;
         const capability = capabilities.get(name);
         const isDisabled = capability !== undefined ? !capability.effectiveDefaultEnabled : legacyDisabled.includes(name);
         if (isDisabled) disabled.push(name);
@@ -1053,6 +1093,14 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
     await withQueue(record, async () => {
       const sessionId = typeof record.agent?.id === "string" ? record.agent.id : undefined;
       for (const [name, enabled] of [...record.explicit.entries()]) {
+        // 宿主注入能力不能被显式关闭：清掉历史遗留的显式记录并跳过投影。
+        if (record.hostInjected.has(name)) {
+          record.explicit.delete(name);
+          if (sessionId !== undefined && deps.state !== undefined) {
+            await deps.state.setSkill(sessionId, name, undefined, metaOf(record));
+          }
+          continue;
+        }
         // v21：不可见能力的显式覆盖**保留但不生效**（契约 §2.3）；不投影 shadow，
         // 也不当作"已删除"清掉，恢复可见后重新生效。
         if (invisibleOf(record, name)) continue;
@@ -1086,7 +1134,10 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
     const sessionId = typeof record.agent?.id === "string" ? record.agent.id : undefined;
     if (api === undefined || deps.state === undefined || sessionId === undefined) return;
     await deps.state.ready();
-    const entries = Object.entries(deps.state.skills(sessionId)).map(([name, enabled]) => ({ name, enabled }));
+    const hostNames = await hostInjectedOf(record);
+    const entries = Object.entries(deps.state.skills(sessionId))
+      .filter(([name]) => !hostNames.has(name))
+      .map(([name, enabled]) => ({ name, enabled }));
     if (entries.length === 0) return;
     const result = await api.setEnabledBatch({ sessionId, entries });
     const failed = result.outcomes.filter((outcome) => outcome.ok !== true).length;
@@ -1107,7 +1158,8 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
     if (record === undefined) return;
     return (async () => {
       await hydrateExplicit(record);
-      const disabled = await effectiveDisabledOf(record.cwd);
+      const hostNames = await hostInjectedOf(record);
+      const disabled = (await effectiveDisabledOf(record.cwd)).filter((name) => !hostNames.has(name));
       record.projectDefaults = new Set(disabled);
       if (disabled.length > 0) {
         const result = await runApply(record, 0, disabled);
@@ -1154,7 +1206,9 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
       // v21.2：live session 用创建时冻结的默认三层快照（不再读新配置）；冷会话
       // （无 live agent）仍按当前配置投影，下次 resume 时在创建路径重新冻结。
       const defaults = record?.skillDefaults ?? (await defaultsOf(cwd));
-      const effectiveDisabled = effectiveDisabledSetOf(defaults);
+      // 宿主注入能力不吃默认关闭 / 可见性：先取名字集合，再把它们从关闭名单剔除。
+      const hostNames = record !== undefined ? await hostInjectedOf(record) : new Set<string>();
+      const effectiveDisabled = new Set([...effectiveDisabledSetOf(defaults)].filter((name) => !hostNames.has(name)));
       // 冷会话（agent 已释放）没有 record，但面板仍应显示落盘快照而不是默认全开。
       let persisted: Readonly<Record<string, boolean>> = {};
       // 只有「派生继承会话」的快照是"缺席即关闭"；派生继承工作区没有快照，
@@ -1261,6 +1315,7 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
       const workspaceView = workspaceCwd !== undefined;
       let hiddenCount = 0;
       const visibleRows = toggleable.filter((row) => {
+        if (row.hostInjected === true) return true;
         const capability = capabilities.get(row.name);
         if (workspaceView && capability !== undefined && !capability.visible) {
           hiddenCount += 1;
@@ -1295,12 +1350,13 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
         // v21：可见性 + 每工作区默认（覆盖旧 flags 的 effectiveDefaultEnabled，
         // 否则工作区默认开关会显示成"跟随兜底全局默认"）。
         const capability = capabilities.get(row.name);
+        const hostRow = row.hostInjected === true;
         const flags = skillDefaultFlags(defaults, row.name);
         return {
           ...row,
           // v20.1 B2：默认态四列（全局 / 项目 / 有效），前后端共用同一口径。
           ...flags,
-          ...(capability !== undefined
+          ...(capability !== undefined && !hostRow
             ? {
                 effectiveDefaultEnabled: capability.effectiveDefaultEnabled,
                 visibilityMode: capability.visibilityMode,
@@ -1314,9 +1370,11 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
                 ...(!capability.visible ? { disabledByVisibility: true, enabledInSession: false } : {}),
               }
             : {}),
-          enabledInSession,
-          canToggleInSession: record !== undefined || deps.state !== undefined,
-          ...(record === undefined && deps.state !== undefined ? { activationPending: true } : {}),
+          // 宿主注入 = 运行基线：恒启用、不可切换、不吃可见性 / 落盘显式开关。
+          ...(hostRow ? { hostInjected: true as const } : {}),
+          enabledInSession: hostRow ? true : enabledInSession,
+          canToggleInSession: hostRow ? false : record !== undefined || deps.state !== undefined,
+          ...(hostRow ? {} : record === undefined && deps.state !== undefined ? { activationPending: true } : {}),
         };
       });
       return { skills: views, hiddenCount };
@@ -1330,6 +1388,24 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
       if (name.length === 0) return { ok: false, errors: ["skill name is required"] };
 
       const record = find(sessionId);
+      if (record?.hostInjected.has(name) === true) {
+        return { ok: false, errors: [HOST_INJECTED_REASON] };
+      }
+      // 宿主注入能力（随包 / 宿主预设 / 官方插件）只读展示，任何作用域都不接受开关。
+      if (deps.registry !== undefined) {
+        try {
+          const verdict = await deps.registry.inspectName(name, {
+            ...(record?.cwd !== undefined ? { cwd: record.cwd } : {}),
+            sessionId,
+          });
+          if (verdict?.row?.hostInjected === true) {
+            if (record !== undefined) record.hostInjected.add(name);
+            return { ok: false, errors: [HOST_INJECTED_REASON] };
+          }
+        } catch {
+          /* registry 暂不可用：交给下面的常规路径（默认不会关闭宿主能力） */
+        }
+      }
       if (record === undefined) {
         // 冷会话（teammate 已结束）：没有 live agent ctx，无法注册 shadow；
         // 先落盘，等下次 restore / resume 时由 applyPersistedExplicit 应用。
@@ -1421,19 +1497,34 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
       if (wanted.size === 0) return { ok: true, errors: [], outcomes: [] };
 
       const record = find(sessionId);
+      if (record !== undefined) await hostInjectedOf(record);
       if (record === undefined) {
         if (deps.state === undefined) {
           return { ok: false, errors: [`session not found: ${sessionId}`], outcomes: [] };
         }
         await deps.state.ready();
         const writes: Record<string, boolean | undefined> = {};
-        for (const [name, enabled] of wanted) writes[name] = enabled;
+        const outcomes: SessionSkillBatchOutcome[] = [];
+        for (const [name, enabled] of wanted) {
+          // 冷会话也可能命中宿主注入技能（registry 无 agent 时按 global 视图判定）。
+          let host = false;
+          if (deps.registry !== undefined) {
+            try {
+              const verdict = await deps.registry.inspectName(name, { sessionId });
+              host = verdict?.row?.hostInjected === true;
+            } catch {
+              host = false;
+            }
+          }
+          if (host) {
+            outcomes.push({ name, ok: false, errors: [HOST_INJECTED_REASON] });
+            continue;
+          }
+          writes[name] = enabled;
+          outcomes.push({ name, ok: true });
+        }
         if (Object.keys(writes).length > 0) await deps.state.setToggles(sessionId, "skills", writes);
-        return {
-          ok: true,
-          errors: [],
-          outcomes: [...wanted.keys()].map((name) => ({ name, ok: true })),
-        };
+        return { ok: true, errors: [], outcomes };
       }
       const skills = skillsOf(record);
       if (typeof skills?.register !== "function") {
@@ -1442,6 +1533,8 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
 
       return withQueue(record, async () => {
         await hydrateExplicit(record);
+        // 刷新宿主注入集合：即使 prepareShadows 失败，也能拦住宿主能力。
+        await hostInjectedOf(record);
         // v21.2：默认 fallback 用**会话冻结快照**（未缓存的名字一次补入）。
         const capabilityMap = await sessionCapabilitiesOf(record, [...wanted.keys()]);
         const registry = deps.registry;
@@ -1469,6 +1562,11 @@ export function createSkillSessionRegistry(ctx: any, deps: SkillSessionDeps = {}
         const disabledNames: string[] = [];
 
         for (const [name, enabled] of wanted) {
+          // 宿主注入能力只读展示：即使批量请求里带了它，也逐项明确失败。
+          if (record.hostInjected.has(name) || prepared?.rows.get(name)?.hostInjected === true) {
+            outcomes.set(name, { name, ok: false, errors: [HOST_INJECTED_REASON] });
+            continue;
+          }
           const capability = capabilityMap.get(name);
           // v21：不可见能力不能写会话开关（整批不因此失败；逐项给出业务失败）。
           if (capability !== undefined && !capability.visible) {

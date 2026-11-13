@@ -71,6 +71,8 @@ export interface RuntimeCapture {
     /** `high` = 调用方身份；`medium` = 注册栈兜底。 */
     confidence: "high" | "medium";
     signal: RuntimeSignal;
+    /** true = 注册方是宿主包（`@deepseek-ai/*`）：面板只读展示，不参与开关。 */
+    hostInjected?: boolean;
 }
 /** 运行时归属器。 */
 export interface RuntimeAttributor {

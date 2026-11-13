@@ -375,6 +375,11 @@ export function createSessionBulk(deps: SessionBulkDeps): SessionBulk {
         sessionId: input.sessionId,
       });
       for (const view of runtime?.servers ?? []) {
+        // 宿主注入实例 = 运行基线：批量动作不碰（只读展示）。
+        if (view.hostInjected === true) {
+          stat.skipped += 1;
+          continue;
+        }
         // 与配置条目同名时以配置条目为准（与 manager.runtime / Jev 枚举同口径）。
         if (configured.has(view.serverName)) continue;
         const current = typeof view.enabledInSession === "boolean" ? view.enabledInSession : view.disabledInProject !== true;
@@ -427,6 +432,10 @@ export function createSessionBulk(deps: SessionBulkDeps): SessionBulk {
     const units: string[] = [];
     const desired = input.action === "enable";
     for (const unit of view?.units ?? []) {
+      if (unit.hostInjected === true) {
+        stat.skipped += 1;
+        continue;
+      }
       if (input.action === "reset") {
         if (unit.explicit === true) units.push(unit.unit);
         continue;

@@ -46,6 +46,7 @@ import { useWorkspaceLabel } from "./composer-common.js";
 import { JEV_CONFIG_CHANGED_EVENT } from "./jev-panel.js";
 import { aggregateMounts, MOUNT_LABEL, type MountInfo } from "./mcp-common.js";
 import { PromptTab, usePromptTabData } from "./prompt-tab.js";
+import { HOST_INJECTED_LABEL, HOST_INJECTED_REASON } from "../shared/host-injected.js";
 
 // ---------------------------------------------------------------------------
 // 图标（内联 SVG，颜色走 currentColor）
@@ -168,7 +169,7 @@ export interface CapabilitySnapshot {
 }
 
 /** 卡片底部的来源标签配色（项目蓝 / 全局绿 / 内置琥珀 / 插件紫 / 预设灰 / 外部橙 / 未识别琥珀）。 */
-type TagTone = "project" | "global" | "bundled" | "plugin" | "preset" | "external" | "unattributed";
+type TagTone = "project" | "global" | "bundled" | "plugin" | "preset" | "external" | "unattributed" | "host";
 
 export interface SkillRow {
   id: string;
@@ -182,6 +183,8 @@ export interface SkillRow {
   channel?: string;
   /** true = 宿主 registry 注入行（来源标签 + 渠道小标签，内容只读但可在会话启停）。 */
   injected?: boolean;
+  /** true = 宿主注入（`@deepseek-ai/*` / 宿主预设 / 随包）：只读，不可在会话开关。 */
+  hostInjected?: boolean;
   enabled: boolean;
   disabled: boolean;
   meta?: string;
@@ -202,6 +205,8 @@ export interface McpRow {
   writeKind: "project" | "server";
   /** restrict 无法生效的外部实例（按会话注入）。 */
   locked: boolean;
+  /** true = 宿主注入实例：只读展示，不可在会话开关。 */
+  hostInjected?: boolean;
   /** 插件展示名（v13 R4：第二枚标签；缺省 = 无插件来源）。 */
   channel?: string;
   /** true = 命名空间合成行（详情/卡片可加「合成」说明）。 */
@@ -237,6 +242,8 @@ export interface ToolRow {
   defaultEnabled: boolean;
   /** 不可开关原因（正常缺省）。 */
   lockedReason?: string;
+  /** true = 宿主注入单元：只读展示，不可在会话开关。 */
+  hostInjected?: boolean;
 }
 
 export type Row = SkillRow | McpRow | ToolRow;
@@ -263,6 +270,7 @@ function sourceIsProject(source: string): boolean {
  *   - 磁盘行仍是 项目 / 全局（只读兼容根加「只读」后缀）。
  */
 function skillTag(skill: ClientSkillSummary): string {
+  if (skill.hostInjected === true) return HOST_INJECTED_LABEL;
   if (skill.injected === true) {
     return skill.origin === "bundled" ? "内置" : skill.origin === "preset" ? "预设" : "插件";
   }
@@ -271,6 +279,7 @@ function skillTag(skill: ClientSkillSummary): string {
 
 /** 技能卡片来源标签的配色。 */
 function skillTone(skill: ClientSkillSummary): TagTone {
+  if (skill.hostInjected === true) return "host";
   if (skill.injected === true) {
     return skill.origin === "bundled" ? "bundled" : skill.origin === "preset" ? "preset" : "plugin";
   }
@@ -1134,6 +1143,7 @@ const RANK_REASON_TEXT: Record<string, string> = {
   "hard-disabled": "该能力已在配置中禁用",
   "not-restrictable": "不可在当前对话关闭",
   "not-toggleable": "当前会话无法切换该能力",
+  "host-injected": "宿主注入 · 仅展示，不可开关",
   shadowed: "被同名能力覆盖",
   "no-answer": "未获得评分",
 };
@@ -1154,6 +1164,8 @@ function isCheckedItem(item: JevRankItem, manual: Record<string, boolean>, thres
  * 回落（注入行缺 `source` 时只显示 kind，不猜来源）。
  */
 function rankSourceTag(item: JevRankItem): { label: string; tone: TagTone } | undefined {
+  // 宿主注入：优先标「宿主」（能力决策里仍展示，但不可选）。
+  if (item.hostInjected === true) return { label: HOST_INJECTED_LABEL, tone: "host" };
   // Tools 行名称就是插件名，再挂一枚来源标签会重复（结果行只有 `插件` + `N 个工具`）。
   // origin / channel 仍写进数据供诊断与未来复用。
   if (item.kind === "tool") return undefined;
@@ -1775,7 +1787,12 @@ function DecisionPanel(props: DecisionPanelProps) {
               const srcTag = rankSourceTag(item);
               // FINDING-04：Tools 行的工具数已由 `N 个工具` 标签表达，说明列不再重复数量；
               // 改成帧 08 的口径（说明「插件注入 + 以插件整体计分」）。宿主原文留在 title。
-              const descText = item.kind === "tool" ? "插件注入 · 能力决策以插件整体计分" : item.description;
+              const descText =
+                item.kind === "tool"
+                  ? item.hostInjected === true
+                    ? "宿主注入 · 只读展示"
+                    : "插件注入 · 能力决策以插件整体计分"
+                  : item.description;
               return (
                 <li
                   key={item.id}
@@ -1913,7 +1930,8 @@ export function buildSkillRows(snapshot: CapabilitySnapshot, pending: Record<str
   });
   return unique.map((skill) => {
     const id = `skill:${skill.name}`;
-    const canToggle = skill.canToggleInSession !== false;
+    const hostInjected = skill.hostInjected === true;
+    const canToggle = !hostInjected && skill.canToggleInSession !== false;
     const pendingActivation = skill.activationPending === true;
     return {
       id,
@@ -1923,10 +1941,17 @@ export function buildSkillRows(snapshot: CapabilitySnapshot, pending: Record<str
       tag: skillTag(skill),
       tone: skillTone(skill),
       ...(skill.injected === true ? { injected: true } : {}),
+      ...(hostInjected ? { hostInjected: true } : {}),
       ...(skill.injected === true && skill.channel !== undefined && skill.channel.length > 0 ? { channel: skill.channel } : {}),
-      enabled: pending[id] ?? skillEnabled(skill),
+      enabled: hostInjected ? true : (pending[id] ?? skillEnabled(skill)),
       disabled: !canToggle,
-      ...(pendingActivation ? { meta: "改动待激活生效" } : canToggle ? {} : { meta: "会话未激活" }),
+      ...(hostInjected
+        ? { meta: "宿主注入 · 不可关闭" }
+        : pendingActivation
+          ? { meta: "改动待激活生效" }
+          : canToggle
+            ? {}
+            : { meta: "会话未激活" }),
     };
   });
 }
@@ -1964,12 +1989,15 @@ export function buildMcpRows(snapshot: CapabilitySnapshot, pending: Record<strin
     const id = `mcp:external:${server.serverName}`;
     // v13 R4 三态：有插件展示名 → `插件` + channel 第二枚标签；
     // 命名空间合成但无映射 → `未识别`（琥珀）；其余 → `外部注入`。
+    // 宿主注入单独标「宿主」并锁定（运行基线，所有工作区默认需要）。
+    const hostInjected = server.hostInjected === true;
     const hasChannel = typeof server.channel === "string" && server.channel.length > 0;
     const synthesized = server.synthesized === true || server.origin === "namespace";
-    const tag = hasChannel ? "插件" : synthesized ? "未识别" : "外部注入";
-    const tone: TagTone = hasChannel ? "plugin" : synthesized ? "unattributed" : "external";
-    const meta =
-      server.restrictable !== true
+    const tag = hostInjected ? HOST_INJECTED_LABEL : hasChannel ? "插件" : synthesized ? "未识别" : "外部注入";
+    const tone: TagTone = hostInjected ? "host" : hasChannel ? "plugin" : synthesized ? "unattributed" : "external";
+    const meta = hostInjected
+      ? "宿主注入 · 不可关闭"
+      : server.restrictable !== true
         ? "不可在当前对话关闭"
         : hasChannel
           ? server.tools.length > 0
@@ -1989,12 +2017,13 @@ export function buildMcpRows(snapshot: CapabilitySnapshot, pending: Record<strin
       tag,
       tone,
       meta,
-      enabled: pending[id] ?? externalEnabled(server),
-      disabled: server.restrictable !== true,
-      dot: server.restrictable ? "mounted" : "none",
+      enabled: hostInjected ? true : (pending[id] ?? externalEnabled(server)),
+      disabled: hostInjected || server.restrictable !== true,
+      dot: hostInjected ? "mounted" : server.restrictable ? "mounted" : "none",
       target: server.serverName,
       writeKind: "server",
-      locked: server.restrictable !== true,
+      locked: hostInjected || server.restrictable !== true,
+      ...(hostInjected ? { hostInjected: true } : {}),
       ...(hasChannel ? { channel: server.channel as string } : {}),
       ...(synthesized ? { synthesized: true } : {}),
     });
@@ -2009,33 +2038,35 @@ export function buildMcpRows(snapshot: CapabilitySnapshot, pending: Record<strin
 export function buildToolRows(snapshot: CapabilitySnapshot, pending: Record<string, boolean>): ToolRow[] {
   const rows = snapshot.tools.map((unit) => {
     const id = `tool:${unit.unit}`;
+    const hostInjected = unit.hostInjected === true;
     const unattributed = unit.kind === "unattributed";
-    const locked = unit.lockedReason !== undefined;
+    const locked = hostInjected || unit.lockedReason !== undefined;
     const toolCount = unit.toolCount;
     const defaultEnabled = unit.defaultEnabled ?? unit.enabledInSession ?? true;
     return {
       id,
       kind: "tool" as const,
       name: unit.name,
-      tag: unattributed ? "未识别" : "插件",
-      tone: (unattributed ? "unattributed" : "plugin") as TagTone,
-      description: `${toolCount} 个工具 · ${unattributed ? "来源未识别" : "插件注入"}`,
+      tag: hostInjected ? HOST_INJECTED_LABEL : unattributed ? "未识别" : "插件",
+      tone: (hostInjected ? "host" : unattributed ? "unattributed" : "plugin") as TagTone,
+      description: `${toolCount} 个工具 · ${hostInjected ? "宿主注入" : unattributed ? "来源未识别" : "插件注入"}`,
       meta: `${toolCount} 个工具`,
       // 首屏 = 本会话生效值（会话覆盖 ?? 全局默认）。adapter 已归一；旧宿主/夹具
       // 缺新字段时按旧 `enabledInSession` 再按默认开启回落。
-      enabled: pending[id] ?? unit.enabled ?? unit.enabledInSession ?? unit.defaultEnabled ?? true,
+      enabled: hostInjected ? true : (pending[id] ?? unit.enabled ?? unit.enabledInSession ?? unit.defaultEnabled ?? true),
       disabled: locked,
       unit: unit.unit,
       explicit: unit.explicit === true,
       defaultEnabled,
-      ...(locked ? { lockedReason: unit.lockedReason } : {}),
+      ...(hostInjected ? { hostInjected: true } : {}),
+      ...(locked ? { lockedReason: hostInjected ? HOST_INJECTED_REASON : unit.lockedReason } : {}),
     };
   });
-  // 已识别插件按展示名排序，来源未识别恒排最后（UX v1.8 §5.4）。
+  // 宿主单元恒排最前，其余已识别插件按展示名排序，来源未识别恒排最后（UX v1.8 §5.4）。
   return rows.sort((a, b) => {
-    const aUn = a.tone === "unattributed" ? 1 : 0;
-    const bUn = b.tone === "unattributed" ? 1 : 0;
-    if (aUn !== bUn) return aUn - bUn;
+    const rank = (row: ToolRow): number => (row.hostInjected === true ? 0 : row.tone === "unattributed" ? 2 : 1);
+    const diff = rank(a) - rank(b);
+    if (diff !== 0) return diff;
     return a.name.localeCompare(b.name);
   });
 }

@@ -306,7 +306,9 @@ export async function enumerateCapabilities(options: {
     // 宿主 list 已过滤 shadow stub / 双向不可调用；这里防御性再过滤一次。
     if (row.shadowStub === true) continue;
     if (!row.invocation.modelInvocable && !row.invocation.userInvocable) continue;
-    const applicable = !(live && row.canToggleInSession === false);
+    const hostInjected = row.hostInjected === true;
+    // 宿主注入（随包 / 宿主预设 / 官方插件）= 运行基线：仍展示（不可选）。
+    const applicable = !hostInjected && !(live && row.canToggleInSession === false);
     // 注入技能（origin/channel/provider）与磁盘技能在评分/应用上完全一致，
     // 只有来源展示字段不同：source 映射为 "external"（不是项目级能力）。
     const injected = row.injected === true;
@@ -330,7 +332,8 @@ export async function enumerateCapabilities(options: {
       if (typeof row.provider === "string" && row.provider.length > 0) capability.provider = row.provider;
       if (row.contentReadOnly === true) capability.contentReadOnly = true;
     }
-    if (!applicable) capability.reason = "not-toggleable";
+    if (hostInjected) capability.hostInjected = true;
+    if (!applicable) capability.reason = hostInjected ? "host-injected" : "not-toggleable";
     add(capability);
   }
 
@@ -386,7 +389,9 @@ export async function enumerateCapabilities(options: {
       if (configuredServerNames.has(view.serverName)) continue;
       const defaultEnabled = view.disabledInProject !== true;
       const enabledInSession = typeof view.enabledInSession === "boolean" ? view.enabledInSession : defaultEnabled;
-      const applicable = view.restrictable === true;
+      // 宿主注入实例：运行基线，仍展示但不可选。
+      const hostInjected = view.hostInjected === true;
+      const applicable = !hostInjected && view.restrictable === true;
       const capability: JevCapability = {
         id: capabilityId(`mcp:server:${view.serverName}`),
         kind: "mcp",
@@ -407,7 +412,8 @@ export async function enumerateCapabilities(options: {
         mcpExplicitToggle: explicitToggleOf(enabledInSession, view.disabledInProject),
         write: { type: "mcp", target: view.serverName, targetKind: "server", serverName: view.serverName },
       };
-      if (!applicable) capability.reason = "not-restrictable";
+      if (hostInjected) capability.hostInjected = true;
+      if (!applicable) capability.reason = hostInjected ? "host-injected" : "not-restrictable";
       // 外部实例直接用它已发现的工具（mcp.runtime 的 view.tools）。
       const tools = normalizeTools(view.tools);
       if (tools !== undefined) capability.tools = tools;
@@ -434,12 +440,14 @@ export async function enumerateCapabilities(options: {
     }
     for (const unit of toolsView?.units ?? []) {
       if (unit.kind === "unattributed") continue;
+      // 宿主注入单元：运行基线，仍展示但不可选。
+      const hostInjected = unit.hostInjected === true;
       // 两层语义（task-20 §4）：候选 = 本会话 **effective 启用**的插件
       // （`enabled = 会话覆盖 ?? 全局默认`）。全局默认关闭 / 本会话已关的单元
       // **不参与评分与应用**，因此 Jev 无法把它们重新打开（只收窄不扩权）。
       const effective = typeof unit.enabled === "boolean" ? unit.enabled : unit.enabledInSession;
       if (effective !== true) continue;
-      const applicable = unit.lockedReason === undefined;
+      const applicable = !hostInjected && unit.lockedReason === undefined;
       const capability: JevCapability = {
         id: capabilityId(`tool:plugin:${unit.unit}`),
         kind: "tool",
@@ -467,7 +475,8 @@ export async function enumerateCapabilities(options: {
         toolsExplicitToggle: unit.explicit ? true : undefined,
         write: { type: "tools", unit: unit.unit, unitName: unit.name },
       };
-      if (!applicable) capability.reason = "not-restrictable";
+      if (hostInjected) capability.hostInjected = true;
+      if (!applicable) capability.reason = hostInjected ? "host-injected" : "not-restrictable";
       add(capability);
     }
   }

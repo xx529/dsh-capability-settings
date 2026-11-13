@@ -180,6 +180,15 @@ export function apply(ctx: any, config: Config = {}) {
   // overrides 与 loader 互相依赖（loader 要 sets、切换要 reload），所以在
   // 组合根处包一层：loader 拿原身（只读），对外暴露的 service.overrides 是
   // 带 reload 侧效应的包装。
+  /**
+   * 宿主注入能力写路径守卫（延迟绑定：overrides 先建，各域管理器后建）。
+   *
+   * 由 overrides 的 `toggle` / `globalToggle` / `globalToggleMany` / `setVisibility`
+   * 在真正写盘前调用；返回 true ⇒ 拒绝写入（只读展示、所有工作区默认需要）。
+   */
+  const hostKeyGuardRef: {
+    current?: (domain: "skills" | "mcp" | "tools", key: string, cwd?: string) => Promise<boolean>;
+  } = {};
   const overridesRaw = createOverridesManager({
     dshHome: config.dshHome,
     // v21：Tools 兜底全局默认 = 旧 `tools-global.json` ∪ 全局文件 `tools`。
@@ -187,6 +196,7 @@ export function apply(ctx: any, config: Config = {}) {
       await toolsGlobal.ready();
       return toolsGlobal.disabled();
     },
+    isHostKey: (domain, key, cwd) => hostKeyGuardRef.current?.(domain, key, cwd) ?? false,
   });
   // 会话级开关的持久化存储：MCP loader 与 Skills 会话注册表**共用同一实例**
   // （见 session-state.ts）。两个域各自读-改-写同一文件会互相覆盖，所以必须
@@ -354,6 +364,16 @@ export function apply(ctx: any, config: Config = {}) {
     const skills: SkillSummaryView[] = [];
     for (const row of annotated) {
       const capability = capabilities.get(row.name);
+      // 宿主注入 = 运行基线：恒可见、恒启用，不吃可见性 / 项目默认。
+      if (row.hostInjected === true) {
+        skills.push({
+          ...row,
+          disabledInProject: false,
+          effectiveDefaultEnabled: true,
+          ...(workspaceView ? { visibleInWorkspace: true } : {}),
+        });
+        continue;
+      }
       if (workspaceView && capability !== undefined && !capability.visible) {
         hiddenCount += 1;
         continue; // 工作区视图不展示不可见技能
@@ -401,6 +421,47 @@ export function apply(ctx: any, config: Config = {}) {
     agentsHome: config.agentsHome,
     logger: ctx.logger,
   });
+  /** 运行时注入的 mcp-client（cordis 注册表 fiber + loader 条目；只读）。 */
+  const scanInjectedMcp = () =>
+    [...scanInjectedMcpInstances(ctx, (namespace) => attribution.resolveNamespace(namespace)).values()];
+  const mcpManager = createMcpManager(
+    // tools 访问器用于反推"运行时注入"的 MCP 实例（见 manager.runtime）。
+    {
+      dshHome: config.dshHome,
+      agentsHome: config.agentsHome,
+      usage: mcpUsage,
+      tools: () => ctx.get?.("tools"),
+      scanInjected: scanInjectedMcp,
+    },
+    loader,
+    overrides,
+    imports,
+  );
+  // 宿主注入能力的写路径守卫：全局默认 / 项目默认 / 可见性一律拒绝。
+  hostKeyGuardRef.current = async (domain, key, cwd) => {
+    if (domain === "skills") {
+      try {
+        const verdict = await skillsRegistry.inspectName(key, { ...(cwd !== undefined ? { cwd } : {}) });
+        return verdict?.row?.hostInjected === true;
+      } catch {
+        return false;
+      }
+    }
+    if (domain === "tools") {
+      try {
+        const view = await tools.list();
+        return view.units.some((unit) => unit.unit === key && unit.hostInjected === true);
+      } catch {
+        return false;
+      }
+    }
+    try {
+      const view = await mcpManager.runtime({ ...(cwd !== undefined ? { cwd } : {}) });
+      return view.servers.some((server) => server.serverName === key && server.hostInjected === true);
+    } catch {
+      return false;
+    }
+  };
   const service: CapabilityPanelService = {
     // 用对象展开装配（不原地改 skillsBase）：三个覆盖方法都基于 `diskList`
     // 这一份原始磁盘 list，避免装配顺序造成的自引用/无限递归。
@@ -416,22 +477,7 @@ export function apply(ctx: any, config: Config = {}) {
       setSessionEnabled: skillSessions.setEnabled,
       setSessionEnabledBatch: skillSessions.setEnabledBatch,
     },
-    mcp: createMcpManager(
-      // tools 访问器用于反推"运行时注入"的 MCP 实例（见 manager.runtime）。
-      {
-        dshHome: config.dshHome,
-        agentsHome: config.agentsHome,
-        usage: mcpUsage,
-        tools: () => ctx.get?.("tools"),
-        // 运行时注入的 mcp-client：cordis 注册表里的动态 fiber + loader 条目
-        // （见 mcp/runtime.ts）。只读，用来给出「来源插件」与桥接层配置。
-        scanInjected: () =>
-        [...scanInjectedMcpInstances(ctx, (namespace) => attribution.resolveNamespace(namespace)).values()],
-      },
-      loader,
-      overrides,
-      imports,
-    ),
+    mcp: mcpManager,
     overrides,
     prompt,
     jev,
