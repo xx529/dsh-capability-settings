@@ -1570,6 +1570,20 @@ function McpExternalDetail({
             命名空间 <span className="skp-strip-strong">{namespace}</span>
           </span>
           <span className="skp-strip-right">
+            {/* v26.3：外部注入实例同样支持「可见范围」编辑（与配置条目同一入口；
+                以前只在「元数据」弹层里，用户找不到）。宿主注入的实例保持只读。 */}
+            {scope === "global" && server.hostInjected !== true && (
+              <VisibilityEditControl
+                api={panelApi}
+                domain="mcp"
+                capabilityKey={server.serverName}
+                name={server.serverName}
+                entry={visibilityEntry}
+                workspaces={projects}
+                globalOff={globalOff}
+                onSaved={onVisibilitySaved}
+              />
+            )}
             <button type="button" className="skp-strip-meta-btn" onClick={() => setUsageOpen(true)}>
               使用记录
             </button>
@@ -1628,6 +1642,7 @@ function McpExternalDetail({
               )}
               {scope === "global" && server.hostInjected !== true && (
                 <VisibilityDetailFields
+                  summaryOnly
                   api={panelApi}
                   domain="mcp"
                   capabilityKey={server.serverName}
