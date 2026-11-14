@@ -746,6 +746,15 @@ export interface ClientToolsUnit extends ClientVisibilityFields {
    * 列表里恒为启用。缺省 = false（旧宿主按第三方插件处理）。
    */
   hostInjected?: boolean;
+  /**
+   * true = 该**全部**工具都注册在 Agent 预设作用域（agent scope）。
+   *
+   * 桌面 / Web 组合的核心工具由预设按会话挂载；`tools.restrict` 只作用于继承层，
+   * 无法屏蔽 agent 自己的注册 ⇒ 这类单元只读。
+   */
+  agentScoped?: boolean;
+  /** 该单元里 agent-scope 工具的数量（混合单元 = 部分工具随预设固定）。 */
+  agentToolCount?: number;
   /** 该单元当前可见的全部工具。 */
   tools: ClientToolBrief[];
   /** 工具数（卡片描述与 Jev toolCount 用）。 */

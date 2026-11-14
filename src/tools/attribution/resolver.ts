@@ -30,6 +30,7 @@ import { attributeMcpNamespace, attributeTool, isHostBuiltinTool } from "../../s
 import type { McpNamespaceRule } from "../../shared/plugin-attribution.js";
 import { isHostOwnedPackage } from "../../shared/host-injected.js";
 import { createAttributionCache, type AttributionCache } from "./cache.js";
+import { emptyHostToolCatalog, loadHostToolCatalog, type HostToolCatalog } from "./host-catalog.js";
 import { createRuntimeAttributor, type RuntimeAttributor } from "./runtime.js";
 import {
   DEFAULT_SCAN_LIMITS,
@@ -75,6 +76,11 @@ export interface AttributionResolver {
    * 同步方法：只读内存映射，不触发 IO，不阻塞 `tools.list`。
    */
   packageDescription?(packageId: string): string | undefined;
+  /**
+   * 宿主随包工具目录（`tool-catalog.md`）解析出的宿主包；未加载 / 有歧义 / 读不到
+   * 返回 undefined（调用方回落人工表）。同步、不触发扫描。
+   */
+  hostUnitOf?(toolName: string): string | undefined;
   /** 后台扫描/缓存是否仍在进行（`tools.list.attributionSettling`）。 */
   settling(): boolean;
   /** 强制刷新（按需全量重扫；诊断/测试）。 */
@@ -197,6 +203,9 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
   };
   const unknownNames = new Set<string>();
   const conflictWarned = new Set<string>();
+  /** 宿主随包工具目录（name → 宿主包）；读不到为 empty，不阻塞任何路径。 */
+  let hostCatalog: HostToolCatalog = emptyHostToolCatalog();
+  let hostCatalogLoaded = false;
 
   /** 重建字面量/命名空间索引（扫描结果/缓存 hydrate 共用）。 */
   function applyScans(scans: Map<string, PackageScanResult>): void {
@@ -380,6 +389,17 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
     void cache?.save({ interceptors: [...suspects] });
   }
 
+  /** 懒加载宿主工具目录（同步、幂等；force=true 时重读，用于晚就绪的包解析器）。 */
+  function ensureHostCatalog(force = false): void {
+    if (hostCatalogLoaded && !force) return;
+    hostCatalogLoaded = true;
+    try {
+      hostCatalog = loadHostToolCatalog(ctx, logger);
+    } catch {
+      hostCatalog = emptyHostToolCatalog();
+    }
+  }
+
   /** 挂 T0（幂等、同步、零文件 IO；tools 服务可用即可挂）。 */
   function attachT0(): void {
     if (!enabled || disposed || t0Attached) return;
@@ -532,6 +552,8 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
   async function refresh(options: { force?: boolean } = {}): Promise<void> {
     if (!enabled || disposed) return;
     const force = options.force === true;
+    // 宿主包解析器可能晚于本插件就绪：每次刷新顺手重读一次工具目录（读失败空表）。
+    ensureHostCatalog(true);
     settling = true;
     try {
       // 第三方插件包与宿主包分开发现，但都进入同一个扫描/缓存索引：
@@ -807,11 +829,27 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
   // 供测试/诊断读取各层命中（additive 方法，非契约必需）。
   (resolveTool as unknown as { counters?: () => ResolverCounters }).counters = () => countersSnapshot();
 
-  // 组合根：T0 尽早挂（tools 服务可用即挂；扫描/缓存仍惰性）。
+  // 组合根：T0 尽早挂（tools 服务可用即挂；扫描/缓存仍惰性）；工具目录同步读一次
+  // （失败为空表，panel 回落人工表，后续 refresh 再重试）。
+  ensureHostCatalog();
   attachT0Early();
 
   return {
     resolveTool,
+    hostUnitOf(toolName: string): string | undefined {
+      if (typeof toolName !== "string" || toolName.length === 0) return undefined;
+      ensureHostCatalog();
+      // 首次构造时宿主包解析器可能尚未就绪：目录为空时顺便启动后台初始化，
+      // 下一轮 refresh 会强制重读（`tools.list` 带 attributionSettling 收敛）。
+      if (hostCatalog.tools.size === 0) {
+        try {
+          ensureStarted();
+        } catch {
+          /* 初始化失败不影响回落人工表 */
+        }
+      }
+      return hostCatalog.tools.get(toolName);
+    },
     resolveNamespace,
     packageDescription(packageId: string): string | undefined {
       if (typeof packageId !== "string" || packageId.length === 0) return undefined;

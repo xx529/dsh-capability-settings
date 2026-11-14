@@ -1160,6 +1160,10 @@ function toToolsList(value: unknown): ClientToolsList {
         ...toVisibilityFields(unit),
         name: typeof unit.name === "string" && unit.name.length > 0 ? unit.name : unit.unit,
         ...(unit.hostInjected === true ? { hostInjected: true } : {}),
+        ...(unit.agentScoped === true ? { agentScoped: true } : {}),
+        ...(typeof unit.agentToolCount === "number" && Number.isFinite(unit.agentToolCount) && unit.agentToolCount > 0
+          ? { agentToolCount: unit.agentToolCount }
+          : {}),
         kind: unit.kind === "unattributed" ? "unattributed" : "plugin",
         tools,
         toolCount:

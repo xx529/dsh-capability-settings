@@ -907,3 +907,31 @@ attribution?: {
 - 现状：`src/shared/plugin-attribution.ts`（TOOL_RULES/MCP_NAMESPACE_RULES/内建清单）、`src/tools/{manager,types,global-state,restrict}.ts`、`src/session-state.ts`、`src/mcp/runtime.ts`、`src/index.ts`
 - 关联方案：`docs/architecture/v13-implementation.md`（§2 域边界 / §3 持久化 / §4 归属 / §5 Tools 开关 / §9.4 面板）
 - 宿主：`@deepseek-ai/cordis`（emit/registry/Fiber）、`@deepseek-ai/cordis-plugin-loader`（entries/baseUrl）、`@deepseek-ai/dsh-tools`（register/tools/change）、`@deepseek-ai/dsh-scope`（ScopedLayers.effect）、`@deepseek-ai/dsh-app-boot`（pluginPackages.packageOf）、`@deepseek-ai/dsh-tool-cordis`（packageDir 消费范例）
+
+## 18. v26.2 修订：Agent 作用域工具与宿主工具目录
+
+**问题（用户反馈）**：dsh-context 能看到 `bash` / `read` / `edit` / `job_output` /
+`todo_write` / `skill` / `ask_user_question`，本插件面板"没识别出来"。
+
+**根因是采集点，不是归属算法**：`dsh-web-app` 的 `cordis.patch.yml` 把根层工具行
+逐条 `disabled: true`（注释写明这些模型可见工具改由 preset 拥有），
+`presets/standard.patch.yml` 再把它们挂进 `@deepseek-ai/dsh-agent-preset` 的
+子插件树——即 **agent scope**。面板只读全局 `ctx.root.get("tools").schemas()`，
+所以这些工具根本不在枚举结果里；`tools.restrict` 又只作用于继承层
+（viewing scope 自己的注册不受限），因此它们天然不可按会话关闭。
+
+**修订**
+
+| 层 | 位置 | 行为 |
+|---|---|---|
+| 采集 | `src/tools/manager.ts` `agentToolSchemas` + `enumerateGlobalTools` | 对 `agents.list()` 的前 20 个 live agent 调 `tools.schemas(agent)`，只补全局层没有的名字；`names`（restrict 可用集合）仍只含全局层名字。 |
+| 只读 | `ToolsUnitView.agentScoped` / `AGENT_SCOPED_REASON` | 全部工具都是 agent-scope 的单元 → `lockedReason=AGENT_SCOPED_REASON`，恒启用；会话 / 全局默认 / 可见性 / 批量开关 / Jev 均可按 `lockedReason` 自动跳过。 |
+| 归属 | `src/tools/attribution/host-catalog.ts` | 解析宿主随包的 `@deepseek-ai/dsh/docs/tool-catalog.md` 的 `Tool Package Map`（宿主生成，权威 name → package）。唯一命中直接用；同名多包（`bash` / `pwsh`）记 ambiguous，回落人工表（`src/shared/plugin-attribution.ts`）。 |
+
+**边界**
+
+- 没有 live agent 时只能看到全局层（预设工具随会话创建才注册）；
+- 多个 live 会话使用不同 preset 时按工具名取并集；同名工具实际包以会话自己的
+  preset 为准，面板的包名是"至少一个会话如此"的并集口径；
+- 混合单元（同一包既有全局又有预设工具）仍可开关，deny 只含全局层名字，
+  预设副本会继续可见——面板以 `agentToolCount` 暴露数量，不宣称完全关闭。

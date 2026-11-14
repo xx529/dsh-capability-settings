@@ -50,6 +50,11 @@ export interface AttributionResolver {
      * 同步方法：只读内存映射，不触发 IO，不阻塞 `tools.list`。
      */
     packageDescription?(packageId: string): string | undefined;
+    /**
+     * 宿主随包工具目录（`tool-catalog.md`）解析出的宿主包；未加载 / 有歧义 / 读不到
+     * 返回 undefined（调用方回落人工表）。同步、不触发扫描。
+     */
+    hostUnitOf?(toolName: string): string | undefined;
     /** 后台扫描/缓存是否仍在进行（`tools.list.attributionSettling`）。 */
     settling(): boolean;
     /** 强制刷新（按需全量重扫；诊断/测试）。 */

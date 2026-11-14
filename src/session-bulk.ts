@@ -432,7 +432,7 @@ export function createSessionBulk(deps: SessionBulkDeps): SessionBulk {
     const units: string[] = [];
     const desired = input.action === "enable";
     for (const unit of view?.units ?? []) {
-      if (unit.hostInjected === true) {
+      if (unit.hostInjected === true || unit.agentScoped === true) {
         stat.skipped += 1;
         continue;
       }

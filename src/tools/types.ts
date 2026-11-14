@@ -18,6 +18,9 @@ export const UNATTRIBUTED_UNIT = "__unattributed__";
 /** 未识别来源单元的展示名（卡片标题 / 详情标题）。 */
 export const UNATTRIBUTED_DISPLAY = "来源未识别";
 
+/** 「Agent 预设注入」单元的只读原因（v26.2；定义在共享模块，客户端同源）。 */
+export { AGENT_SCOPED_REASON } from "../shared/host-injected.js";
+
 /** 持久化键前缀：`plugin:<unit>`（本批唯一使用的前缀）。 */
 export const PLUGIN_UNIT_KEY_PREFIX = "plugin:";
 
@@ -44,6 +47,8 @@ export interface HostToolBrief {
   name: string;
   /** 一句话说明（截断到 200 码点，与 Jev 的 DESCRIPTION_LIMIT 同口径）。 */
   description?: string;
+  /** true = 该工具只在该会话的 Agent 预设作用域里注册（agent scope）。 */
+  agentScoped?: boolean;
 }
 
 /** 一个插件单元在视图里的样子（卡片 / 面板行共用）。 */
@@ -67,6 +72,15 @@ export interface ToolsUnitView {
    * 一律不可写；列表里恒为启用。宿主包包含 DSH 自带的 bundle 与官方插件。
    */
   hostInjected?: boolean;
+  /**
+   * true = 该**全部**工具都注册在 Agent 预设作用域（agent scope）里。
+   *
+   * 桌面 / Web 组合下内建工具都由预设按会话挂载；`tools.restrict` 只作用于
+   * 继承层，无法屏蔽 agent 自己的注册 ⇒ 这类单元只读（{@link AGENT_SCOPED_REASON}）。
+   */
+  agentScoped?: boolean;
+  /** 该单元里 agent-scope 工具的数量（混合单元 = 部分工具随预设固定）。 */
+  agentToolCount?: number;
   /** plugin = 已识别插件；unattributed = 来源未识别。 */
   kind: "plugin" | "unattributed";
   /** 该单元当前可见的全部工具。 */
@@ -237,6 +251,8 @@ export type ToolsSetGlobalResult = { ok: true; applied: number } | { ok: false; 
 export interface ToolsInspectedTool {
   /** 完整工具名（`schemas()` 里的 `name`）。 */
   name: string;
+  /** true = 该工具仅在 Agent 预设作用域可见（只读，不可 restrict）。 */
+  agentScoped?: boolean;
   /** 完整说明（**不截断**，与 `tools.list` 的 200 码点不同：详情页要能读全）。 */
   description?: string;
   /**

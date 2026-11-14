@@ -191,6 +191,13 @@ const HOST_BUILTIN_EXACT: ReadonlySet<string> = new Set([
   "ask_user_question",
   // 工作区 / MCP 资源（宿主基础 bundle 的内建工具，不进 Tools 域）
   "create_worktree",
+  "exit_plan_mode",
+  "apply_patch",
+  "lsp",
+  "plugin_manager",
+  "plugin_market",
+  "propose_action",
+  "subagent_oar",
   "list_mcp_resources",
   "list_mcp_resource_templates",
   "read_mcp_resource",
@@ -215,6 +222,8 @@ const HOST_BUILTIN_PREFIXES: readonly string[] = [
   "terminal_",
   "team_task_",
   "cordis_inspect_",
+  "office_",
+  "stagehand_",
 ];
 
 /**
@@ -270,6 +279,20 @@ const HOST_BUILTIN_UNIT_RULES: readonly HostBuiltinUnitRule[] = [
   { match: "exact", pattern: "skill", unit: "@deepseek-ai/dsh-tool-skill" },
   { match: "exact", pattern: "todo_write", unit: "@deepseek-ai/dsh-tool-todo" },
   { match: "exact", pattern: "ask_user_question", unit: "@deepseek-ai/dsh-tool-ask-user" },
+  // 宿主随包工具目录（`docs/tool-catalog.md`）是权威来源；这里是目录不可用时的兜底。
+  { match: "exact", pattern: "present", unit: "@deepseek-ai/dsh-tool-present" },
+  { match: "exact", pattern: "working_directory", unit: "@deepseek-ai/dsh-tool-working-directory" },
+  { match: "exact", pattern: "load_workspace_dependencies", unit: "@deepseek-ai/dsh-tool-workspace-dependencies" },
+  { match: "exact", pattern: "create_worktree", unit: "@deepseek-ai/dsh-experimental-tool-worktree" },
+  { match: "exact", pattern: "str_replace_editor", unit: "@deepseek-ai/dsh-tool-str-replace-editor" },
+  { match: "exact", pattern: "exit_plan_mode", unit: "@deepseek-ai/dsh-plan-mode" },
+  { match: "exact", pattern: "apply_patch", unit: "@deepseek-ai/dsh-tool-fs" },
+  { match: "exact", pattern: "lsp", unit: "@deepseek-ai/dsh-tool-lsp" },
+  { match: "exact", pattern: "plugin_manager", unit: "@deepseek-ai/dsh-plugin-manager" },
+  { match: "exact", pattern: "plugin_market", unit: "@deepseek-ai/dsh-plugin-market" },
+  { match: "exact", pattern: "propose_action", unit: "@deepseek-ai/dsh-action-cards" },
+  { match: "exact", pattern: "subagent_oar", unit: "@deepseek-ai/dsh-experimental-tool-subagent-oar" },
+  { match: "exact", pattern: "run_code", unit: "@deepseek-ai/dsh-tool-executor-ptc" },
   { match: "exact", pattern: "subagent", unit: "@deepseek-ai/dsh-tool-subagent" },
   { match: "exact", pattern: "subagent_fork", unit: "@deepseek-ai/dsh-tool-subagent" },
   { match: "exact", pattern: "list_subagent_models", unit: "@deepseek-ai/dsh-tool-subagent" },
@@ -286,9 +309,15 @@ const HOST_BUILTIN_UNIT_RULES: readonly HostBuiltinUnitRule[] = [
   // 成组注册的宿主工具
   { match: "prefix", pattern: "job_", unit: "@deepseek-ai/dsh-tool-jobs" },
   { match: "prefix", pattern: "schedule_", unit: "@deepseek-ai/dsh-tool-schedule" },
-  { match: "prefix", pattern: "session_", unit: "@deepseek-ai/dsh-tool-session" },
+  { match: "prefix", pattern: "session_", unit: "@deepseek-ai/dsh-tool-session-query" },
   { match: "prefix", pattern: "terminal_", unit: "@deepseek-ai/dsh-tool-terminal" },
-  { match: "prefix", pattern: "team_task_", unit: "@deepseek-ai/dsh-experimental-tool-agent-team" },
+  { match: "prefix", pattern: "team_task_", unit: "@deepseek-ai/dsh-tool-agent-team" },
+  { match: "prefix", pattern: "office_", unit: "@deepseek-ai/dsh-tool-office" },
+  {
+    match: "prefix",
+    pattern: "stagehand_",
+    unit: "@deepseek-ai/dsh-experimental-browser-use-stagehand-native",
+  },
 ];
 
 /**

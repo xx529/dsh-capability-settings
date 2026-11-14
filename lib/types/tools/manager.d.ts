@@ -5,9 +5,10 @@
  *
  * 关键口径（不得偏离）：
  *
- *   - **枚举源唯一**：`ctx.root.get("tools").schemas()`（全局视图）。`restrict`
- *     只能屏蔽"继承层"的名字，而 agent 自身层注册的插件工具**枚举不到** ⇒
- *     不显示（不是显示后置灰，方案 §2.2 的规格修正）。
+ *   - **枚举源**：全局 `ctx.root.get("tools").schemas()`（继承层）+ live agent 的
+ *     `tools.schemas(agent)` 并集（v26.2：桌面 / Web 把核心工具改由 Agent 预设
+ *     按会话挂载，全局层看不到）。`restrict` 只能屏蔽继承层名字，agent 自身层
+ *     注册的工具只读展示（`agentScoped`），不产生 deny。
  *   - **一个插件 = 一个开关单元**：关闭 = 对该插件在本会话的全部可继承工具
  *     `tools.restrict({deny})`；deny 名单**每次重算**，持久化只存 `plugin:<unit>`。
  *   - **A4 未识别单元**：可开关、计入分母、不进 Jev 候选。

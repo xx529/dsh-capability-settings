@@ -26,6 +26,15 @@ export const HOST_INJECTED_LABEL = "宿主";
 /** 宿主注入能力的统一禁用原因（开关 tooltip / 后端业务错误共用）。 */
 export const HOST_INJECTED_REASON = "宿主注入的能力：仅展示，不能开关（所有工作区默认启用）";
 
+/**
+ * 「Agent 预设注入」单元的只读原因（Tools 域，v26.2）。
+ *
+ * 桌面 / Web 组合把内建工具改由 Agent 预设按会话挂载（agent scope）；宿主
+ * `tools.restrict` 只作用于继承层，viewing scope 自己的注册不受限，因此这类
+ * 工具**无法按会话关闭**，面板只读展示。
+ */
+export const AGENT_SCOPED_REASON = "Agent 预设注入的会话工具：随预设固定，不能按会话开关";
+
 /** 去空白并小写（npm 包名大小写不敏感），与 attribution 的归一化口径一致。 */
 function normalizeId(raw: string | undefined | null): string {
   return typeof raw === "string" ? raw.trim().toLowerCase() : "";

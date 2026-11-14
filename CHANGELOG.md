@@ -3,6 +3,37 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 新增
+
+- **Tools 域采集 Agent 预设注入的工具（桌面 / Web 组合的核心工具）**（反馈：dsh-context
+  能看到 `bash` / `read` / `edit` / `job_output` / `todo_write` / `skill` /
+  `ask_user_question` 等内建工具，本插件面板里却"没识别出来"）：根因**不是归属算法**，
+  是采集点——`dsh-web-app` 的 patch 把根层工具行逐条 `disabled: true`，核心工具改由
+  `presets/standard.patch.yml` 挂进 **agent scope**；面板只读全局
+  `ctx.root.get("tools").schemas()`，自然看不到。
+  - **采集**：新增 live agent 并集——`ctx.get("agents").list()` 的每个 agent 调
+    `tools.schemas(agent)`，只补全局层没有的名字（上限 20 个 agent；单 agent 失败
+    不影响其它）。无 live agent 时保持旧行为（只枚举全局层）。
+  - **只读语义**：宿主 `tools.restrict` 只作用于继承层，agent 自己的注册无法屏蔽
+    ⇒ 这些单元标记 `agentScoped`（UI 标签「预设」），`lockedReason` =
+    「Agent 预设注入的会话工具：随预设固定，不能按会话开关」；会话 / 全局默认 /
+    可见性 / 批量开关一律跳过，Jev 里展示但不可选。混合单元只把全局层名字放进
+    deny（agent 名字进 restrict 会直接报错）。
+  - **归属**：新增宿主随包工具目录解析（`@deepseek-ai/dsh/docs/tool-catalog.md`
+    的 `Tool Package Map`）作为宿主工具归属的权威来源——`present` /
+    `working_directory` / `load_workspace_dependencies` / `apply_patch` /
+    `exit_plan_mode` / `session_*` / `team_task_*` 等不再落 generic 或错包；
+    同一名字多包声明（如 `bash` 普通版 / persistent 版）不猜，回落人工表。
+    人工表同步修正 `session_*` → `dsh-tool-session-query`、`team_task_*` →
+    `dsh-tool-agent-team`，补齐 `present` / `working_directory` / `lsp` /
+    `plugin_manager` / `plugin_market` / `office_*` / `stagehand_*` 等兜底。
+  - 验证：新增 `node notes/verify/v26-agent-scope-tools.mjs` 7/7（目录解析 /
+    目录装载 / agent 并集归组 / 只读拒绝 / 无 agent 旧行为）；既有
+    `v14-attribution-*`、`host-injected`、`v13-tools-*` 与改动前基线一致（无新增
+    失败）；`pnpm typecheck`、`pnpm build` 通过。
+
 ## [1.18.12] - 2026-11-14
 
 ### 修复

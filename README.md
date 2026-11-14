@@ -501,7 +501,8 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
    也归 MCP，不进入 Tools）；
 2. 命中宿主内建清单（或宿主插件实例）→ **只读「宿主」单元**（v26 起展示，按
    宿主包分组：`edit/read/write` → `dsh-tool-fs`、`glob/grep`→`dsh-tool-fs-search`、
-   `bash` → `dsh-tool-bash-persistent`；其余内建工具归 `dsh-tool-builtins`。
+   `bash` → `dsh-tool-bash-persistent`；包名优先取宿主随包工具目录
+   `@deepseek-ai/dsh/docs/tool-catalog.md` 的 `Tool Package Map`，读不到才回落人工表）。
    这些单元恒启用、不可开关、不参与 `tools.restrict`；宿主不提供"危险等级"标注，
    清单由本插件自维护，**升级宿主版本后需复核**）。
    同一宿主插件包的**额外实例**不再需要手写清单：cordis patch 用 `config.toolName`
@@ -511,14 +512,20 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
    之前就注册好的实例工具用宿主 loader 条目的 `config.toolName` 兜底，统一并入
    该宿主包只读单元（与 `subagent` / `subagent_fork` / `list_subagent_models` 同组）；
 3. 命中插件映射表 → Tools 插件单元；
-4. 其余（非 mcp、非内建、无映射）→ 合并进唯一的 **「来源未识别」** 单元
+4. **Agent 预设注入的工具**（v26.2）：桌面 / Web 组合把核心工具改由
+   `presets/standard.patch.yml` 挂进 agent scope（`dsh-web-app` 的 patch 把根层
+   同名工具行逐条 `disabled: true`），全局 `tools.schemas()` **看不到**。面板从
+   live agent 的 `tools.schemas(agent)` 取并集补进来，归到对应宿主包，并标记为
+   **只读「预设」**（`agentScoped`）——`tools.restrict` 只作用于继承层，agent
+   自己的注册无法屏蔽，所以这些工具没有按会话开关；
+5. 其余（非 mcp、非内建、无映射）→ 合并进唯一的 **「来源未识别」** 单元
    （`未识别` 琥珀标签；可开关、计入分母，但**不进 Jev 候选**——它可能混入未来
    宿主新增的内建工具，让模型去"推荐关闭"风险高）。
 
 **归属自动发现（v14）：新增插件无需改表**
 
-宿主工具注册表没有"哪个插件注入"的字段，所以按四层自动发现插件归属，
-原硬编码映射表退化为**人工兜底与降级锚**（不再需要为新插件改表）：
+宿主工具注册表没有"哪个插件注入"的字段，所以按多层自动发现插件归属，
+硬编码映射表退化为**人工兜底与降级锚**（新增插件不需要改表）：
 
 1. **T0 运行时归属（调用方身份优先，主路径）**：tools 服务一可用就挂两个监听
    （早于第三方插件装载）——
@@ -550,12 +557,23 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
    「来源为自动推测，关闭前请核对下方工具清单」；推测单元仍可开关。
    仍无法归属 → **「来源未识别」**（不猜，不进 Jev 候选）。
 
+5. **宿主随包工具目录（v26.2，宿主工具的主路径）**：读
+   `@deepseek-ai/dsh/docs/tool-catalog.md` 的 `Tool Package Map`（宿主
+   `pnpm run gen-tool-catalog` 生成），`工具名 → 包名` 直接取权威值；同一名字
+   被多个包声明（如 `bash` 的普通版 / persistent 版）时不猜，回落人工表。
+6. **Agent 作用域并集（v26.2）**：`ctx.get("agents").list()` 的每个 live agent
+   调 `tools.schemas(agent)`，只补全局层没有的名字；这些工具按来源包的
+   `hostInjected` / `agentScoped` 规则只读展示。
+
 归属结果显示在 Tools / MCP 详情的「来源判定」：运行时捕获 / 包扫描 / 宿主声明 /
 人工映射 / 名字推测 / 命名空间 / 未识别（运行时捕获带「高置信」= 调用方身份，
-「中置信 + 推测」= 注册栈兜底；宿主声明 = 宿主 loader 条目的 `config.toolName`）；`tools.list.attributionSettling=true` 表示后台扫描未收敛
+「中置信 + 推测」= 注册栈兜底；宿主声明 = 宿主 loader 条目的 `config.toolName`；
+宿主工具目录命中也显示为「宿主内建」）；`tools.list.attributionSettling=true` 表示后台扫描未收敛
 （列表不阻塞，前端可延迟静默刷新一次）。**已知边界**：本插件挂监听之前注册的
-第三方工具（宿主工具有 loader 声明可兜底）、异步注册（身份过期 → 注册栈兜底）、
-包根不可得、扫描超时/多命中 → 逐层降级，最差等于改造前的「人工表 + 来源未识别」；`enableAutoAttribution: false` 可退回
+第三方工具（宿主工具有目录 / loader 声明可兜底）、异步注册（身份过期 → 注册栈兜底）、
+包根不可得、扫描超时/多命中 → 逐层降级，最差等于改造前的「人工表 + 来源未识别」；
+没有 live agent 时只能看到全局层工具（预设工具随会话创建才可见）；多个 live
+会话使用不同预设时按名字取并集（同名工具的实际包以会话自己的预设为准）；`enableAutoAttribution: false` 可退回
 纯人工表行为（不挂监听、不扫描、不写缓存）。
 
 > **为什么不是纯栈归属**：平台上有插件会包装 `tools.register` 做自己的工具来源

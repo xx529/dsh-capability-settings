@@ -47,7 +47,7 @@ import {
   workspaceOverrideOf,
   type WorkspaceOverrideState,
 } from "./visibility.js";
-import { HOST_INJECTED_LABEL, HOST_INJECTED_REASON } from "../shared/host-injected.js";
+import { AGENT_SCOPED_REASON, HOST_INJECTED_LABEL, HOST_INJECTED_REASON } from "../shared/host-injected.js";
 
 /** 详情标题右侧标签行的排版（与 mcp-panel 的 HEAD_TAGS_STYLE 同形）。 */
 const HEAD_TAGS_STYLE: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 6, flex: "none" };
@@ -63,14 +63,20 @@ function defaultEnabledOf(unit: ClientToolsUnit): boolean {
   return unit.defaultEnabled ?? unit.enabledInSession ?? true;
 }
 
+/** 只读单元：宿主注入（全局层）或 Agent 预设注入（agent scope，restrict 无效）。 */
+function isLockedUnit(unit: ClientToolsUnit): boolean {
+  return unit.hostInjected === true || unit.agentScoped === true;
+}
+
 /** 未识别单元的琥珀标签类（复用既有 warn 标签）。 */
 function unitTagClass(unit: ClientToolsUnit): string {
-  if (unit.hostInjected === true) return "skp-tag skp-tag-host";
+  if (unit.agentScoped === true || unit.hostInjected === true) return "skp-tag skp-tag-host";
   return unit.kind === "unattributed" ? "skp-tag skp-tag-warn" : "skp-tag skp-tag-plugin";
 }
 
 /** 单元来源标签文案（宿主 / 插件 / 未识别）。 */
 function unitTagLabel(unit: ClientToolsUnit): string {
+  if (unit.agentScoped === true) return "预设";
   if (unit.hostInjected === true) return HOST_INJECTED_LABEL;
   return unit.kind === "unattributed" ? "未识别" : "插件";
 }
@@ -81,9 +87,9 @@ function unitTagLabel(unit: ClientToolsUnit): string {
  */
 function sortUnits(units: ClientToolsUnit[]): ClientToolsUnit[] {
   return [
-    ...units.filter((unit) => unit.hostInjected === true),
-    ...units.filter((unit) => unit.hostInjected !== true && unit.kind !== "unattributed"),
-    ...units.filter((unit) => unit.hostInjected !== true && unit.kind === "unattributed"),
+    ...units.filter((unit) => isLockedUnit(unit)),
+    ...units.filter((unit) => !isLockedUnit(unit) && unit.kind !== "unattributed"),
+    ...units.filter((unit) => !isLockedUnit(unit) && unit.kind === "unattributed"),
   ];
 }
 
@@ -120,8 +126,8 @@ function attributionLabel(unit: ClientToolsUnit): string {
 
 /** true = 来源含推测成分（UI 加琥珀「推测」标识与核对提示）。 */
 function attributionIsSpeculative(unit: ClientToolsUnit): boolean {
-  // 宿主注入由包扫描/运行时身份命中：不展示「推测」标识。
-  if (unit.hostInjected === true) return false;
+  // 宿主注入 / Agent 预设注入由目录、包扫描或运行时身份命中：不展示「推测」标识。
+  if (unit.hostInjected === true || unit.agentScoped === true) return false;
   const attribution = unit.attribution;
   // 「运行时捕获」分两档：调用方身份（高置信）与注册栈兜底（中置信，标推测）。
   const runtimeFallback = attribution.matchedBy === "runtime" && attribution.confidence === "medium";
@@ -240,7 +246,7 @@ const ToolListRow = memo(function ToolListRow({
 }) {
   const locked = unit.lockedReason !== undefined;
   const visibilityMeta =
-    scope === "global" && unit.hostInjected !== true ? (
+    scope === "global" && !isLockedUnit(unit) ? (
       <VisibilityRowMeta
         entry={visibilityEntry}
         workspaces={projects}
@@ -302,11 +308,13 @@ const ToolListRow = memo(function ToolListRow({
           <span
             className={unitTagClass(unit)}
             title={
-              unit.hostInjected === true
-                ? HOST_INJECTED_REASON
-                : unit.kind === "unattributed"
-                  ? "来源未识别：不是宿主内置工具"
-                  : "插件运行时注册（非 MCP）"
+              unit.agentScoped === true
+                ? (unit.lockedReason ?? AGENT_SCOPED_REASON)
+                : unit.hostInjected === true
+                  ? HOST_INJECTED_REASON
+                  : unit.kind === "unattributed"
+                    ? "来源未识别：不是宿主内置工具"
+                    : "插件运行时注册（非 MCP）"
             }
           >
             {unitTagLabel(unit)}
@@ -410,7 +418,7 @@ export function ToolsView({
     visibilityEntryOf(visibilitySets, "tools", unit.unit);
   /** 兜底默认是否关闭：legacy `tools-global.json` 已并入行字段 defaultEnabled。 */
   const globalOffOf = (unit: ClientToolsUnit): boolean =>
-    unit.hostInjected === true ? false : !defaultEnabledOf(unit) || globalOverrides?.tools.includes(unit.unit) === true;
+    isLockedUnit(unit) ? false : !defaultEnabledOf(unit) || globalOverrides?.tools.includes(unit.unit) === true;
 
   const units = useMemo(() => sortUnits(data?.units ?? []), [data]);
   /** 工作区视图只渲染可见单元（宿主已过滤；这里防御旧宿主 / 脏数据）。 */
@@ -491,7 +499,7 @@ export function ToolsView({
   /** 当前行的开关勾选态与写路径（按作用域分派）。 */
   const switchStateOf = (unit: ClientToolsUnit) => {
     if (scope === "global") {
-      const invisible = unit.hostInjected === true ? false : isRowInvisible(unit, visibilityOf(unit), projects);
+      const invisible = isLockedUnit(unit) ? false : isRowInvisible(unit, visibilityOf(unit), projects);
       return { checked: defaultEnabledOf(unit), disabled: unit.lockedReason !== undefined || invisible, invisible };
     }
     const entry = visibilityOf(unit);
@@ -684,7 +692,16 @@ export function ToolsView({
                 <div className="skp-detail-head">
                   <h3 title={selected.name}>{selected.name}</h3>
                   <span style={HEAD_TAGS_STYLE}>
-                    <span className={unitTagClass(selected)} title={selected.hostInjected === true ? HOST_INJECTED_REASON : undefined}>
+                    <span
+                      className={unitTagClass(selected)}
+                      title={
+                        selected.agentScoped === true
+                          ? (selected.lockedReason ?? AGENT_SCOPED_REASON)
+                          : selected.hostInjected === true
+                            ? HOST_INJECTED_REASON
+                            : undefined
+                      }
+                    >
                       {unitTagLabel(selected)}
                     </span>
                     <span className="skp-tag skp-tag-channel" title={selected.attribution.packageName ?? selected.name}>
@@ -724,9 +741,11 @@ export function ToolsView({
                   {attributionSettling && <span className="skp-note">来源解析中…</span>}
                   <span className="skp-detail-meta-item">
                     <span className="skp-detail-meta-strong">注入方式：</span>
-                    {selected.hostInjected === true
-                      ? "宿主注入（@deepseek-ai/*，只读展示）"
-                      : "插件运行时注册的非 MCP 工具（不落盘）"}
+                    {selected.agentScoped === true
+                      ? "Agent 预设注入（agent scope，只读展示）"
+                      : selected.hostInjected === true
+                        ? "宿主注入（@deepseek-ai/*，只读展示）"
+                        : "插件运行时注册的非 MCP 工具（不落盘）"}
                   </span>
                 </div>
                 {attributionIsSpeculative(selected) && <p className="skp-note skp-note-warn">来源为推测，请核对工具清单</p>}
@@ -735,13 +754,15 @@ export function ToolsView({
                 )}
 
                 <div className="skp-note">
-                  {selected.hostInjected === true
-                    ? `工具数 ${selected.toolCount} · 宿主注入：所有工作区默认启用，仅展示，不能关闭`
-                    : `工具数 ${selected.toolCount} · 开关为插件级：关闭后该插件全部工具默认不可用（不改已有对话的显式覆盖）`}
+                  {selected.agentScoped === true
+                    ? `工具数 ${selected.toolCount} · Agent 预设注入：随会话预设固定，仅展示，不能按会话关闭`
+                    : selected.hostInjected === true
+                      ? `工具数 ${selected.toolCount} · 宿主注入：所有工作区默认启用，仅展示，不能关闭`
+                      : `工具数 ${selected.toolCount} · 开关为插件级：关闭后该插件全部工具默认不可用（不改已有对话的显式覆盖）`}
                 </div>
 
                 {/* v21：全局视图的可见性编辑（工作区视图 / 宿主注入不出现）。 */}
-                {scope === "global" && selected.hostInjected !== true && (
+                {scope === "global" && !isLockedUnit(selected) && (
                   <dl className="skp-detail-fields">
                     <VisibilityDetailFields
                       api={api}
