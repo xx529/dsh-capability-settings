@@ -935,3 +935,25 @@ attribution?: {
   preset 为准，面板的包名是"至少一个会话如此"的并集口径；
 - 混合单元（同一包既有全局又有预设工具）仍可开关，deny 只含全局层名字，
   预设副本会继续可见——面板以 `agentToolCount` 暴露数量，不宣称完全关闭。
+
+## 19. v26.4 修订：`tools/change` 监听顺序与缓存版本 3
+
+**问题**：`dsh-remote` 的 21 个 `rw_*` 工具被归到 `dsh-trace-inspect`（运行时
+捕获 · 高置信）。根因不在栈解析：`dsh-trace-inspect` 的第二个条目
+`desc-inject`（`inject: ["tools","agents"]`）在自己的 `tools/change` 监听里为每个
+live agent 逐个 `agent.ctx.tools.register()` 影子工具，并因此读取 tools 服务。
+它的监听注册**早于**本插件，于是 T0 在事件派发时看到的「本宏任务最近一次
+`internal/get` 身份」已经是 `dsh-trace-inspect`，刚插入全局层的 `rw_*` 被记到了
+它名下。
+
+**修订**
+
+| 位置 | 行为 |
+|---|---|
+| `src/tools/attribution/runtime.ts` `attach` | `tools/change` 监听改用 `{ prepend: true }`：先取 schemas 差集并配对身份，其它监听随后运行；拦截器触发的嵌套 `tools/change` 因差集已清空不再捕获。 |
+| `src/tools/attribution/types.ts` / `cache.ts` | 缓存版本 2 → 3；v2 的 `runtime` 逐条校验，与人工表冲突的条目丢弃、不冲突的保留（`packages` 保留；`interceptors` 不跨版本复用）。被污染的 `rw_* → dsh-trace-inspect` 因此跨重启失效，回落到人工表 `rw_` → `dsh-remote`。 |
+| `src/tools/attribution/resolver.ts` `onCapture` / `resolveTool` | **人工表优先**：自动捕获与人工表包不一致时不写入 runtime 缓存；`resolveTool` 遇到（旧缓存/极端时序带来的）冲突条目时返回人工表结果并标 `conflictsWithTable`。未知插件（无表规则）仍由运行时学习。 |
+
+**边界**：prepend 只解决「同一同步派发里被其它监听抢先读服务」的污染；若注册
+发生在异步回调（身份过期）仍走注册栈兜底；`dsh-trace-inspect` 本人注册的影子
+工具在 agent scope，不改变全局 schemas 差集，因此不会被误记为全局工具。

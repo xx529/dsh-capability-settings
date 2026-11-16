@@ -464,7 +464,15 @@ export function createRuntimeAttributor(deps: RuntimeAttributorDeps): RuntimeAtt
       logger?.warn?.(`capability-panel: 无法挂载 internal/get 身份监听（${String(error)}），本次运行只用注册栈兜底`);
     }
     try {
-      const offChange = deps.ctx?.on?.("tools/change", capture);
+      // **prepend**：必须在其它插件的 `tools/change` 监听之前捕获。
+      //
+      // 本机 `dsh-trace-inspect/desc-inject` 会在自己的 `tools/change` 监听里
+      // 逐个 `agent.ctx.tools.register()` 影子工具（带描述装饰），这会读一次
+      // tools 服务；若它先于我们运行，`access` 身份就被它覆盖，刚注册的全局
+      // 工具（如 dsh-remote 的 `rw_*`）会被误记到拦截器名下。prepend 让我们
+      // 在事件派发的第一棒同步取差集，之后嵌套的 tools/change 因差集已清空而
+      // 不再产生错误归属。
+      const offChange = deps.ctx?.on?.("tools/change", capture, { prepend: true });
       if (typeof offChange === "function") offs.push(offChange);
       else disabled = true;
     } catch (error) {

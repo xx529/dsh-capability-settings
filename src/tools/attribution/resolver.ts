@@ -415,6 +415,14 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
       onSuspect: addSuspect,
       onCapture: (capture): void => {
         for (const tool of capture.tools) {
+          // 人工表是已核对的已知插件锚：自动捕获与它冲突时不写内存/缓存，
+          // 防止一次监听顺序污染（如 dsh-trace-inspect/desc-inject）把
+          // `rw_*` 永久记到拦截器名下。未知插件（无表规则）照常学习。
+          const table = tableToolAttribution(tool);
+          if (table?.packageId !== undefined && table.packageId !== capture.packageName) {
+            noteConflict(tool, table.packageId, capture.packageName);
+            continue;
+          }
           runtime.set(tool, {
             package: capture.packageName,
             at: capture.at,
@@ -645,11 +653,11 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
   }
 
   /** 记录 T1 与 T4 冲突（warn 一次/tool）。 */
-  function noteConflict(toolName: string, tablePackage: string, literalPackage: string): void {
+  function noteConflict(toolName: string, tablePackage: string, automaticPackage: string): void {
     if (conflictWarned.has(toolName)) return;
     conflictWarned.add(toolName);
     logger?.warn?.(
-      `capability-panel: 工具 ${toolName} 的包扫描归属（${literalPackage}）与人工表（${tablePackage}）冲突，采用更高优先级的扫描结果`,
+      `capability-panel: 工具 ${toolName} 的自动归属（${automaticPackage}）与人工表（${tablePackage}）冲突，采用人工表（已核对的已知插件）`,
     );
   }
 
@@ -660,7 +668,14 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
     ensureStarted();
     // `mcp__*` 恒归 MCP 域：工具归属只用 runtime 的非 MCP 部分（防御性二次过滤）。
     const captured = parseMcpToolName(toolName) === undefined ? runtime.get(toolName) : undefined;
+    const table = tableToolAttribution(toolName);
     if (captured !== undefined) {
+      // 防御：旧缓存 / 极端时序仍可能带进污染条目——与人工表冲突时以人工表为准。
+      if (table?.packageId !== undefined && table.packageId !== captured.package) {
+        counters.tableHits += 1;
+        noteConflict(toolName, table.packageId, captured.package);
+        return { ...table, conflictsWithTable: true };
+      }
       counters.runtimeHits += 1;
       return {
         packageId: captured.package,
@@ -685,7 +700,6 @@ export function createAttributionResolver(deps: AttributionResolverDeps): Attrib
         hostInjected: true,
       };
     }
-    const table = tableToolAttribution(toolName);
     const owners = literalOwners.get(toolName);
     if (owners !== undefined && owners.size === 1) {
       const packageId = [...owners][0] as string;

@@ -3,6 +3,30 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 修复
+
+- **`rw_*` 等工具被误归到 `dsh-trace-inspect`**（反馈：`dsh-remote` 的 21 个
+  `rw_*` 工具在 Tools 详情里显示成 `dsh-trace-inspect`，来源判定「运行时捕获 ·
+  高置信」）：`dsh-trace-inspect` 的第二个宿主条目 `desc-inject` 会在自己的
+  `tools/change` 监听里逐个 `agent.ctx.tools.register()` 影子工具（描述装饰），
+  这个监听**先于**本插件注册；它读 tools 服务时覆盖了 T0 的「本宏任务最近一次
+  服务访问」身份，于是刚注册的全局 `rw_*` 被记到了 `dsh-trace-inspect` 名下。
+  - T0 的 `tools/change` 捕获监听改为 `{ prepend: true }`：先于所有其它监听取
+    schemas 差集并配对身份，之后拦截器的嵌套 `tools/change` 因差集已清空不再
+    产生错误归属。
+  - **人工表优先于冲突的自动归属**：T0 捕获（含旧缓存条目）与人工表不一致时
+    不写缓存/不生效，`resolveTool` 返回人工表结果并标 `conflictsWithTable`
+    （详情「与人工映射冲突」）；未知插件（无表规则）不受影响。
+  - 归属缓存版本 2 → 3：`packages` 扫描结果继续复用；v2 的 `runtime` 逐条校验，
+    与人工表冲突的条目（如已被污染的 `rw_* → dsh-trace-inspect`）丢弃、不冲突的
+    保留（新插件已学到的归属不丢）；`interceptors` 不跨版本复用。`rw_*` 回落到
+    人工表前缀规则 → `dsh-remote`。
+  - 验证：新增 `node notes/verify/v26-attribution-interceptor.mjs` 3/3（prepend
+    监听顺序 / v2→v3 缓存迁移 / 污染缓存失效后 rw_connect → dsh-remote）；
+    `v14-attribution-*` 全部通过；`pnpm typecheck`、`pnpm build` 通过。
+
 ## [1.19.1] - 2026-11-14
 
 ### 修复

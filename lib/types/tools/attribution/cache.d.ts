@@ -2,11 +2,12 @@
  * 归属扫描缓存 `<dshHome>/dsh-capability-settings/tool-attribution.json`（D7/§8）。
  *
  * 契约：
- *   - `version: 2`；`hostVersion` / `selfPackage` 作为整体失效键；
- *   - **v1 → v2 迁移**：保留 `packages` 扫描结果（省一次全量重扫），丢弃
- *     `runtime` 与 `interceptors` —— v1 的运行时归属可能被 `register` 拦截器
- *     污染（本机 `dsh-context` 案例），不能跨进程复用；`interceptors` 是 v2
- *     新增的交叉校验结果；
+ *   - `version: 3`；`hostVersion` / `selfPackage` 作为整体失效键；
+ *   - **< v3 迁移**：保留 `packages` 扫描结果（省一次全量重扫）；`v1` 的
+ *     `runtime` 全丢（`dsh-context` 包装 `register` 污染）；`v2` 的 `runtime`
+ *     逐条校验——与人工表冲突的条目视为被监听拦截器污染（本机
+ *     `dsh-trace-inspect/desc-inject`）丢弃，不冲突的保留；`interceptors` 不跨
+ *     版本复用；
  *   - 单包失效键 = 包名 + version + mtimeMs（宿主版本变化时整份失效）；
  *   - 原子写（0600 / 目录 0700）+ `withFileLock` 锁内**读盘合并**（多实例/多次
  *     写入不丢别人的包结果）+ 进程内串行队列；

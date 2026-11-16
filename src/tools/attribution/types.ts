@@ -115,13 +115,13 @@ export interface CachedRuntimeAttribution {
 }
 
 /**
- * 缓存文件 v2 形状（`<dshHome>/.../tool-attribution.json`）。
+ * 缓存文件 v3 形状（`<dshHome>/.../tool-attribution.json`）。
  *
- * v1 → v2 迁移：**保留** `packages` 扫描结果，**丢弃** `runtime`（v1 的运行时
- * 归属可能被 `register` 拦截器污染，不能跨进程复用）与 `interceptors`。
+ * < v3 迁移：**保留** `packages` 扫描结果；v1 的 `runtime` 全丢，v2 只丢弃与人工表
+ * 冲突的条目（与人工表一致/无表规则的保留）；`interceptors` 不跨版本复用。
  */
 export interface ToolAttributionCacheFile {
-  version: 2;
+  version: 3;
   generatedAt: number;
   /** 宿主版本指纹（`@deepseek-ai/dsh-tools` 的 package version；探测不到为 "unknown"）。 */
   hostVersion: string;
@@ -136,8 +136,15 @@ export interface ToolAttributionCacheFile {
   interceptors?: string[];
 }
 
-/** 当前缓存版本。 */
-export const TOOL_ATTRIBUTION_CACHE_VERSION = 2;
+/**
+ * 当前缓存版本。
+ *
+ * v3：丢弃 <3 的 `runtime` / `interceptors`。v2 的运行时归属可能被
+ * `tools/change` 监听顺序污染（本机 `dsh-trace-inspect/desc-inject` 在监听里
+ * 读 tools 服务，导致 `rw_*` 被记到 trace-inspect 名下）；`packages` 扫描结果
+ * 继续复用，省一次全量扫描。
+ */
+export const TOOL_ATTRIBUTION_CACHE_VERSION = 3;
 
 /** 缓存文件名。 */
 export const TOOL_ATTRIBUTION_CACHE_FILE = "tool-attribution.json";
