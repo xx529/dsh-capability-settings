@@ -3,6 +3,44 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.19.3] - 2026-11-17
+
+### 修复
+
+- **新会话首轮请求拿到全量能力（首屏关掉的 MCP / 插件工具在第一条消息里仍然可用）**
+  （用户反馈：开启「智能体团队协作」后新建会话，首屏能力弹层里的关闭项仿佛全部失效、
+  模型直接拿到全量工具）。真实会话日志复现：`session-80db96a5…` 首轮
+  `request/header` 共 204 个工具，其中 107 个属于已关闭的 MCP server、figma_* /
+  dsh_im_* 属于已关闭插件；`session-4afba6aa…`（**没开 Team**）同样是 227 个工具
+  ——与 Team 无关，Team 只额外注册 4 个 `team_task_*` 工具和一段 policy 提示词。
+  - 根因：会话首屏（hero）改的会话开关只落盘（此时还没有 live agent），恢复发生在
+    `agent/created`。宿主该事件是 serial 且被 await 的（`AgentFactory.create` 等监听器
+    收敛后才放行首轮请求），但 Tools / MCP 两个域的监听器是 fire-and-forget
+    （`mountAgent` 返回 void + `scheduleRefresh` / `scheduleRemount` 异步队列），
+    首轮请求抢在 `tools.restrict({ deny })` 挂上之前组装；Skills 域因为明确返回
+    Promise 被 await，所以技能通常已生效（同一会话提示词里只有 7 个技能）。
+  - `src/tools/manager.ts`：`mountAgent` 返回首轮收敛的 Promise（catch 后返回，
+    失败只 warn，绝不把异常抛回 agent 创建路径），`agent/created` 监听器随之被宿主
+    await。
+  - `src/mcp/loader.ts`：新增 `primeSessionRestrictions`——`agent/created` 时只做首轮
+    必需且不依赖子进程的两步（`hydrateToggles` + `resolveSessionPlan` →
+    `applyRestrictions` + `applyPromptShadows`），项目层 MCP 挂载仍留在后台
+    `remount`（不能 await：会起子进程、把首轮卡数秒）。`primeHandoff` 让紧随其后的
+    第一次 `remount` **不先解除** prime 刚挂上的 restrict / 指令段影子（否则首轮窗口
+    又会出现空档），由末尾的幂等收敛处理；非 prime 世代的 remount 行为不变。
+  - 语义边界：项目层 MCP server 的**挂载**仍是异步的（首轮可能还没连上，与旧行为
+    一致）；变化的是「关闭项对全局 / 外部实例的 restrict 与指令段遮蔽」在首轮请求前
+    就已生效。降级路径不变：`restrict` 不可用 / 名单为空 / agent 创建失败都只 warn。
+  - 验证：`pnpm typecheck`、`pnpm build` 通过；新增
+    `node notes/verify/first-step-apply.mjs`（`VERIFY_BUILD=$PWD/lib`）8/8——
+    同一脚本在旧实现上 4/8（M1/M2/T1/T2 首轮前 restrict 缺失），修复后 8/8；
+    既有 `loader-behavior` 81/81、`mcp-connectivity-baseline`、`probe-connectivity`
+    12/12、`v26-agent-scope-tools` 7/7、`api-two-instances` 17/17、
+    `session-restore`、`host-injected`、`v26-attribution-interceptor` 4/4 全过；
+    `v13-tools-global` 7/10、`v13-regression` 6/8、`v13-session-bulk` 12/13、
+    `v13-mcp-namespace` 7/8、`v24-dynamic-derive` 7/9、`v21-visibility` 报错与
+    改动前的 `notes/verify/out-*` 基线完全一致（既有夹具漂移，不是本次回归）。
+
 ## [1.19.2] - 2026-11-16
 
 ### 修复

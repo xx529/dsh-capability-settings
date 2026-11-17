@@ -146,6 +146,12 @@ interface SessionRecord {
    * 会话级开关）仍复用该基线，只重新读取**配置文件条目**本身。
    */
   defaultsSnapshot?: SessionDefaultsSnapshot;
+  /**
+   * 首轮前 {@link primeSessionRestrictions} 已按本代 plan 应用过 restrict / 指令段
+   * 影子：紧接着的第一次 remount 不要先解除它们（否则宿主组装首轮请求的瞬间会
+   * 出现"能力又变全量"的空窗），交给末尾的幂等收敛处理。
+   */
+  primeHandoff?: boolean;
   /** 降级 warning 只打一次，避免 tools/change 刷新刷屏。 */
   restrictWarned?: boolean;
   /**
@@ -1224,10 +1230,18 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
       // 先恢复落盘的会话级开关（resolveSessionPlan 要读 sessionToggles）；
       // 幂等，失败降级为"无显式覆盖"（跟随项目默认），不阻断挂载。
       await hydrateToggles(typeof record.agent?.id === "string" ? record.agent.id : undefined, metaOf(record));
-      disposeRestrictions(record);
-      // 先解除上一代的指令段遮蔽：本代若挂载同名项目层 server，桥接层要在
-      // **同一** agent 作用域注册同名段，残留影子段会让它重复注册失败。
-      disposePromptShadows(record);
+      // 首轮前 prime 刚按同一份 plan 应用过 restrict / 指令段影子：此处**不能**
+      // 先解除它们——宿主可能正在组装首轮请求，短暂空窗会让首轮工具表/提示词
+      // 又回到全量。交接后直接进入挂载，末尾由 applyRestrictions /
+      // applyPromptShadows 幂等收敛（名单不变时结构不动）。
+      const handoff = record.primeHandoff === true;
+      record.primeHandoff = false;
+      if (!handoff) {
+        disposeRestrictions(record);
+        // 先解除上一代的指令段遮蔽：本代若挂载同名项目层 server，桥接层要在
+        // **同一** agent 作用域注册同名段，残留影子段会让它重复注册失败。
+        disposePromptShadows(record);
+      }
       const previous = record.fibers;
       record.fibers = [];
       // 上一代 fiber 并联释放（各 fiber 独立，失败不挡住新一代挂载）。
@@ -1275,8 +1289,50 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
     return run;
   }
 
-  /** 登记一个新 agent 并触发首轮挂载（跳过无 ctx/id 的 stub）。 */
-  function mountAgent(agent: any): void {
+  /**
+   * 首轮请求前的**快速收敛**（不等项目层 server 的进程挂载）。
+   *
+   * 背景：会话首屏（hero）改的会话开关只落盘（此时还没有 live agent），真正恢复
+   * 发生在 `agent/created`。宿主 `agent/created` 是 serial 且被 await 的（factory
+   * 在放行首轮请求前等监听器收敛），但 {@link remount} 要起项目层 MCP 子进程，
+   * 不能整体 await（会把首轮卡数秒，与「写路径不 await 重挂」同一个理由）。
+   * 所以这里只做首轮必需、且不依赖子进程的两步：
+   *
+   *   1. `hydrateToggles` + `resolveSessionPlan` 解出本会话要屏蔽的全局 / 外部实例；
+   *   2. `applyRestrictions` + `applyPromptShadows` 立即挂上 restrict 与指令段影子。
+   *
+   * 项目层挂载仍走后台的 {@link remount}（排在 prime 之后执行，不会与这里的
+   * restrict / 影子段交错）。失败只 warn：绝不能拖垮 agent 创建。
+   */
+  async function primeSessionRestrictions(record: SessionRecord): Promise<void> {
+    if (!enabled) return;
+    try {
+      await hydrateToggles(typeof record.agent?.id === "string" ? record.agent.id : undefined, metaOf(record));
+      const plan = await resolveSessionPlan(record.cwd, record.agent?.id, record.defaultsSnapshot);
+      record.defaultsSnapshot ??= plan.snapshot;
+      record.restrictTargets = plan.restrict;
+      applyRestrictions(record);
+      // 项目层此刻可能还没挂载：用「本代计划挂载」的 serverName 做排除，避免
+      // 影子段与随后挂载的项目层同名段抢注册（与 remount 的排除口径一致）。
+      applyPromptShadows(
+        record,
+        plan.session.map(({ key }) => sanitizeServerName(key)),
+      );
+      // 交给紧随其后的 remount：别先拆掉这里刚挂上的限制（见字段注释）。
+      record.primeHandoff = true;
+    } catch (error) {
+      logger.warn?.(`capability-panel: MCP 首轮前收敛失败（session ${record.agent?.id}）：${errMessage(error)}`);
+    }
+  }
+
+  /**
+   * 登记一个新 agent 并触发首轮挂载（跳过无 ctx/id 的 stub）。
+   *
+   * **返回首轮收敛的 Promise**（prime；不等待项目层子进程）：宿主会 await 它，
+   * 保证 `tools.restrict` 在首轮工具表组装前生效。项目层挂载排在 prime 之后
+   * 后台执行，创建路径不会等它。
+   */
+  function mountAgent(agent: any): Promise<void> | void {
     if (agent?.ctx === undefined || agent?.id === undefined) return;
     if (sessions.has(agent.id)) return;
     const cwd = typeof agent.session?.header?.cwd === "string" ? agent.session.header.cwd : undefined;
@@ -1298,9 +1354,18 @@ export function createMcpLoader(ctx: any, deps: McpLoaderDeps = {}): McpLoader {
     sessions.set(agent.id, record);
     // 资源清单过滤器与会话同生命周期（与 remount 解耦：监听器只注册一次）。
     installResourceListFilter(record);
-    scheduleRemount(record).catch((error) => {
+    // prime 与 remount 严格串行：remount 排在 prime 完成后执行，避免它的
+    // disposeRestrictions / disposePromptShadows 与 prime 的挂载交错。
+    const prime = primeSessionRestrictions(record);
+    const mount = record.queue.then(async () => {
+      await prime;
+      await remount(record);
+    });
+    record.queue = mount.catch(() => undefined);
+    mount.catch((error) => {
       logger.warn?.(`capability-panel: MCP mount sweep failed for session ${agent.id}: ${String(error)}`);
     });
+    return prime;
   }
 
   if (enabled) {

@@ -717,6 +717,12 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
     只影响当前对话、**按会话落盘**（宿主重启 / resume 后自动恢复）；项目条目
     按需挂载/卸载，全局与外部实例用 `tools.restrict` 屏蔽/恢复其工具。显式
     会话开关优先于默认。
+  - **首屏（hero）选的关闭项在第一轮请求前就生效**（v1.19.3）：此时还没有 live
+    agent，开关先落盘；agent 创建时 `agent/created` 监听器会先做「快速收敛」
+    （恢复落盘开关 → 算出屏蔽名单 → `tools.restrict` + 服务器指令段遮蔽），再在
+    后台挂载项目层条目。宿主会 await 该监听器后才组装首轮请求，所以新会话第一条
+    消息就看不到已关闭的 `mcp__*` 工具；项目层 server 的**连接**仍是异步的（与旧
+    行为一致）。
   - 行尾「默认」**不是启停**：配置条目的启用/禁用在该条目的详情状态按钮与
     编辑表单里。
 - **外部注入的 MCP 也能管理（配置只读 + 全局/工作区默认 + 当前对话开关）**：其它插件或 profile
@@ -1141,11 +1147,13 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   `effective = 会话覆盖 ?? 全局默认`：全局默认存 `tools-global.json`（能力面板写，
   写成功后**微任务扇出**所有 live agent 重算，不阻塞写 RPC），会话覆盖存
   `session-capabilities.json` 的 `tools` 域（会话首屏写）；新 agent 在
-  `agent/created` 时按 effective 应用。`effective === false` 时把该插件当前全部
-  可继承工具名放进同一条 `deny`——**与 MCP 的 restrict 是两条独立 restriction**，
-  宿主侧按交集合并，各自持有 disposer、各自幂等短路；不得合并成一条（否则任一方
-  重算都要动对方名单，`tools/change` 易互相触发）。`tools/change` 时会重算（restrict
-  只能按当前已注册名字屏蔽，首轮名单可能漏掉后注册的工具）。
+  `agent/created` 时按 effective 应用。**该监听器返回首轮收敛的 Promise**：宿主
+  `agent/created` 是 serial 且被 await 的，因此首屏关掉的能力在第一轮请求组装前
+  就已 `restrict`（v1.19.3 修复；修复前首轮工具表仍是全量）。`effective === false`
+  时把该插件当前全部可继承工具名放进同一条 `deny`——**与 MCP 的 restrict 是两条
+  独立 restriction**，宿主侧按交集合并，各自持有 disposer、各自幂等短路；不得合并
+  成一条（否则任一方重算都要动对方名单，`tools/change` 易互相触发）。`tools/change`
+  时会重算（restrict 只能按当前已注册名字屏蔽，首轮名单可能漏掉后注册的工具）。
 - **`tools.inspect` 按需拉 schema、`tools.list` 保持轻量**：`schemas()` 里的
   `parameters` 不塞进 list（首屏每会话都会拉 list）；详情选中插件时才调
   `tools.inspect {unit}`，复用与 list 同一份枚举/归属逻辑（不二次扫描、不漂移），

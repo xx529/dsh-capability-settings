@@ -164,6 +164,11 @@ RPC 返回形状有硬约束（见 `src/remote.ts` 文件头）：传输层恒�
    逐条起进程 + MCP 握手（本机 npx/bunx 冷启动数秒），await 会把「删除/保存/启停」
    RPC 卡住数秒——这正是历史 bug「删除后列表不消失」的根因。挂载状态由
    `status().settling` + 面板静默轮询收敛。
+   **例外：`agent/created` 只 await「首轮快速收敛」**（`primeSessionRestrictions`：
+   hydrate 开关 → 解析屏蔽名单 → `restrict` + 指令段影子），项目层挂载仍排在其后
+   后台执行。宿主 serial await 该事件后才会组装首轮请求；不 await prime 会让首屏
+   关掉的能力在第一条消息里失效（v1.19.3 修复，见 CHANGELOG）。prime 之后第一次
+   `remount` 靠 `primeHandoff` 跳过「先解除」步骤，避免首轮窗口出现空档。
 4. **「默认关闭」= 项目级 overrides**：面板每行的「默认」开关写统一存储
    `<dshHome>/dsh-capability-settings/capability-overrides.json` 里
    `projects.<工作区>.mcp` 列表（旧项目内 `.agents/capability-overrides.json` 只读
