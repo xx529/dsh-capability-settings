@@ -944,9 +944,12 @@ function noulOf(id: string): number | null {
 
 1. `buildSystemOneRequests` 按能力**二分**（保持原顺序），每片单独构造成 1 个请求；
 2. 每片内部仍走原有 4 档降级（moreTools → 工具描述 → 仅名称 → 无工具）；
-3. `jev.rank` / 动态选择**串行**发送各片、合并 `answers` 后统一打分；
+3. `jev.rank` / 动态选择按 `FRAGMENT_CONCURRENCY`（3）**并发发送**各片、合并 `answers` 后统一打分
+   （本次改动：原先串行 `await`，4 片墙钟 = 4×单片，是本机「自动评分约 5s」的主因；
+   并发 3 时 4 片 ≈ 2 轮 ≈ 单片耗时 ×2，不取全量并行的原因是 429 限流会触发退避重试）；
 4. 对外仍是一次调用：`requestCount` 保持逻辑值 1，`usage` 为各片累加；
-5. 任一片失败 → 整体按对应错误码失败（不返回半份结果，避免"评分不全但假装成功"）。
+5. 任一片失败 → **取消其余在飞分片**并按该错误整体失败（不返回半份结果，避免"评分不全但假装成功"；
+   取消不会把「被取消分片的 timeout」当成真实错误——保留第一个真实失败）。
 
 **超上下文**仍按 §6.9 映射 `context-too-long`；不发送扩展 long-context header。
 
@@ -971,14 +974,18 @@ async function rank(input: unknown, signal?: AbortSignal): Promise<JevRankResult
   try {
     // §6.2/§6.10：state={request,guidance}；每能力最多 3 题（role/task/operation，取 max）；
     // 三维按体积分片，串行发送后合并 answers。
+    // 三维按体积分片；分片按 FRAGMENT_CONCURRENCY 并发发送（失败即取消其余）后合并 answers。
     const plan = buildSystemOneRequests(config, caps, draft);
     const answers = {};
-    for (const request of plan.requests) {
-      const json = await postSystemOne(systemOneURL(config.baseURL), request, key.value, {
-        timeoutMs: config.timeoutMs, ...(signal !== undefined ? { signal } : {}), secrets,
-      });
-      Object.assign(answers, json.answers ?? {});
-    }
+    const responses = await runWithConcurrencySignal(
+      plan.requests, FRAGMENT_CONCURRENCY,
+      (request, _index, fragmentSignal) =>
+        postSystemOne(systemOneURL(config.baseURL), request, key.value, {
+          timeoutMs: config.timeoutMs, signal: fragmentSignal, secrets,
+        }),
+      signal,   // 外部取消（RPC 客户端）
+    );
+    for (const json of responses) Object.assign(answers, json.json.answers ?? {});
     const mergedJson = { answers };
     const items = caps.map((cap) => toRankItem(cap, parseRankScore(mergedJson, cap.id)));  // §6.6 → max(三维)
     items.sort(compareRankItems);                                  // §6.7

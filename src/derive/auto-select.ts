@@ -24,8 +24,15 @@ import { isAbsolute, resolve as resolvePath } from "node:path";
 import { enumerateCapabilities } from "../jev/apply.js";
 import type { JevCapabilityService } from "../jev/apply.js";
 import { collectJevSecrets, readJevConfig, resolveJevKey } from "../jev/config-file.js";
-import { buildSystemOneRequests, parseRankScore, postSystemOne, systemOneURL } from "../jev/rank.js";
+import {
+  buildSystemOneRequests,
+  FRAGMENT_CONCURRENCY,
+  parseRankScore,
+  postSystemOne,
+  systemOneURL,
+} from "../jev/rank.js";
 import type { JevCapability, JevConfig } from "../jev/types.js";
+import { runWithConcurrencySignal } from "../shared/concurrency.js";
 import { errMessage } from "../shared/errors.js";
 import type { DerivedDynamicInfo, SessionStateStore } from "../session-state.js";
 
@@ -411,23 +418,32 @@ export function createDeriveAutoSelect(ctx: any, deps: DeriveAutoSelectDeps): De
     if (key.source === "none" || key.value === undefined) {
       return fallbackPlan({ ...base, reason: "no-key", threshold, total: candidates.length });
     }
+    // 回调里无法保留 `key.value` 的缩窄，先取局部常量。
+    const apiKey = key.value;
     const secrets = collectJevSecrets(config, process.env);
     const draft = Array.from(input.prompt).slice(0, 8000).join("");
     // 三维判据 + 体积分片：多片共享一个 8s 总预算（spawn 同步等待，不能逐片各等 8s）。
+    // 分片并发发送（原先串行）：4 片 × 单片在 8s 预算下极易超时回退。
     const plan = buildSystemOneRequests(config, candidates, draft);
     const answers: Record<string, unknown> = {};
     const controller = new AbortController();
     const timeoutMs = Math.min(config.timeoutMs, DYNAMIC_RANK_TIMEOUT_CAP_MS);
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      for (const request of plan.requests) {
-        const response = await postSystemOne(systemOneURL(config.baseURL), request, key.value, {
-          ...(deps.fetchImpl !== undefined ? { fetchImpl: deps.fetchImpl } : {}),
-          ...(deps.sleep !== undefined ? { sleep: deps.sleep } : {}),
-          timeoutMs,
-          signal: controller.signal,
-          secrets,
-        });
+      const responses = await runWithConcurrencySignal(
+        plan.requests,
+        FRAGMENT_CONCURRENCY,
+        (request, _index, fragmentSignal) =>
+          postSystemOne(systemOneURL(config.baseURL), request, apiKey, {
+            ...(deps.fetchImpl !== undefined ? { fetchImpl: deps.fetchImpl } : {}),
+            ...(deps.sleep !== undefined ? { sleep: deps.sleep } : {}),
+            timeoutMs,
+            signal: fragmentSignal,
+            secrets,
+          }),
+        controller.signal,
+      );
+      for (const response of responses) {
         const partial = (response.json as { answers?: Record<string, unknown> }).answers;
         if (partial !== null && typeof partial === "object") Object.assign(answers, partial);
       }

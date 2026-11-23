@@ -3,6 +3,36 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.19.4] - 2026-11-23
+
+### 变更
+
+- **Jev 评分分片改为并发发送（自动评分 / 手动评分 / 派生动态选择）**
+  （用户反馈：输入停顿后自动调用 Jev 判能力要 5s 左右）。根因不是网络或能力枚举：
+  三维判据让 150–300 条能力分成约 4 片（本机 196 条 → 4 片 / 每片 147 题 / 单次
+  约 95KB），而 `jev.rank` 与派生动态选择都是 `for + await` **串行**发送——墙钟 =
+  片数 × 单片，叠加客户端 1s 停顿防抖正好是 5s 量级。
+  - 新增 `src/shared/concurrency.ts`：
+    - `runWithConcurrency`（固定并发度、按序写回、失败不取消其它任务）——
+      `jev/apply.ts` 原私有实现迁入，MCP / Tools 写入与回滚语义不变；
+    - `runWithConcurrencySignal`（同上 + 合并后的 AbortSignal；第一个失败即取消
+      其余在飞任务并抛该真实失败，不把「被取消分片的 timeout」当成错误）。
+  - `src/jev/manager.ts`（`jev.rank`）与 `src/derive/auto-select.ts`（动态选择）
+    改用 `runWithConcurrencySignal`，并发上限 `FRAGMENT_CONCURRENCY = 3`
+    （不取全量并行的原因：jev 对连续请求会 429，退避重试反而更慢）。
+  - 语义边界：任一分片失败仍整体失败、错误码不变（不返回半份结果）；`usage`
+    按片累加、`requestCount` 仍为逻辑值 1；外部取消（RPC abort）转发给每个分片。
+  - 派生动态选择收益更大：8s 总预算下 4 片串行原先极易超时回退「继承会话」。
+  - 验证：`pnpm typecheck` / `pnpm build` 通过；
+    `node notes/verify/jev-parallel-fragments.mjs` 8/8（并发上限、按序写回、
+    失败即取消、外部取消、rank 端到端 4 片并发与失败整体报错、auto-select
+    端到端）；`bash notes/verify/jev-capability-decision/run-all.sh` 的
+    host-config 82/82、host-rank 132/132、host-apply 122/122、host-rpc 13/13、
+    client-adapter 21/21 通过。既有的 `v24-dynamic-derive` 7/9、`client-panel`
+    67/73、`client-hero`、`v13-jev-tools`、`v13-session-bulk`、`v13-regression`
+    失败与本次无关（`git stash` 改动前复跑结果逐项一致；原因是 v23 Prompt Tab /
+    三维判据 / 面板改版后未更新的过期断言）。
+
 ## [1.19.3] - 2026-11-17
 
 ### 修复
