@@ -934,8 +934,10 @@ attribution?: {
   宿主条目仍拒绝）；全局默认写入仍由守卫拒绝。
 - **工作区覆盖**：`overrides.toggle("tools", …)` 允许写这两类单元的项目三态；
   `off` = 本工作区默认不启用，恢复时回落全局。
-- **运行层**：继承层的宿主单元按工作区默认进 `tools.restrict`；预设单元
-  （own-layer）改用 `tools.guard` 在调用时拒绝，disposer 随重算 / 卸载解除。
+- **运行层（v28.1 修正）**：宿主与预设单元都进 `tools.restrict`。预设插件
+  注册在**预设祖先作用域**（`bindScopeParent`），agent 作用域的 restrict 可以
+  屏蔽；宿主拒绝的 own-layer 影子名字由 `applyRestrictWithRetry` 剔除后重试。
+  `tools.guard` 仅作 own-layer 兜底。
 - **Jev**：`enumerateCapabilities` 直接跳过 `hostInjected` / `agentScoped` 工具
   单元（不进候选、不评分、不应用），取舍只由人类开关决定。
 

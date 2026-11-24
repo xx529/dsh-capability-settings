@@ -517,9 +517,10 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
    `presets/standard.patch.yml` 挂进 agent scope（`dsh-web-app` 的 patch 把根层
    同名工具行逐条 `disabled: true`），全局 `tools.schemas()` **看不到**。面板从
    live agent 的 `tools.schemas(agent)` 取并集补进来，归到对应宿主包，并标记为
-   **「预设」**（`agentScoped`）——`tools.restrict` 只作用于继承层，agent 自己的
-   注册无法 restrict，所以**会话开关**仍不可用；v28 起可见范围 / 每工作区默认 /
-   工作区覆盖可配，工作区关闭后由执行层 `tools.guard` 拒绝调用；
+   **「预设」**（`agentScoped`）——这些工具实际注册在**预设祖先作用域**，
+   agent 作用域的 `tools.restrict` 可以把它们从工具表移除（v28.1）；面板的
+   **会话开关**仍不可用；v28 起可见范围 / 每工作区默认 / 工作区覆盖可配，
+   工作区关闭后由 `tools.restrict` 移除（own-layer 影子工具由 guard 兜底）；
 5. 其余（非 mcp、非内建、无映射）→ 合并进唯一的 **「来源未识别」** 单元
    （`未识别` 琥珀标签；可开关、计入分母，但**不进 Jev 候选**——它可能混入未来
    宿主新增的内建工具，让模型去"推荐关闭"风险高）。
@@ -624,9 +625,10 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   - **工作区优先、恢复回落**：工作区开关写项目三态（`tools` / `enabledTools`）；
     `off` = 本工作区默认不启用，重新打开时若全局默认本就开启则**只清项目覆盖**，
     回到全局默认（与普通插件单元同一套语义）。
-  - **运行层**：继承层的宿主工具默认恒启用；工作区默认 / 可见性显式关闭时进
-    `tools.restrict`。预设工具注册在 agent 自己层、`restrict` 无法屏蔽，改用
-    `tools.guard` 在调用时拒绝（恢复 / 卸载即解除）。
+  - **运行层**：宿主 / 预设工具默认恒启用；工作区默认 / 可见性显式关闭时进
+    `tools.restrict`（预设工具位于预设祖先作用域，可被 agent 作用域屏蔽）。
+    own-layer 影子名字由 `applyRestrictWithRetry` 从宿主错误中剔除；`tools.guard`
+    仅作兜底，保证残留注册也无法调用。
   - 工具归属优先按宿主包源码字面量识别，避免被同名第三方插件按「名字推测」抢走。
 - **能力面板 Tools 页 = 全局默认**（所有会话、含新建会话）：写
   `<dshHome>/dsh-capability-settings/tools-global.json`

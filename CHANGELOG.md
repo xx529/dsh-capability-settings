@@ -23,6 +23,22 @@
     打分或应用（`jev.rank`、手动决策、派生「动态选择」同源）——这两类工具只由
     人类通过上述开关配置，Jev 不得自动选择或改变。
 
+### 修复
+
+- **工作区关闭的预设 / 宿主 tool 仍出现在新 session 上下文**（用户反馈 commander
+  工作区）。根因：预设插件由预设注册表挂在**预设祖先作用域**（`bindScopeParent`），
+  并非 agent own-layer；v28 的 `agentScoped` 判断把它们当成不可 restrict，只注册
+  执行层 `tools.guard` 拒绝调用，工具 schema 仍在 `request/header` 里。
+  - `computeTargets` 不再跳过 `agentScoped`，宿主 / 预设单元统一进 `tools.restrict`；
+    deny 候选改用全局 + agent 预设层并集。
+  - 新增 `applyRestrictWithRetry`：宿主拒绝 own-layer / 已注销名字时解析错误、
+    剔除后重试，避免一条无效名字让整批 restriction 失败。
+  - `tools.guard` 保留为 own-layer 兜底；工作区关闭后新会话不再拿到这些工具。
+  - 验证：`v28-human-only-tools` 19/19（C1 断言预设名字进 deny、C2b 覆盖重试）。
+  - 说明：`dsh-commander` 的工具注册带 `when`，只对配置里绑定的指挥官会话可见
+    （`commander.sessionId`）；普通新会话没有 `commander_*` 是插件设计，不是本插件
+    开关失效。
+
 ### 变更
 
 - `tools.list` 对宿主 / 预设单元不再强制 `enabled/defaultEnabled=true`：按
@@ -49,8 +65,9 @@
 ### 验证
 
 - `pnpm typecheck`、`pnpm build` 通过。
-- 新增 `node notes/verify/v28-human-only-tools.mjs` **18/18**（写路径 / list 投影 /
-  宿主 restrict / 预设 guard / Jev 排除 / jsdom 可见性入口与工作区开关）。
+- 新增 `node notes/verify/v28-human-only-tools.mjs` **19/19**（写路径 / list 投影 /
+  宿主 + 预设 restrict / restrict 未知名字重试 / Jev 排除 / jsdom 可见性入口与
+  工作区开关）。
 - `node notes/verify/v26-agent-scope-tools.mjs` 7/7；`node notes/verify/host-injected.mjs`
   14/14；`bash notes/verify/jev-capability-decision/run-all.sh` 的 host-config 82/82、
   host-rank 132/132、host-apply 122/122、host-rpc 13/13、client-adapter 21/21 通过。

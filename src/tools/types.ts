@@ -78,7 +78,8 @@ export interface ToolsUnitView {
    * 桌面 / Web 组合下内建工具都由预设按会话挂载；`tools.restrict` 只作用于
    * 继承层，无法屏蔽 agent 自己的注册 ⇒ **会话开关**不可用
    * （{@link AGENT_SCOPED_REASON}）；v28 起可见范围 / 每工作区默认 / 工作区覆盖
-   * 可配（工作区关闭后由执行层 guard 拒绝调用）。
+   * 可配。预设工具位于预设祖先作用域，v28.1 起由 `tools.restrict` 从新会话的
+   * 工具表移除；guard 只作 own-layer 兜底。
    */
   agentScoped?: boolean;
   /** 该单元里 agent-scope 工具的数量（混合单元 = 部分工具随预设固定）。 */

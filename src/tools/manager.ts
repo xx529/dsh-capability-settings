@@ -8,8 +8,9 @@
  *   - **枚举源**：全局 `ctx.root.get("tools").schemas()`（继承层）+ live agent 的
  *     `tools.schemas(agent)` 并集（v26.2：桌面 / Web 把核心工具改由 Agent 预设
  *     按会话挂载，全局层看不到）。`restrict` 只能屏蔽继承层名字；agent 自身层
- *     注册的工具标 `agentScoped`，不产生 deny（v28：改由执行层 `tools.guard`
- *     按工作区默认拒绝调用）。
+ *     注册的工具标 `agentScoped`；它们实际位于**预设祖先作用域**，agent 作用域
+ *     可以 restrict（v28.1）。own-layer 影子名字由重试剔除；`tools.guard` 只作
+ *     兜底。
  *   - **一个插件 = 一个开关单元**：关闭 = 对该插件在本会话的全部可继承工具
  *     `tools.restrict({deny})`；deny 名单**每次重算**，持久化只存 `plugin:<unit>`。
  *   - **A4 未识别单元**：可开关、计入分母、不进 Jev 候选。
@@ -516,8 +517,8 @@ function computeTargets(
 /**
  * v28：预设（agent-scope）单元里「按工作区默认 / 可见性应关闭」的单元。
  *
- * 这类工具不能进 `tools.restrict`（own-layer 注册），只作为执行层 `tools.guard`
- * 的目标；默认（无配置）时全部开启，因此旧行为不变。
+ * v28.1 起主路径是 `tools.restrict`（预设工具在祖先作用域，可屏蔽）；本函数
+ * 仍为 own-layer 名字保留执行层 guard 兜底。默认（无配置）时全部开启，旧行为不变。
  */
 function computePresetTargets(
   toggles: ReadonlyMap<string, boolean> | undefined,
@@ -824,8 +825,9 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
   /**
    * v28：给「按工作区默认关闭」的预设单元注册执行层 guard。
    *
-   * 预设工具注册在 agent 自己的层，`tools.restrict` 按宿主契约无法屏蔽；用
-   * `tools.guard`（monotonic denial）在调用时拒绝，disposer 在重算 / 卸载时解除。
+   * 预设工具通常注册在预设祖先作用域（restrict 已能移除）；但如果单元里混入
+   * agent own-layer 的影子工具，restrict 重试会把它们剔除。这里保留
+   * `tools.guard`（monotonic denial）兜底：即使工具仍在上下文，调用也被拒绝。
    * 任何失败只降级为 `skipped` + warning，绝不抛穿会话创建路径。
    */
   function applyPresetGuards(
@@ -1096,7 +1098,7 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
       // 不阻塞列表（Jev 侧有占位兜底）。
       const description = deps.resolver?.packageDescription?.(unit.unit);
       const briefTools = unit.tools.map((tool) => ({ ...tool }));
-      // v28：宿主 / 预设工具不再整行只读——**会话开关**仍锁定（restrict 契约），
+      // v28：宿主 / 预设工具不再整行只读——**会话开关**仍锁定（面板策略），
       // 但可见范围、每工作区默认与工作区覆盖由人类配置。默认无配置时仍恒启用，
       // 保持旧行为。
       const humanOnly = unit.hostInjected === true || unit.agentScoped === true;

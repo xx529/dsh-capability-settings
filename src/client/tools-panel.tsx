@@ -768,7 +768,7 @@ export function ToolsView({
 
                 <div className="skp-note">
                   {selected.agentScoped === true
-                    ? `工具数 ${selected.toolCount} · Agent 预设注入：会话开关不可用；工作区关掉后新会话调用会被拒绝（工具表仍由宿主预设注册）`
+                    ? `工具数 ${selected.toolCount} · Agent 预设注入：会话开关不可用；工作区关掉后新会话不再提供这些工具（由宿主 restrict 从工具表移除）`
                     : selected.hostInjected === true
                       ? `工具数 ${selected.toolCount} · 宿主注入：会话开关不可用；工作区关掉后新会话不再提供这些工具`
                       : `工具数 ${selected.toolCount} · 开关为插件级：关闭后该插件全部工具默认不可用（不改已有对话的显式覆盖）`}

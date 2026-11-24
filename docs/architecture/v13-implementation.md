@@ -462,7 +462,8 @@ export interface ToolsListView {
 `workspaceDefaultEnabled?` / `projectOverride?`。宿主 / 预设单元的 `lockedReason`
 **只锁会话开关**；可见范围与工作区三态仍可写（`overrides.setVisibility` /
 `overrides.toggle`），默认无配置时 `enabled = true` 保持旧行为。工作区默认关闭时，
-继承层宿主工具进 `tools.restrict`，agent-scope 预设工具进执行层 `tools.guard`；
+宿主与预设工具都进 `tools.restrict`（预设位于祖先作用域）；own-layer 名字由重试
+剔除，`tools.guard` 仅兜底；
 Jev 的 `enumerateCapabilities` 直接跳过这两类单元（不进候选 / 不评分 / 不应用）。
 
 **读投影规则**（`src/tools/manager.ts:637-683`）：
