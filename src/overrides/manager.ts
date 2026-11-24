@@ -122,7 +122,8 @@ export interface OverridesManagerDeps {
    * 写路径的宿主注入判定（Skills / MCP / Tools 共用）。
    *
    * 返回 true ≈ 该 key 是宿主注入能力（`@deepseek-ai/*` / 随包 / 宿主预设）：
-   * 全局默认、项目默认、可见性一律拒绝写入（只读展示、所有工作区默认需要）。
+   * 全局默认写入拒绝（skills / mcp 的项目默认与可见性也拒绝）；Tools 的可见性
+   * 与工作区三态在 v28 起豁免（见 setVisibility / toggle）。
    * 缺省 = 不判定（旧装配 / 单测）。
    */
   isHostKey?: (domain: CapabilityDomain, key: string, cwd?: string) => Promise<boolean> | boolean;
@@ -693,6 +694,7 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
    * projectRoot 归一化**；运行时按「projectRoot 精确 → path 精确 → cwd 最长前缀」
    * 匹配）。`mode=all` 且 workspaces 为空 ⇒ 删除该条目（等价缺省全可见）。
    * 读→改→写按全局文件串行化；坏 visibility 显式报错（严格读，不静默丢配置）。
+   * v28：Tools 域允许宿主 / 预设工具（不再拒绝），人类配置它们的可见范围。
    *
    * **冲突检测（v21.1）**：本次会把某工作区变为不可见、而该工作区项目覆盖里显式
    * 开启该能力时：
@@ -712,8 +714,9 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
     const key = typeof rawKey === "string" ? rawKey.trim() : "";
     if (key.length === 0) return { ok: false, errors: ["key must not be empty"] };
     if (key.length > 256) return { ok: false, errors: [`invalid capability key "${key}": too long (max 256)`] };
-    // 宿主注入能力是运行基线：不参与可见性（所有工作区默认需要）。
-    if (await isHostKey(domain, key)) {
+    // 宿主注入能力是运行基线：skills / mcp 不参与可见性。**Tools 例外（v28）**：
+    // 预设 / 宿主工具由人类配置可见范围（会话 restrict 仍锁定），见 tools/manager。
+    if (domain !== "tools" && (await isHostKey(domain, key))) {
       return { ok: false, errors: [HOST_INJECTED_REASON] };
     }
     const mode = (input as { mode?: unknown }).mode;
@@ -852,7 +855,11 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
     return normalizeOverridesSet(draft);
   }
 
-  /** 该 key 是否为宿主注入能力（失败按 false，保持旧行为）。 */
+  /**
+   * 该 key 是否为宿主 / 预设注入的**只读全局默认**能力（失败按 false，保持旧行为）。
+   *
+   * v28 起 Tools 的可见性与工作区三态不走这个守卫；全局默认写入仍受它保护。
+   */
   async function isHostKey(domain: CapabilityDomain, key: string, cwd?: string): Promise<boolean> {
     if (deps.isHostKey === undefined) return false;
     try {
@@ -872,6 +879,9 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
    *   （`enabledSkills` / `enabledMcp` / `enabledTools`），否则清掉该项目态；
    *   禁用时加入项目禁用名单并清掉重新打开标记（禁用优先）。
    *
+   * v28：Tools 域的宿主 / 预设工具也允许写（工作区覆盖开关），与普通插件单元
+   * 同一套三态；其它两域的宿主条目仍拒绝。
+   *
    * 读→改→写整段按统一存储文件串行化，避免并发写者互相覆盖。某个项目首次
    * 写入时：把项目内旧声明（`.agents` / `.dsh` / `.claude`）并入统一存储，
    * 成功后删除旧文件。旧文件损坏时显式报错（不静默覆盖用户数据）。
@@ -882,7 +892,9 @@ export function createOverridesManager(deps: OverridesManagerDeps = {}) {
     if (!DOMAIN_KEYS.includes(input.domain)) {
       return { ok: false, errors: [`unknown domain "${String(input.domain)}"`] };
     }
-    if (await isHostKey(input.domain, key, input.cwd)) {
+    // **Tools 例外（v28）**：预设 / 宿主工具允许写工作区三态覆盖（人类开关）；
+    // skills / mcp 的宿主注入条目仍拒绝。
+    if (input.domain !== "tools" && (await isHostKey(input.domain, key, input.cwd))) {
       return { ok: false, errors: [HOST_INJECTED_REASON] };
     }
     const loc = locationFor(input.cwd);

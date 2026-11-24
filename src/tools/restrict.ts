@@ -27,6 +27,17 @@ export const TOOLS_RESTRICT_UNAVAILABLE =
 /** 名单为空（工具尚未注册 / 已全部注销）时的降级说明。 */
 export const TOOLS_RESTRICT_NO_TOOLS = "该单元当前没有已注册的全局工具（可能尚未加载），本次未调用 restrict";
 
+/**
+ * v28：预设（agent-scope）工具被工作区默认关闭时，执行层 guard 的拒绝文案。
+ *
+ * `tools.restrict` 无法屏蔽 agent 自身层注册（宿主契约），因此这类单元改用
+ * `tools.guard`（monotonic denial）在调用时拒绝；恢复工作区默认后 disposer 解除。
+ */
+export const PRESET_TOOL_DISABLED_REASON = "该工具在所属工作区已关闭（能力面板工作区默认）；恢复默认后可用";
+
+/** v28：宿主未提供 `tools.guard` 时预设工具的降级说明。 */
+export const TOOLS_GUARD_UNAVAILABLE = "宿主 tools 服务未提供 guard()，无法在本会话拒绝已关闭的预设工具";
+
 /** 一次 restrict 的结果状态（与 `McpRestrictionView.state` 同口径）。 */
 export type ToolsRestrictionState = "applied" | "skipped" | "failed";
 

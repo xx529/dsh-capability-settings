@@ -3,6 +3,61 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 新增
+
+- **预设 tool / 宿主 tool 的人类开关域（v28）**：这两类工具不再整行只读。
+  - **可见范围可编辑**：Tools 全局视图的宿主工具（`hostInjected`）与 Agent 预设
+    工具（`agentScoped`）支持「编辑可见范围」（`overrides.setVisibility`：`mode`
+    + 每工作区 `visible` / `defaultEnabled`）。`skills` / `mcp` 的宿主条目仍拒绝
+    可见性写入；宿主 / 预设工具的**全局默认**写入仍被守卫拒绝。
+  - **工作区覆盖开关**：工作区视图的行尾开关现在可写宿主 / 预设工具的项目三态
+    （`overrides.toggle("tools", …)` → `tools` / `enabledTools`）。语义与普通插件
+    单元一致：工作区设置优先于全局；关掉 = 本工作区默认不启用；重新打开时若全局
+    默认本就开启则只清项目覆盖，**恢复即回落全局**。
+  - **运行层**：继承层的宿主工具在工作区默认 / 可见性显式关闭时进
+    `tools.restrict`；预设工具注册在 agent 自己层、`restrict` 无法屏蔽，改用
+    `tools.guard` 在调用时拒绝（恢复 / 卸载即解除，失败 fail-open 只 warn）。
+  - **Jev 排除**：`enumerateCapabilities` 不再把预设 / 宿主 tool 单元纳入候选、
+    打分或应用（`jev.rank`、手动决策、派生「动态选择」同源）——这两类工具只由
+    人类通过上述开关配置，Jev 不得自动选择或改变。
+
+### 变更
+
+- `tools.list` 对宿主 / 预设单元不再强制 `enabled/defaultEnabled=true`：按
+  `可见性 + 每工作区默认 + 项目覆盖` 投影，并下发 `visibilityMode` /
+  `visibleWorkspaceCount` / `visibleInWorkspace` / `globalDefaultEnabled` /
+  `workspaceDefaultEnabled` / `projectOverride`；工作区视图按可见性隐藏并计入
+  `hiddenCount`。`lockedReason` 现在**只锁会话开关**（文案改为
+  `HOST_INJECTED_TOOL_REASON` / `AGENT_SCOPED_TOOL_REASON`），不再阻止可见范围
+  与工作区覆盖写入。默认无配置时行为不变（恒启用、会话开关锁定）。
+- 工具详情文案：宿主 / 预设工具的「注入方式」与底部说明改为「会话开关不可用，
+  可见范围与工作区默认可配」；不再写「只读展示、不能关闭」。
+
+### 内部
+
+- `src/tools/manager.ts`：新增 `computePresetTargets` + 执行层 guard 簿记
+  （`guardDisposers` / `guardedNames` / `guardWarned`）；`computeTargets` 不再
+  无条件跳过宿主单元（缺省基线仍为开，只有人类配置显式关闭才产生 deny）。
+- `src/tools/restrict.ts`：新增 `PRESET_TOOL_DISABLED_REASON` /
+  `TOOLS_GUARD_UNAVAILABLE`。
+- `src/overrides/manager.ts`：`setVisibility` / `toggle` 对 `domain:"tools"` 豁免
+  宿主/预设守卫（全局默认写入仍受守卫）；`src/index.ts` 的守卫扩展到
+  `agentScoped` 单元。
+
+### 验证
+
+- `pnpm typecheck`、`pnpm build` 通过。
+- 新增 `node notes/verify/v28-human-only-tools.mjs` **18/18**（写路径 / list 投影 /
+  宿主 restrict / 预设 guard / Jev 排除 / jsdom 可见性入口与工作区开关）。
+- `node notes/verify/v26-agent-scope-tools.mjs` 7/7；`node notes/verify/host-injected.mjs`
+  14/14；`bash notes/verify/jev-capability-decision/run-all.sh` 的 host-config 82/82、
+  host-rank 132/132、host-apply 122/122、host-rpc 13/13、client-adapter 21/21 通过。
+- `v13-tools-global`、`v13-jev-tools`、`v13-tools-domain`、`v21-visibility`、
+  `client-panel` / `client-hero` 的失败与改动前基线一致（v21.2 不热应用 / 三维判据 /
+  面板改版后的过期断言），不是本次回归。
+
 ## [1.19.4] - 2026-11-23
 
 ### 变更

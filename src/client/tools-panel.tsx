@@ -17,6 +17,9 @@
  * 全局视图的行尾开关仍是**全局默认兜底**（`tools.setGlobalEnabled`，写统一全局文件）；
  * 不可见行的默认开关禁用并标「不可见 · 不参与默认」。
  *
+ * v28：宿主工具 / 预设工具不再整行只读——**会话开关**仍锁定（宿主 restrict
+ * 契约），但可见范围与工作区覆盖由人类配置；工作区行尾开关对它们也可写。
+ *
  * @module dsh-capability-settings/client/tools-panel
  */
 
@@ -246,7 +249,7 @@ const ToolListRow = memo(function ToolListRow({
 }) {
   const locked = unit.lockedReason !== undefined;
   const visibilityMeta =
-    scope === "global" && !isLockedUnit(unit) ? (
+    scope === "global" ? (
       <VisibilityRowMeta
         entry={visibilityEntry}
         workspaces={projects}
@@ -266,6 +269,7 @@ const ToolListRow = memo(function ToolListRow({
         </span>
       )
     );
+  const humanOnly = unit.hostInjected === true || unit.agentScoped === true;
   const switchLabel = invisible
     ? "不可见 · 不参与默认"
     : scope === "global"
@@ -273,15 +277,17 @@ const ToolListRow = memo(function ToolListRow({
       : `默认 · ${override === "inherit" ? "跟随全局" : "已覆盖"}`;
   const switchTitle = invisible
     ? "该单元对所有工作区都不可见：不参与默认开关；先在「可见范围」里打开可见性"
-    : locked
-      ? (unit.lockedReason ?? "该插件无法开关")
-      : scope === "global"
-        ? defaultEnabledOf(unit)
-          ? "关闭：关闭后全局默认不可用；仍可在对话首屏为单个对话单独开启"
-          : "开启：全局默认可用（仍可在对话首屏为单个对话单独关闭）"
-        : checked
-          ? "关闭：仅此工作区默认不启用（写工作区覆盖，其它工作区不受影响）"
-          : "打开：仅此工作区默认启用（写工作区覆盖）";
+    : scope === "workspace" && humanOnly
+      ? `${unit.lockedReason ?? "会话开关不可用"}；此开关写工作区覆盖：关掉即本工作区默认不启用，恢复后回落全局`
+      : locked
+        ? (unit.lockedReason ?? "该插件无法开关")
+        : scope === "global"
+          ? defaultEnabledOf(unit)
+            ? "关闭：关闭后全局默认不可用；仍可在对话首屏为单个对话单独开启"
+            : "开启：全局默认可用（仍可在对话首屏为单个对话单独关闭）"
+          : checked
+            ? "关闭：仅此工作区默认不启用（写工作区覆盖，其它工作区不受影响）"
+            : "打开：仅此工作区默认启用（写工作区覆盖）";
   return (
     <li className={active ? "skp-row-wrap skp-row-wrap-active" : "skp-row-wrap"}>
       <button
@@ -311,7 +317,7 @@ const ToolListRow = memo(function ToolListRow({
               unit.agentScoped === true
                 ? (unit.lockedReason ?? AGENT_SCOPED_REASON)
                 : unit.hostInjected === true
-                  ? HOST_INJECTED_REASON
+                  ? (unit.lockedReason ?? HOST_INJECTED_REASON)
                   : unit.kind === "unattributed"
                     ? "来源未识别：不是宿主内置工具"
                     : "插件运行时注册（非 MCP）"
@@ -416,9 +422,14 @@ export function ToolsView({
   /** 某单元的可见性配置（skills/mcp/tools 同构；tools key = unit）。 */
   const visibilityOf = (unit: ClientToolsUnit): ClientCapabilityVisibility | undefined =>
     visibilityEntryOf(visibilitySets, "tools", unit.unit);
-  /** 兜底默认是否关闭：legacy `tools-global.json` 已并入行字段 defaultEnabled。 */
+  /**
+   * 兜底默认是否关闭：legacy `tools-global.json` 已并入行字段 defaultEnabled。
+   *
+   * v28：宿主 / 预设单元也按配置计算（没有配置时行字段为 true ⇒ 关闭 = false），
+   * 这样工作区弹层 / 行尾开关的「跟随全局」有正确基线。
+   */
   const globalOffOf = (unit: ClientToolsUnit): boolean =>
-    isLockedUnit(unit) ? false : !defaultEnabledOf(unit) || globalOverrides?.tools.includes(unit.unit) === true;
+    !defaultEnabledOf(unit) || globalOverrides?.tools.includes(unit.unit) === true;
 
   const units = useMemo(() => sortUnits(data?.units ?? []), [data]);
   /** 工作区视图只渲染可见单元（宿主已过滤；这里防御旧宿主 / 脏数据）。 */
@@ -498,15 +509,17 @@ export function ToolsView({
 
   /** 当前行的开关勾选态与写路径（按作用域分派）。 */
   const switchStateOf = (unit: ClientToolsUnit) => {
+    const humanOnly = unit.hostInjected === true || unit.agentScoped === true;
     if (scope === "global") {
-      const invisible = isLockedUnit(unit) ? false : isRowInvisible(unit, visibilityOf(unit), projects);
-      return { checked: defaultEnabledOf(unit), disabled: unit.lockedReason !== undefined || invisible, invisible };
+      const invisible = isRowInvisible(unit, visibilityOf(unit), projects);
+      return { checked: defaultEnabledOf(unit), disabled: (unit.lockedReason !== undefined && !humanOnly) || invisible, invisible };
     }
     const entry = visibilityOf(unit);
     const override = workspaceOverrideOf(projectOverrides, "tools", unit.unit);
     const fallback = workspace === undefined ? true : workspaceDefaultOf(entry, workspace, globalOffOf(unit));
     const checked = override === "on" ? true : override === "off" ? false : fallback;
-    return { checked, disabled: unit.lockedReason !== undefined, invisible: false, override };
+    // v28：宿主 / 预设单元的会话开关不可用，但工作区覆盖可写（人类开关）。
+    return { checked, disabled: unit.lockedReason !== undefined && !humanOnly, invisible: false, override };
   };
 
   /**
@@ -698,7 +711,7 @@ export function ToolsView({
                         selected.agentScoped === true
                           ? (selected.lockedReason ?? AGENT_SCOPED_REASON)
                           : selected.hostInjected === true
-                            ? HOST_INJECTED_REASON
+                            ? (selected.lockedReason ?? HOST_INJECTED_REASON)
                             : undefined
                       }
                     >
@@ -742,9 +755,9 @@ export function ToolsView({
                   <span className="skp-detail-meta-item">
                     <span className="skp-detail-meta-strong">注入方式：</span>
                     {selected.agentScoped === true
-                      ? "Agent 预设注入（agent scope，只读展示）"
+                      ? "Agent 预设注入（agent scope；会话开关不可用，可见范围与工作区默认可配）"
                       : selected.hostInjected === true
-                        ? "宿主注入（@deepseek-ai/*，只读展示）"
+                        ? "宿主注入（@deepseek-ai/*；会话开关不可用，可见范围与工作区默认可配）"
                         : "插件运行时注册的非 MCP 工具（不落盘）"}
                   </span>
                 </div>
@@ -755,14 +768,14 @@ export function ToolsView({
 
                 <div className="skp-note">
                   {selected.agentScoped === true
-                    ? `工具数 ${selected.toolCount} · Agent 预设注入：随会话预设固定，仅展示，不能按会话关闭`
+                    ? `工具数 ${selected.toolCount} · Agent 预设注入：会话开关不可用；工作区关掉后新会话调用会被拒绝（工具表仍由宿主预设注册）`
                     : selected.hostInjected === true
-                      ? `工具数 ${selected.toolCount} · 宿主注入：所有工作区默认启用，仅展示，不能关闭`
+                      ? `工具数 ${selected.toolCount} · 宿主注入：会话开关不可用；工作区关掉后新会话不再提供这些工具`
                       : `工具数 ${selected.toolCount} · 开关为插件级：关闭后该插件全部工具默认不可用（不改已有对话的显式覆盖）`}
                 </div>
 
-                {/* v21：全局视图的可见性编辑（工作区视图 / 宿主注入不出现）。 */}
-                {scope === "global" && !isLockedUnit(selected) && (
+                {/* v21：全局视图的可见性编辑；v28 起宿主 / 预设工具同样可编辑。 */}
+                {scope === "global" && (
                   <dl className="skp-detail-fields">
                     <VisibilityDetailFields
                       api={api}
@@ -804,7 +817,7 @@ export function ToolsView({
                 </div>
 
                 <p className="skp-note" style={NOTE_STYLE}>
-                  插件级开关，不提供单工具开关；无法 restrict 的插件开关置灰并说明原因；宿主内建工具按宿主包只读展示，恒启用、不可开关。
+                  插件级开关，不提供单工具开关；无法 restrict 的插件会话开关置灰并说明原因。宿主 / 预设工具的会话开关仍锁定（宿主契约），但可见范围与工作区默认可在此配置——工作区关掉即该工作区默认不启用，恢复后回落全局。
                 </p>
               </div>
             )}

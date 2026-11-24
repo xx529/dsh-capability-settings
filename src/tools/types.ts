@@ -18,8 +18,8 @@ export const UNATTRIBUTED_UNIT = "__unattributed__";
 /** 未识别来源单元的展示名（卡片标题 / 详情标题）。 */
 export const UNATTRIBUTED_DISPLAY = "来源未识别";
 
-/** 「Agent 预设注入」单元的只读原因（v26.2；定义在共享模块，客户端同源）。 */
-export { AGENT_SCOPED_REASON } from "../shared/host-injected.js";
+/** 「Agent 预设注入」单元的会话开关锁定原因（v26.2；v28 起可见性/工作区默认可配）。 */
+export { AGENT_SCOPED_REASON, AGENT_SCOPED_TOOL_REASON, HOST_INJECTED_TOOL_REASON } from "../shared/host-injected.js";
 
 /** 持久化键前缀：`plugin:<unit>`（本批唯一使用的前缀）。 */
 export const PLUGIN_UNIT_KEY_PREFIX = "plugin:";
@@ -68,15 +68,17 @@ export interface ToolsUnitView {
   /**
    * true = 宿主注入（所属包为 `@deepseek-ai/*`，或工具由宿主运行时注册）。
    *
-   * 语义：仅只读展示，所有开关（会话 / 全局默认 / 每工作区默认 / 可见性）
-   * 一律不可写；列表里恒为启用。宿主包包含 DSH 自带的 bundle 与官方插件。
+   * 语义（v28）：**会话 / 全局默认开关**不可写；**可见范围、每工作区默认与
+   * 工作区覆盖**由人类配置（不再只读）。宿主包包含 DSH 自带的 bundle 与官方插件。
    */
   hostInjected?: boolean;
   /**
    * true = 该**全部**工具都注册在 Agent 预设作用域（agent scope）里。
    *
    * 桌面 / Web 组合下内建工具都由预设按会话挂载；`tools.restrict` 只作用于
-   * 继承层，无法屏蔽 agent 自己的注册 ⇒ 这类单元只读（{@link AGENT_SCOPED_REASON}）。
+   * 继承层，无法屏蔽 agent 自己的注册 ⇒ **会话开关**不可用
+   * （{@link AGENT_SCOPED_REASON}）；v28 起可见范围 / 每工作区默认 / 工作区覆盖
+   * 可配（工作区关闭后由执行层 guard 拒绝调用）。
    */
   agentScoped?: boolean;
   /** 该单元里 agent-scope 工具的数量（混合单元 = 部分工具随预设固定）。 */
@@ -153,12 +155,15 @@ export interface ToolsUnitView {
    */
   explicit: boolean;
   /**
-   * 不可开关原因；正常缺省。第一批唯一可能来源 = 当前 agent 作用域缺少
-   * `tools.restrict`（旧外壳 / 服务缺失），或该 unit 含被契约禁止的名字
-   * （`run_code` 等，理论不会出现）。
+   * **会话开关**不可用原因；正常缺省。来源 = 宿主/预设单元
+   * （{@link HOST_INJECTED_TOOL_REASON} / {@link AGENT_SCOPED_TOOL_REASON}）、
+   * 当前 agent 作用域缺少 `tools.restrict`（旧外壳 / 服务缺失），或该 unit 含
+   * 被契约禁止的名字（`run_code` 等，理论不会出现）。
+   *
+   * 注意：v28 起该字段**只锁会话开关**，不阻止可见范围与工作区默认写入。
    */
   lockedReason?: string;
-  /** 上一次 restrict 的降级状态（仅传了 sessionId 时；诊断/文案用）。 */
+  /** 上一次 restrict（宿主 / 预设为执行层 guard）的降级状态（仅传了 sessionId 时）。 */
   restriction?: { state: "applied" | "skipped" | "failed"; error?: string };
   /**
    * v21 可见性：可见范围模式（`all` / `selected` / `none`；缺省 all）。

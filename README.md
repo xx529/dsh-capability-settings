@@ -46,7 +46,7 @@ Skills / MCP / Tools（Tools 以插件为单元），一次请求批量打 0–1
 | **Skills** | ✅ 左导航「全局 / 项目」+ 头部搜索 + 项目按工作区下钻 + 详情（目录树 + `SKILL.md` 阅读器，预览/源码） | ✅ 上传 / 宿主路径 / URL 三种来源 | ✅ | ✅ 行尾「启用」开关（项目区启停；全局 = 在本项目禁用/恢复）+ 详情页模型/用户方向独立开关 | ✅ 确认对话框 | ✅ 导入到本项目（物理副本）/ 在本项目禁用（屏蔽占位）/ 下载 zip / 复制到宿主目录 |
 | **MCP** | ✅ 全局（含外部注入第二组）/ 项目按工作区下钻 + 实时挂载状态 + 行尾「默认」开关 + 工具与参数主从分栏（v22）+ 单个工具调试调用（v25） | ✅ 表单新增（stdio/http）+ JSON 导入 | ✅ | ✅ 「默认」开关（**全局** / **工作区** / 外部注入实例均可设：全局默认 < 工作区显式 < 会话显式）+ 当前对话开关（会话能力配置）+ 项目条目详情启停 | ✅ 两击确认 | ✅ 导入到本项目（引用，跟随全局）/ `.mcp.json` 与 Claude Code 格式兼容 |
 | **Prompt**（指令文件，v23） | ✅ 全局（`~/.dsh/AGENTS.md` / `~/.agents/AGENTS.md`）+ 项目链（项目根→cwd 的 `AGENTS.md` / `CLAUDE.md` / `*.local.md`）+ 状态标签（注入 / 关闭 / 不可见 / 重复折叠 / 预算省略 / 超 1MB） | ❌ 文件由用户维护（可新建后刷新出现） | ✅ 详情页 Markdown 预览 + 文本编辑（原子写） | ✅ 全局可见范围（按工作区）+ 每文件项目级默认；全局与项目**叠加注入**，各自独立开关 | ❌ | ❌ |
-| **Tools**（插件工具） | ✅ 插件列表 + 搜索（按插件名 / 工具名 / 工具说明）+ 详情**只读工具清单**（手风琴：参数表 + 原始 JSON，按需懒加载）；宿主内建工具按宿主包只读展示 | ❌ 由插件自带（插件注册即出现） | ❌ 工具清单只读 | ✅ **插件级**「启用」开关：**能力面板 = 全局默认**（所有会话）+ **会话首屏 = 本会话覆盖**；整插件全开 / 全关，无单工具开关；宿主单元恒启用 | ❌ | ❌ |
+| **Tools**（插件工具） | ✅ 插件列表 + 搜索（按插件名 / 工具名 / 工具说明）+ 详情**只读工具清单**（手风琴：参数表 + 原始 JSON，按需懒加载）；宿主 / 预设工具按宿主包展示，可配可见范围与工作区默认 | ❌ 由插件自带（插件注册即出现） | ❌ 工具清单只读 | ✅ **插件级**「启用」开关：**能力面板 = 全局默认**（所有会话）+ **会话首屏 = 本会话覆盖**；整插件全开 / 全关，无单工具开关；宿主 / 预设工具的**会话开关**仍锁定，但可见范围 + 每工作区默认 + 工作区覆盖由人类配置（v28） | ❌ | ❌ |
 
 > 上表前两个是**条目域**（Skills / MCP，有配置文件与写入操作）；**Tools 是全局工具
 > 注册视图**：只收「插件直接注册、且不是 `mcp__` 前缀」的工具，没有项目 / 工作区
@@ -499,25 +499,27 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 
 1. 工具名以 `mcp__` 开头 → **MCP 域**（永远是；插件自己注册的 `mcp__figma__*`
    也归 MCP，不进入 Tools）；
-2. 命中宿主内建清单（或宿主插件实例）→ **只读「宿主」单元**（v26 起展示，按
-   宿主包分组：`edit/read/write` → `dsh-tool-fs`、`glob/grep`→`dsh-tool-fs-search`、
+2. 命中宿主内建清单（或宿主插件实例）→ **「宿主」单元**（v26 起展示，按
+   宿主包分组：`edit/read/write` → `dsh-tool-fs`、`glob/grep`→ `dsh-tool-fs-search`、
    `bash` → `dsh-tool-bash-persistent`；包名优先取宿主随包工具目录
    `@deepseek-ai/dsh/docs/tool-catalog.md` 的 `Tool Package Map`，读不到才回落人工表）。
-   这些单元恒启用、不可开关、不参与 `tools.restrict`；宿主不提供"危险等级"标注，
-   清单由本插件自维护，**升级宿主版本后需复核**）。
+   v28：**会话开关**仍不可用（缺省恒启用），但**可见范围 / 每工作区默认 / 工作区覆盖**
+   由人类配置；工作区默认关闭后，继承层的宿主工具进 `tools.restrict`。宿主不提供
+   "危险等级"标注，清单由本插件自维护，**升级宿主版本后需复核**）。
    同一宿主插件包的**额外实例**不再需要手写清单：cordis patch 用 `config.toolName`
    给工具改名（`@deepseek-ai/dsh-subagent-codex` / `-claude-code` 把
    `@deepseek-ai/dsh-tool-subagent` 再插一次，生成 `subagent_codex` /
    `subagent_claude_code`），T0 运行时身份（fiber 名 → 宿主包）优先归属；监听挂上
    之前就注册好的实例工具用宿主 loader 条目的 `config.toolName` 兜底，统一并入
-   该宿主包只读单元（与 `subagent` / `subagent_fork` / `list_subagent_models` 同组）；
+   该宿主包单元（与 `subagent` / `subagent_fork` / `list_subagent_models` 同组；会话开关锁定，可见范围/工作区默认可配）；
 3. 命中插件映射表 → Tools 插件单元；
 4. **Agent 预设注入的工具**（v26.2）：桌面 / Web 组合把核心工具改由
    `presets/standard.patch.yml` 挂进 agent scope（`dsh-web-app` 的 patch 把根层
    同名工具行逐条 `disabled: true`），全局 `tools.schemas()` **看不到**。面板从
    live agent 的 `tools.schemas(agent)` 取并集补进来，归到对应宿主包，并标记为
-   **只读「预设」**（`agentScoped`）——`tools.restrict` 只作用于继承层，agent
-   自己的注册无法屏蔽，所以这些工具没有按会话开关；
+   **「预设」**（`agentScoped`）——`tools.restrict` 只作用于继承层，agent 自己的
+   注册无法 restrict，所以**会话开关**仍不可用；v28 起可见范围 / 每工作区默认 /
+   工作区覆盖可配，工作区关闭后由执行层 `tools.guard` 拒绝调用；
 5. 其余（非 mcp、非内建、无映射）→ 合并进唯一的 **「来源未识别」** 单元
    （`未识别` 琥珀标签；可开关、计入分母，但**不进 Jev 候选**——它可能混入未来
    宿主新增的内建工具，让模型去"推荐关闭"风险高）。
@@ -539,14 +541,14 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
    帧路径先走「包根 realpath 前缀」映射（覆盖 `link:`/`@local/*` 的真实路径帧），
    再走 `node_modules/<pkg>`；**注册栈里的**宿主帧（`app.asar` / `@deepseek-ai/*`）
    与 `dsh-mcp-client` bridge 帧不作为第三方归属；但 `ctx.fiber.name`（插件导出名，
-   如 `tool-subagent`）能映射到宿主包时，按 `hostInjected` 只读宿主单元归属
+   如 `tool-subagent`）能映射到宿主包时，按 `hostInjected` 归到宿主单元
    ——这是 `subagent_codex` / `subagent_claude_code` 这类 provider 实例工具的主路径；
    `mcp__*` 永不写工具归属（只从身份信号派生插件自注册命名空间）；零文件 IO、
    单次约 µs 级；连续失败 3 次自动禁用本进程 T0。
 2. **T1 包扫描（冷启动回填）**：按插件包根扫源码字面量（只读 `.js/.mjs/.cjs`，
    跳 artifacts/test/`.d.ts`/node_modules，单文件/单包/总量限额）——工具名在
    **唯一**一个插件包里出现 → 归该包；多命中不猜（标 ambiguous）。
-   **T1' 宿主 loader 声明（只读宿主单元兜底）**：宿主包（`@deepseek-ai/*`）的
+   **T1' 宿主 loader 声明（宿主单元兜底）**：宿主包（`@deepseek-ai/*`）的
    loader 条目带 `config.toolName` 时，该名字直接归到这个宿主包（`matchedBy=config`，
    UI「宿主声明」）。用于 T0 挂上之前就注册好的 provider 实例工具，按条目现算、
    不依赖手写名单；第三方条目的 `config.toolName` 不参与。
@@ -563,7 +565,7 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
    被多个包声明（如 `bash` 的普通版 / persistent 版）时不猜，回落人工表。
 6. **Agent 作用域并集（v26.2）**：`ctx.get("agents").list()` 的每个 live agent
    调 `tools.schemas(agent)`，只补全局层没有的名字；这些工具按来源包的
-   `hostInjected` / `agentScoped` 规则只读展示。
+   `hostInjected` / `agentScoped` 规则展示，v28 起可见范围与工作区默认可配。
 
 归属结果显示在 Tools / MCP 详情的「来源判定」：运行时捕获 / 包扫描 / 宿主声明 /
 人工映射 / 名字推测 / 命名空间 / 未识别（运行时捕获带「高置信」= 调用方身份，
@@ -615,12 +617,17 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
 
 **两层语义：能力面板 = 全局默认，会话首屏 = 本会话覆盖**
 
-- **宿主注入插件单元只读（v26）**：所属包为 `@deepseek-ai/*`（例如宿主
-  `@deepseek-ai/dsh-terminal-panel` 注册的 `user_terminal_*`）的单元属于
-  **运行基线**，所有工作区默认启用。面板与首屏照常展示（标签「宿主」），但开关
-  一律置灰；`tools.setSessionEnabled` / `tools.setGlobalEnabled` 与可见性写入在
-  宿主侧也会拒绝。工具归属优先按宿主包源码字面量识别，避免被同名第三方插件按
-  「名字推测」抢走。
+- **宿主 / 预设工具的人类开关域（v28）**：所属包为 `@deepseek-ai/*`（例如宿主
+  `@deepseek-ai/dsh-terminal-panel` 注册的 `user_terminal_*`）或由 Agent 预设按会话
+  挂载（`agentScoped`）的单元，**会话 / 全局默认开关**仍锁定；但**可见范围、每工作区
+  默认与工作区覆盖**由人类在能力面板配置（详情「编辑可见范围」+ 工作区行尾开关）。
+  - **工作区优先、恢复回落**：工作区开关写项目三态（`tools` / `enabledTools`）；
+    `off` = 本工作区默认不启用，重新打开时若全局默认本就开启则**只清项目覆盖**，
+    回到全局默认（与普通插件单元同一套语义）。
+  - **运行层**：继承层的宿主工具默认恒启用；工作区默认 / 可见性显式关闭时进
+    `tools.restrict`。预设工具注册在 agent 自己层、`restrict` 无法屏蔽，改用
+    `tools.guard` 在调用时拒绝（恢复 / 卸载即解除）。
+  - 工具归属优先按宿主包源码字面量识别，避免被同名第三方插件按「名字推测」抢走。
 - **能力面板 Tools 页 = 全局默认**（所有会话、含新建会话）：写
   `<dshHome>/dsh-capability-settings/tools-global.json`
   （`{"version":1,"disabled":["<unit>",…]}`；目录 `700` / 文件 `600`、原子写 + 文件锁）。
@@ -879,7 +886,8 @@ skill 文件自己的 frontmatter，由宿主的文件 watcher + 目录重发布
   每次重算，持久化只存插件单元 id），共享实例不卸载，插件升级增减工具自动跟随。
   全局默认关闭的插件**仍可在本会话单独开启**；`lockedReason` 的单元开关置灰；
   冷会话（无 live agent）仍可落盘，agent 创建后按 effective 重算 restrict。
-  「来源未识别」单元同样可开关、计入分母，但**不进 Jev 候选**。
+  「来源未识别」单元同样可开关、计入分母，但**不进 Jev 候选**；宿主 / 预设工具
+  单元（v28）同样**不进 Jev 候选**——它们只由人类的可见范围 / 工作区开关决定。
 - **批量语义（`session.setBulk`）**：宿主自己枚举三域目标、**幂等**（重放只写差异）、
   **同会话串行**、**部分失败不回滚**（失败项在 `failed[]` 里带
   `domain / target / kind / error`，已成功项保留；重试 = 重放同一 action）；

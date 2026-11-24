@@ -20,6 +20,15 @@ import type { HostToolBrief } from "./types.js";
 export declare const TOOLS_RESTRICT_UNAVAILABLE = "\u5BBF\u4E3B tools \u670D\u52A1\u672A\u63D0\u4F9B restrict()\uFF0C\u65E0\u6CD5\u5728\u672C\u4F1A\u8BDD\u5173\u95ED\u63D2\u4EF6\u5DE5\u5177";
 /** 名单为空（工具尚未注册 / 已全部注销）时的降级说明。 */
 export declare const TOOLS_RESTRICT_NO_TOOLS = "\u8BE5\u5355\u5143\u5F53\u524D\u6CA1\u6709\u5DF2\u6CE8\u518C\u7684\u5168\u5C40\u5DE5\u5177\uFF08\u53EF\u80FD\u5C1A\u672A\u52A0\u8F7D\uFF09\uFF0C\u672C\u6B21\u672A\u8C03\u7528 restrict";
+/**
+ * v28：预设（agent-scope）工具被工作区默认关闭时，执行层 guard 的拒绝文案。
+ *
+ * `tools.restrict` 无法屏蔽 agent 自身层注册（宿主契约），因此这类单元改用
+ * `tools.guard`（monotonic denial）在调用时拒绝；恢复工作区默认后 disposer 解除。
+ */
+export declare const PRESET_TOOL_DISABLED_REASON = "\u8BE5\u5DE5\u5177\u5728\u6240\u5C5E\u5DE5\u4F5C\u533A\u5DF2\u5173\u95ED\uFF08\u80FD\u529B\u9762\u677F\u5DE5\u4F5C\u533A\u9ED8\u8BA4\uFF09\uFF1B\u6062\u590D\u9ED8\u8BA4\u540E\u53EF\u7528";
+/** v28：宿主未提供 `tools.guard` 时预设工具的降级说明。 */
+export declare const TOOLS_GUARD_UNAVAILABLE = "\u5BBF\u4E3B tools \u670D\u52A1\u672A\u63D0\u4F9B guard()\uFF0C\u65E0\u6CD5\u5728\u672C\u4F1A\u8BDD\u62D2\u7EDD\u5DF2\u5173\u95ED\u7684\u9884\u8BBE\u5DE5\u5177";
 /** 一次 restrict 的结果状态（与 `McpRestrictionView.state` 同口径）。 */
 export type ToolsRestrictionState = "applied" | "skipped" | "failed";
 /** restrict 执行结果（`deny` 是实际提交的名单，供幂等短路比对）。 */

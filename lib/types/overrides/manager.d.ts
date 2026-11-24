@@ -63,7 +63,8 @@ export interface OverridesManagerDeps {
      * 写路径的宿主注入判定（Skills / MCP / Tools 共用）。
      *
      * 返回 true ≈ 该 key 是宿主注入能力（`@deepseek-ai/*` / 随包 / 宿主预设）：
-     * 全局默认、项目默认、可见性一律拒绝写入（只读展示、所有工作区默认需要）。
+     * 全局默认写入拒绝（skills / mcp 的项目默认与可见性也拒绝）；Tools 的可见性
+     * 与工作区三态在 v28 起豁免（见 setVisibility / toggle）。
      * 缺省 = 不判定（旧装配 / 单测）。
      */
     isHostKey?: (domain: CapabilityDomain, key: string, cwd?: string) => Promise<boolean> | boolean;

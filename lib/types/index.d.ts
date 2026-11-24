@@ -177,6 +177,7 @@ export { projectOverridesFile, OVERRIDES_FILE_NAME, overridesStoreFile, OVERRIDE
 export { readOverrides, writeOverrides, readOverridesStore, writeOverridesStore, normalizeOverridesSet, DOMAIN_KEYS, OVERRIDES_STORE_VERSION, } from "./overrides/config-file.js";
 export { readGlobalOverrides, readGlobalOverridesDocument, writeGlobalOverrides, emptyGlobalOverrides, GLOBAL_OVERRIDES_VERSION, GLOBAL_OVERRIDES_LEGACY_VERSION, } from "./overrides/global-file.js";
 export type { GlobalOverridesReadResult } from "./overrides/global-file.js";
+export { HOST_INJECTED_LABEL, HOST_INJECTED_REASON, AGENT_SCOPED_REASON, AGENT_SCOPED_TOOL_REASON, HOST_INJECTED_TOOL_REASON, } from "./shared/host-injected.js";
 export { VISIBILITY_DOMAINS, INVISIBLE_CAPABILITY_ERROR, emptyVisibilitySets, emptyCapabilityVisibility, normalizeMode, normalizeWorkspaceVisibility, normalizeCapabilityVisibility, normalizeVisibilitySets, visibilityEntryOf, visibilityModeOf, visibleWorkspaceCount, workspaceMatchKey, visibleIn, perWorkspaceDefault, isGloballyDisabled, invisibleKeysForWorkspace, } from "./shared/visibility.js";
 export type { VisibilityDomain, VisibilityMode, VisibilitySets, CapabilityVisibility, WorkspaceVisibility, WorkspaceTarget, } from "./shared/visibility.js";
 export { skillDefaultSets, effectiveDisabledSkills, skillDefaultFlags, annotateSkillDefaults, EMPTY_SKILL_DEFAULT_SETS, } from "./shared/skill-defaults.js";

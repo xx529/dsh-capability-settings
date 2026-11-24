@@ -441,14 +441,16 @@ export async function enumerateCapabilities(options: {
     }
     for (const unit of toolsView?.units ?? []) {
       if (unit.kind === "unattributed") continue;
-      // 宿主注入单元：运行基线，仍展示但不可选。
-      const hostInjected = unit.hostInjected === true;
+      // v28：预设 / 宿主工具是**人类开关域**（可见范围 + 每工作区默认 + 工作区
+      // 覆盖），不进 Jev 的候选、打分或自动应用；连「不可选展示行」也不下发，
+      // 避免模型参与这类工具的取舍。
+      if (unit.hostInjected === true || unit.agentScoped === true) continue;
       // 两层语义（task-20 §4）：候选 = 本会话 **effective 启用**的插件
       // （`enabled = 会话覆盖 ?? 全局默认`）。全局默认关闭 / 本会话已关的单元
       // **不参与评分与应用**，因此 Jev 无法把它们重新打开（只收窄不扩权）。
       const effective = typeof unit.enabled === "boolean" ? unit.enabled : unit.enabledInSession;
       if (effective !== true) continue;
-      const applicable = !hostInjected && unit.lockedReason === undefined;
+      const applicable = unit.lockedReason === undefined;
       const capability: JevCapability = {
         id: capabilityId(`tool:plugin:${unit.unit}`),
         kind: "tool",
@@ -476,8 +478,7 @@ export async function enumerateCapabilities(options: {
         toolsExplicitToggle: unit.explicit ? true : undefined,
         write: { type: "tools", unit: unit.unit, unitName: unit.name },
       };
-      if (hostInjected) capability.hostInjected = true;
-      if (!applicable) capability.reason = hostInjected ? "host-injected" : "not-restrictable";
+      if (!applicable) capability.reason = "not-restrictable";
       add(capability);
     }
   }

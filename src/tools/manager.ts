@@ -7,8 +7,9 @@
  *
  *   - **枚举源**：全局 `ctx.root.get("tools").schemas()`（继承层）+ live agent 的
  *     `tools.schemas(agent)` 并集（v26.2：桌面 / Web 把核心工具改由 Agent 预设
- *     按会话挂载，全局层看不到）。`restrict` 只能屏蔽继承层名字，agent 自身层
- *     注册的工具只读展示（`agentScoped`），不产生 deny。
+ *     按会话挂载，全局层看不到）。`restrict` 只能屏蔽继承层名字；agent 自身层
+ *     注册的工具标 `agentScoped`，不产生 deny（v28：改由执行层 `tools.guard`
+ *     按工作区默认拒绝调用）。
  *   - **一个插件 = 一个开关单元**：关闭 = 对该插件在本会话的全部可继承工具
  *     `tools.restrict({deny})`；deny 名单**每次重算**，持久化只存 `plugin:<unit>`。
  *   - **A4 未识别单元**：可开关、计入分母、不进 Jev 候选。
@@ -30,20 +31,22 @@
 import { errMessage } from "../shared/errors.js";
 import type { CapabilityDefaults } from "../overrides/types.js";
 import { INVISIBLE_CAPABILITY_ERROR } from "../shared/visibility.js";
-import { HOST_INJECTED_REASON } from "../shared/host-injected.js";
+import { AGENT_SCOPED_TOOL_REASON, HOST_INJECTED_TOOL_REASON } from "../shared/host-injected.js";
 import { attributeTool, hostBuiltinUnitOf, isHostBuiltinTool } from "../shared/plugin-attribution.js";
 import { parseMcpToolName } from "../mcp/usage.js";
 import type { SessionStateMeta, SessionStateStore } from "../session-state.js";
 import {
   applyRestrict,
   computeDenyNames,
+  PRESET_TOOL_DISABLED_REASON,
   sameDenyNames,
   TOOLS_RESTRICT_UNAVAILABLE,
+  TOOLS_RESTRICT_NO_TOOLS,
+  TOOLS_GUARD_UNAVAILABLE,
   type RestrictOutcome,
   type ToolsRestrictionState,
 } from "./restrict.js";
 import {
-  AGENT_SCOPED_REASON,
   UNATTRIBUTED_DISPLAY,
   UNATTRIBUTED_UNIT,
   unitKeyOf,
@@ -88,7 +91,7 @@ interface ToolsEnumeration {
     unit: string;
     name: string;
     kind: "plugin" | "unattributed";
-    /** true = 宿主注入（`@deepseek-ai/*`）：只读展示，不参与任何开关。 */
+    /** true = 宿主注入（`@deepseek-ai/*`）：会话/全局开关锁定，可见性与工作区默认可配。 */
     hostInjected: boolean;
     /** true = 该单元全部工具都注册在 Agent 预设作用域（只读，不能 restrict）。 */
     agentScoped?: boolean;
@@ -122,12 +125,21 @@ interface ToolsSessionRecord {
   /** 本代会话显式关单元 → 展示名（重算时用）。 */
   targets: Array<{ unit: string; name: string }>;
   restrictDisposers: Array<() => void>;
+  /**
+   * v28：预设（agent-scope）工具的关闭 guard（restrict 无法屏蔽 own-layer 注册）。
+   * 只对「工作区默认 / 可见性判定为关闭」的预设单元注册；重算 / 卸载时释放。
+   */
+  guardDisposers: Array<() => void>;
+  /** 上一代 guard 覆盖的工具名（幂等短路用）。 */
+  guardedNames: string[];
   appliedDeny: string[];
   restrictions: Array<{ unit: string; state: ToolsRestrictionState; error?: string }>;
   /** 串行化本 session 的重算（与 mcp loader 同款）。 */
   queue: Promise<void>;
   /** 降级 warning 只打一次，避免 `tools/change` 刷新刷屏。 */
   restrictWarned?: boolean;
+  /** v28：预设工具 guard 降级 warning 只打一次。 */
+  guardWarned?: boolean;
   /**
    * v21.2：本会话**创建时冻结**的默认快照（unit → 当时的默认态）。
    *
@@ -478,16 +490,38 @@ function computeTargets(
   const targets: Array<{ unit: string; name: string }> = [];
   const targetTools: HostToolBrief[][] = [];
   for (const unit of enumeration.units) {
-    // 宿主注入能力是运行基线：所有工作区默认需要，任何默认/会话状态都不能把它关掉。
-    if (unit.hostInjected) continue;
-    // Agent 预设注入的工具注册在会话自己的层：restrict 无法屏蔽，不产生 deny 目标。
+    // Agent 预设注入的工具注册在会话自己的层：restrict 无法屏蔽，不产生 deny 目标
+    // （v28 由 {@link computePresetTargets} + 执行层 guard 处理工作区默认关闭）。
     if (unit.agentScoped === true) continue;
+    // 宿主工具默认仍是运行基线（effectiveDefaultEnabled 缺省 true，不会命中）；
+    // v28 起只有人类显式配置（可见性 / 工作区默认）把它置为关闭时才产生 deny。
     if (effectiveEnabledFor(unit.unit, toggles, defaults, globallyDisabled)) continue;
     targets.push({ unit: unit.unit, name: unit.name });
     targetTools.push(unit.tools);
   }
   targets.sort((a, b) => a.name.localeCompare(b.name));
   return { targets, targetTools };
+}
+
+/**
+ * v28：预设（agent-scope）单元里「按工作区默认 / 可见性应关闭」的单元。
+ *
+ * 这类工具不能进 `tools.restrict`（own-layer 注册），只作为执行层 `tools.guard`
+ * 的目标；默认（无配置）时全部开启，因此旧行为不变。
+ */
+function computePresetTargets(
+  toggles: ReadonlyMap<string, boolean> | undefined,
+  enumeration: ToolsEnumeration,
+  globallyDisabled: ReadonlySet<string>,
+  defaults?: ReadonlyMap<string, CapabilityDefaults>,
+): ToolsEnumeration["units"] {
+  const targets: ToolsEnumeration["units"] = [];
+  for (const unit of enumeration.units) {
+    if (unit.agentScoped !== true) continue;
+    if (effectiveEnabledFor(unit.unit, toggles, defaults, globallyDisabled)) continue;
+    targets.push(unit);
+  }
+  return targets;
 }
 
 /** 对某个 agent 的一次性应用结果（R2 预留形态的返回值）。 */
@@ -738,12 +772,11 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
     for (const key of keys) if (!toggles.has(key)) toggles.set(key, stored[key]);
   }
 
-  /** 释放本 session 上一代的 restrict（同步；换代与重算前都会调用）。 */
-  function releaseRestrictions(record: ToolsSessionRecord): void {
+  /** 释放本 session 上一代的 restrict（只动 restrict；guard 由 releaseGuards 释放）。 */
+  function releaseRestrict(record: ToolsSessionRecord): void {
     const disposers = record.restrictDisposers;
     record.restrictDisposers = [];
     record.appliedDeny = [];
-    record.restrictions = [];
     for (const dispose of disposers) {
       try {
         dispose();
@@ -752,6 +785,79 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
           `capability-panel: 解除插件工具屏蔽失败（session ${record.agent?.id}）：${errMessage(error)}`,
         );
       }
+    }
+  }
+
+  /** 释放预设工具的执行层 guard（只动 guard）。 */
+  function releaseGuards(record: ToolsSessionRecord): void {
+    const disposers = record.guardDisposers;
+    record.guardDisposers = [];
+    record.guardedNames = [];
+    for (const dispose of disposers) {
+      try {
+        dispose();
+      } catch (error) {
+        logger?.warn?.(
+          `capability-panel: 解除预设工具关闭 guard 失败（session ${record.agent?.id}）：${errMessage(error)}`,
+        );
+      }
+    }
+  }
+
+  /** 释放本 session 上一代的 restrict + guard（卸载 / 整代重算前调用）。 */
+  function releaseRestrictions(record: ToolsSessionRecord): void {
+    releaseRestrict(record);
+    releaseGuards(record);
+    record.restrictions = [];
+  }
+
+  /**
+   * v28：给「按工作区默认关闭」的预设单元注册执行层 guard。
+   *
+   * 预设工具注册在 agent 自己的层，`tools.restrict` 按宿主契约无法屏蔽；用
+   * `tools.guard`（monotonic denial）在调用时拒绝，disposer 在重算 / 卸载时解除。
+   * 任何失败只降级为 `skipped` + warning，绝不抛穿会话创建路径。
+   */
+  function applyPresetGuards(
+    record: ToolsSessionRecord,
+    presetTargets: ToolsEnumeration["units"],
+  ): Array<{ unit: string; state: ToolsRestrictionState; error?: string }> {
+    if (presetTargets.length === 0) return [];
+    const names = [...new Set(presetTargets.flatMap((unit) => unit.tools.map((tool) => tool.name)))].sort();
+    const agentTools = record.agent?.ctx?.get?.("tools");
+    if (typeof agentTools?.guard !== "function") {
+      if (record.guardWarned !== true) {
+        record.guardWarned = true;
+        logger?.warn?.(
+          `capability-panel: ${TOOLS_GUARD_UNAVAILABLE}（session ${record.agent?.id}，${presetTargets.map((unit) => unit.name).join(", ")}）`,
+        );
+      }
+      return presetTargets.map((unit) => ({ unit: unit.unit, state: "skipped" as const, error: TOOLS_GUARD_UNAVAILABLE }));
+    }
+    if (names.length === 0) {
+      return presetTargets.map((unit) => ({ unit: unit.unit, state: "skipped" as const, error: TOOLS_RESTRICT_NO_TOOLS }));
+    }
+    try {
+      const denied = new Set(names);
+      const dispose = agentTools.guard((execution: any) => {
+        const name = typeof execution?.name === "string" ? execution.name : "";
+        return name.length > 0 && denied.has(name) ? PRESET_TOOL_DISABLED_REASON : undefined;
+      });
+      if (typeof dispose === "function") record.guardDisposers.push(dispose);
+      record.guardedNames = names;
+      return presetTargets.map((unit) => ({ unit: unit.unit, state: "applied" as const }));
+    } catch (error) {
+      if (record.guardWarned !== true) {
+        record.guardWarned = true;
+        logger?.warn?.(
+          `capability-panel: 无法关闭预设工具（session ${record.agent?.id}，${presetTargets.map((unit) => unit.name).join(", ")}）：${errMessage(error)}`,
+        );
+      }
+      return presetTargets.map((unit) => ({
+        unit: unit.unit,
+        state: "failed" as const,
+        error: errMessage(error),
+      }));
     }
   }
 
@@ -765,39 +871,60 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
     const toggles = sessionId !== undefined ? sessionToggles.get(sessionId) : undefined;
     // v21.2：用**本会话创建时冻结的**默认快照，而非当前配置文件（默认 / 可见性
     // 变更只影响新会话；会话级显式开关仍按 `toggles` 即时生效）。
-    const { targets, targetTools } = computeTargets(
-      toggles,
-      enumeration,
-      record.globals ?? new Set<string>(),
-      record.defaults,
-    );
+    const globallyDisabled = record.globals ?? new Set<string>();
+    const { targets, targetTools } = computeTargets(toggles, enumeration, globallyDisabled, record.defaults);
+    const presetTargets = computePresetTargets(toggles, enumeration, globallyDisabled, record.defaults);
     record.targets = targets;
-    if (targets.length === 0) {
-      if (record.restrictDisposers.length > 0 || record.restrictions.length > 0) releaseRestrictions(record);
-      return;
+
+    /** restrict 应用于继承层（插件 + v28 显式关闭的宿主工具）。 */
+    let restrictStates: Array<{ unit: string; state: ToolsRestrictionState; error?: string }> = [];
+    if (targets.length > 0) {
+      const deny = computeDenyNames(targetTools, enumeration.names);
+      if (record.restrictDisposers.length > 0 && sameDenyNames(deny, record.appliedDeny)) {
+        // 幂等短路：名单与上一代完全一致（`tools/change` 不形成循环的关键）。
+        restrictStates = targets.map((target) => ({ unit: target.unit, state: "applied" as const }));
+      } else {
+        releaseRestrict(record);
+        const agentTools = record.agent?.ctx?.get?.("tools");
+        const outcome = applyRestrict(agentTools, deny);
+        if (outcome.state === "applied") {
+          if (typeof outcome.dispose === "function") record.restrictDisposers.push(outcome.dispose);
+          record.appliedDeny = deny;
+        } else if (record.restrictWarned !== true) {
+          record.restrictWarned = true;
+          const reason =
+            outcome.error ??
+            (typeof agentTools?.restrict !== "function" ? TOOLS_RESTRICT_UNAVAILABLE : "empty deny list");
+          logger?.warn?.(
+            `capability-panel: 无法关闭插件工具（session ${record.agent?.id}，${targets.map((target) => target.name).join(", ")}）：${reason}`,
+          );
+        }
+        restrictStates = targets.map((target) => ({
+          unit: target.unit,
+          state: outcome.state,
+          ...(outcome.error !== undefined ? { error: outcome.error } : {}),
+        }));
+      }
+    } else if (record.restrictDisposers.length > 0) {
+      releaseRestrict(record);
     }
-    const deny = computeDenyNames(targetTools, enumeration.names);
-    if (record.restrictDisposers.length > 0 && sameDenyNames(deny, record.appliedDeny)) return;
-    releaseRestrictions(record);
-    const agentTools = record.agent?.ctx?.get?.("tools");
-    const outcome = applyRestrict(agentTools, deny);
-    if (outcome.state === "applied") {
-      if (typeof outcome.dispose === "function") record.restrictDisposers.push(outcome.dispose);
-      record.appliedDeny = deny;
-    } else if (record.restrictWarned !== true) {
-      record.restrictWarned = true;
-      const reason =
-        outcome.error ??
-        (typeof agentTools?.restrict !== "function" ? TOOLS_RESTRICT_UNAVAILABLE : "empty deny list");
-      logger?.warn?.(
-        `capability-panel: 无法关闭插件工具（session ${record.agent?.id}，${targets.map((target) => target.name).join(", ")}）：${reason}`,
-      );
+
+    /** 预设工具（agent-scope）走执行层 guard；目标为空时释放上一代 guard。 */
+    let guardStates: Array<{ unit: string; state: ToolsRestrictionState; error?: string }> = [];
+    const guardNames = [...new Set(presetTargets.flatMap((unit) => unit.tools.map((tool) => tool.name)))].sort();
+    const sameGuard =
+      guardNames.length === record.guardedNames.length &&
+      guardNames.every((name, index) => name === record.guardedNames[index]);
+    if (presetTargets.length === 0) {
+      if (record.guardDisposers.length > 0) releaseGuards(record);
+    } else if (!sameGuard || record.guardDisposers.length === 0) {
+      releaseGuards(record);
+      guardStates = applyPresetGuards(record, presetTargets);
+    } else {
+      guardStates = presetTargets.map((unit) => ({ unit: unit.unit, state: "applied" as const }));
     }
-    record.restrictions = targets.map((target) => ({
-      unit: target.unit,
-      state: outcome.state,
-      ...(outcome.error !== undefined ? { error: outcome.error } : {}),
-    }));
+
+    record.restrictions = [...restrictStates, ...guardStates];
   }
 
   /**
@@ -880,6 +1007,8 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
       ...(cwd !== undefined ? { cwd } : {}),
       targets: [],
       restrictDisposers: [],
+      guardDisposers: [],
+      guardedNames: [],
       appliedDeny: [],
       restrictions: [],
       queue: Promise.resolve(),
@@ -957,31 +1086,13 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
       // 不阻塞列表（Jev 侧有占位兜底）。
       const description = deps.resolver?.packageDescription?.(unit.unit);
       const briefTools = unit.tools.map((tool) => ({ ...tool }));
-      if (unit.hostInjected || unit.agentScoped === true) {
-        // 宿主注入 / Agent 预设注入：只读展示、恒启用。忽略并清空可见性/默认/显式
-        // 覆盖的投影，面板与运行时都不能把它关掉（restrict 对 own-layer 无效）。
-        units.push({
-          unit: unit.unit,
-          name: unit.name,
-          kind: unit.kind,
-          ...(unit.hostInjected ? { hostInjected: true } : {}),
-          ...(unit.agentScoped === true ? { agentScoped: true } : {}),
-          ...(unit.agentToolCount !== undefined && unit.agentToolCount > 0
-            ? { agentToolCount: unit.agentToolCount }
-            : {}),
-          ...(description !== undefined && description.trim().length > 0 ? { description: description.trim() } : {}),
-          tools: briefTools,
-          toolCount: unit.tools.length,
-          attribution: { ...unit.attribution },
-          defaultEnabled: true,
-          enabled: true,
-          enabledInSession: true,
-          explicit: false,
-          lockedReason: unit.agentScoped === true ? AGENT_SCOPED_REASON : HOST_INJECTED_REASON,
-        });
-        continue;
-      }
+      // v28：宿主 / 预设工具不再整行只读——**会话开关**仍锁定（restrict 契约），
+      // 但可见范围、每工作区默认与工作区覆盖由人类配置。默认无配置时仍恒启用，
+      // 保持旧行为。
+      const humanOnly = unit.hostInjected === true || unit.agentScoped === true;
       const key = unitKeyOf(unit.unit);
+      // 旧版本可能给宿主 / 预设单元留下显式会话覆盖（现在会话开关已锁定，但
+      // 读端仍照实投影，保证与运行层 effectiveEnabledFor 的口径一致）。
       const explicit = toggles?.has(key) === true;
       const capability = defaults.get(unit.unit);
       const visible = capability?.visible ?? true;
@@ -991,24 +1102,29 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
       }
       // 两层语义：`defaultEnabled` = 当前视图口径的默认（工作区 = 每工作区默认 +
       // 项目覆盖；全局视图 = 兜底全局默认）；`enabled` = 本会话生效
-      // （会话覆盖 ?? 默认）。`enabledInSession` 是恒等 legacy 别名。
+      // （会话覆盖 ?? 默认）。`enabledInSession` 是恒等 legacy 别名。宿主 / 预设
+      // 单元没有全局默认开关，缺省基线恒为开（旧行为）；v28 起可见性 / 工作区
+      // 默认显式关闭时，host 单元进 restrict、preset 单元进执行层 guard。
+      const baseline = humanOnly ? true : !globalDisabled.has(unit.unit);
       const effectiveDefault =
-        capability !== undefined
-          ? capability.effectiveDefaultEnabled
-          : !globalDisabled.has(unit.unit);
+        capability !== undefined ? capability.effectiveDefaultEnabled : baseline;
       const defaultEnabled = workspaceView
-        ? capability !== undefined
-          ? capability.workspaceDefaultEnabled
-          : effectiveDefault
-        : capability !== undefined
-          ? capability.globalDefaultEnabled
-          : effectiveDefault;
+        ? (capability?.workspaceDefaultEnabled ?? baseline)
+        : (capability?.globalDefaultEnabled ?? baseline);
       const enabled = explicit ? toggles?.get(key) === true : effectiveDefault;
+      const unitLockedReason =
+        unit.agentScoped === true
+          ? AGENT_SCOPED_TOOL_REASON
+          : unit.hostInjected === true
+            ? HOST_INJECTED_TOOL_REASON
+            : lockedReason;
       const restriction = record?.restrictions.find((entry) => entry.unit === unit.unit);
       units.push({
         unit: unit.unit,
         name: unit.name,
         kind: unit.kind,
+        ...(unit.hostInjected ? { hostInjected: true } : {}),
+        ...(unit.agentScoped === true ? { agentScoped: true } : {}),
         ...(unit.agentToolCount !== undefined && unit.agentToolCount > 0
           ? { agentToolCount: unit.agentToolCount }
           : {}),
@@ -1031,7 +1147,7 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
               ...(workspaceView ? { visibleInWorkspace: capability.visible } : {}),
             }
           : {}),
-        ...(lockedReason !== undefined ? { lockedReason } : {}),
+        ...(unitLockedReason !== undefined ? { lockedReason: unitLockedReason } : {}),
         ...(restriction !== undefined
           ? { restriction: { state: restriction.state, ...(restriction.error !== undefined ? { error: restriction.error } : {}) } }
           : {}),
@@ -1112,8 +1228,8 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
     const lockedReasons = new Map<string, string>();
     for (const unit of enumeration.units) {
       // Agent 预设注入更具体：宿主工具也可能挂在预设里，优先解释「随预设固定」。
-      if (unit.agentScoped === true) lockedReasons.set(unit.unit, AGENT_SCOPED_REASON);
-      else if (unit.hostInjected) lockedReasons.set(unit.unit, HOST_INJECTED_REASON);
+      if (unit.agentScoped === true) lockedReasons.set(unit.unit, AGENT_SCOPED_TOOL_REASON);
+      else if (unit.hostInjected) lockedReasons.set(unit.unit, HOST_INJECTED_TOOL_REASON);
     }
     // v21：不可见单元不能写会话开关（混合请求时跳过不可见项；全不可见 ⇒ 业务失败）。
     const requestedAll = [
@@ -1122,7 +1238,7 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
       ),
     ];
     if (requestedAll.length > 0 && requestedAll.every((unit) => lockedReasons.has(unit))) {
-      const reasons = [...new Set(requestedAll.map((unit) => lockedReasons.get(unit) ?? HOST_INJECTED_REASON))];
+      const reasons = [...new Set(requestedAll.map((unit) => lockedReasons.get(unit) ?? HOST_INJECTED_TOOL_REASON))];
       return { ok: false, errors: reasons };
     }
     const requestedUnits = requestedAll.filter((unit) => !lockedReasons.has(unit));
@@ -1214,8 +1330,8 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
     const lockedReasons = new Map<string, string>();
     for (const unit of enumeration.units) {
       // Agent 预设注入更具体：宿主工具也可能挂在预设里，优先解释「随预设固定」。
-      if (unit.agentScoped === true) lockedReasons.set(unit.unit, AGENT_SCOPED_REASON);
-      else if (unit.hostInjected) lockedReasons.set(unit.unit, HOST_INJECTED_REASON);
+      if (unit.agentScoped === true) lockedReasons.set(unit.unit, AGENT_SCOPED_TOOL_REASON);
+      else if (unit.hostInjected) lockedReasons.set(unit.unit, HOST_INJECTED_TOOL_REASON);
     }
     const requested: string[] = [];
     const seen = new Set<string>();
@@ -1234,7 +1350,7 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
       requested.push(unit);
     }
     if (requested.length === 0) {
-      return hostRequested ? { ok: false, errors: [lockedRequested ?? HOST_INJECTED_REASON] } : { ok: true, applied: 0 };
+      return hostRequested ? { ok: false, errors: [lockedRequested ?? HOST_INJECTED_TOOL_REASON] } : { ok: true, applied: 0 };
     }
     // v21：全局兜底写入 `capability-global-overrides.json` 的 `tools`（旧
     // tools-global.json 只读兼容）；旧装配回退旧 store。

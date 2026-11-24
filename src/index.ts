@@ -459,7 +459,12 @@ export function apply(ctx: any, config: Config = {}) {
     if (domain === "tools") {
       try {
         const view = await tools.list();
-        return view.units.some((unit) => unit.unit === key && unit.hostInjected === true);
+        // v28：可见性 / 工作区三态写路径已在 overrides 里豁免 tools；这个守卫
+        // 只剩「全局默认写入」用，宿主工具与预设工具都不可写（人类开关走可见性
+        // 与每工作区默认）。会话 restrict 由 tools manager 自己拒绝。
+        return view.units.some(
+          (unit) => unit.unit === key && (unit.hostInjected === true || unit.agentScoped === true),
+        );
       } catch {
         return false;
       }
@@ -777,6 +782,13 @@ export {
   GLOBAL_OVERRIDES_LEGACY_VERSION,
 } from "./overrides/global-file.js";
 export type { GlobalOverridesReadResult } from "./overrides/global-file.js";
+export {
+  HOST_INJECTED_LABEL,
+  HOST_INJECTED_REASON,
+  AGENT_SCOPED_REASON,
+  AGENT_SCOPED_TOOL_REASON,
+  HOST_INJECTED_TOOL_REASON,
+} from "./shared/host-injected.js";
 export {
   VISIBILITY_DOMAINS,
   INVISIBLE_CAPABILITY_ERROR,

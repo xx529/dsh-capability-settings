@@ -17,6 +17,9 @@
  * 全局视图的行尾开关仍是**全局默认兜底**（`tools.setGlobalEnabled`，写统一全局文件）；
  * 不可见行的默认开关禁用并标「不可见 · 不参与默认」。
  *
+ * v28：宿主工具 / 预设工具不再整行只读——**会话开关**仍锁定（宿主 restrict
+ * 契约），但可见范围与工作区覆盖由人类配置；工作区行尾开关对它们也可写。
+ *
  * @module dsh-capability-settings/client/tools-panel
  */
 import type { CapabilityPanelApi } from "./api.js";
