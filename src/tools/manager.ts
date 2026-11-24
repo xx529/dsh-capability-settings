@@ -36,7 +36,7 @@ import { attributeTool, hostBuiltinUnitOf, isHostBuiltinTool } from "../shared/p
 import { parseMcpToolName } from "../mcp/usage.js";
 import type { SessionStateMeta, SessionStateStore } from "../session-state.js";
 import {
-  applyRestrict,
+  applyRestrictWithRetry,
   computeDenyNames,
   PRESET_TOOL_DISABLED_REASON,
   sameDenyNames,
@@ -112,8 +112,13 @@ interface ToolsEnumeration {
   totalGlobalTools: number;
   /** 被判定为宿主内建、但**未**以只读单元展示的条数（v26 起恒 0；保留诊断字段）。 */
   excludedBuiltinCount: number;
-  /** 当前全局视图里的全部工具名。 */
+  /** 当前全局视图里的全部工具名（restrict 的继承层安全集合）。 */
   names: ReadonlySet<string>;
+  /**
+   * v28.1：全局 + agent 预设层可见的全部工具名（含 scope-local 影子工具）。
+   * deny 候选先按它过滤，再由 {@link applyRestrictWithRetry} 剔除宿主拒绝的名字。
+   */
+  candidateNames: ReadonlySet<string>;
   /** 服务缺失/异常原因（不阻断其它域）。 */
   errors: string[];
 }
@@ -260,6 +265,7 @@ function enumerateGlobalTools(
     totalGlobalTools: 0,
     excludedBuiltinCount: 0,
     names: new Set<string>(),
+    candidateNames: new Set<string>(),
     errors,
   });
   let toolsService: any;
@@ -286,15 +292,19 @@ function enumerateGlobalTools(
   }
 
   const byUnit = new Map<string, ToolsEnumeration["units"][number]>();
-  /** 全局层工具名（restrict 的可用集合；agent-scope 名字不能进 deny）。 */
+  /** 全局层工具名（restrict 的继承层安全集合；诊断/兼容用）。 */
   const names = new Set<string>();
+  /** 全局 + agent 预设层的全部工具名（deny 候选；由宿主的未知名字重试兜底）。 */
+  const candidateNames = new Set<string>();
   let excludedBuiltinCount = 0;
 
   /** 收录一个工具（全局层或 agent 预设层）。 */
   const addTool = (raw: { name?: unknown; description?: unknown; parameters?: unknown } | null | undefined, agentScoped: boolean): void => {
     const name = typeof raw?.name === "string" ? raw.name : "";
     if (name.length === 0) return;
-    // deny 只能写继承层（全局）名字：agent 自己的注册写进 restrict 会直接报错。
+    candidateNames.add(name);
+    // 全局层名字是确定可 restrict 的集合；agent 预设层名字在宿主里位于预设祖先
+    // 作用域，同样可 restrict，但是否属于 own-layer 只能由宿主裁决（重试剔除）。
     if (!agentScoped) names.add(name);
     // 规则 1：任何可解析的 mcp__<ns>__<tool> 恒归 MCP 域（Tools 永不出现）。
     if (parseMcpToolName(name) !== undefined) return;
@@ -414,7 +424,7 @@ function enumerateGlobalTools(
     if (a.kind !== b.kind) return a.kind === "plugin" ? -1 : 1;
     return a.name.localeCompare(b.name);
   });
-  return { units, totalGlobalTools: schemas.length, excludedBuiltinCount, names, errors: [] };
+  return { units, totalGlobalTools: schemas.length, excludedBuiltinCount, names, candidateNames, errors: [] };
 }
 
 /** 单元级归属的确定性选择：命中规则优先，其次模式越长越优先，最后按模式字典序。 */
@@ -490,9 +500,9 @@ function computeTargets(
   const targets: Array<{ unit: string; name: string }> = [];
   const targetTools: HostToolBrief[][] = [];
   for (const unit of enumeration.units) {
-    // Agent 预设注入的工具注册在会话自己的层：restrict 无法屏蔽，不产生 deny 目标
-    // （v28 由 {@link computePresetTargets} + 执行层 guard 处理工作区默认关闭）。
-    if (unit.agentScoped === true) continue;
+    // v28.1：预设工具注册在**预设祖先作用域**（不是 agent own-layer），agent 的
+    // restrict 可以屏蔽；因此不再跳过 `agentScoped`。own-layer 影子工具混入时由
+    // applyRestrictWithRetry 从宿主错误里剔除后重试。
     // 宿主工具默认仍是运行基线（effectiveDefaultEnabled 缺省 true，不会命中）；
     // v28 起只有人类显式配置（可见性 / 工作区默认）把它置为关闭时才产生 deny。
     if (effectiveEnabledFor(unit.unit, toggles, defaults, globallyDisabled)) continue;
@@ -582,8 +592,8 @@ export function applyForAgent(
     options.capabilityDefaults,
   );
   if (targets.length === 0) return { targets: [], outcome: { state: "skipped", deny: [] } };
-  const deny = computeDenyNames(targetTools, enumeration.names);
-  const outcome = applyRestrict(agent?.ctx?.get?.("tools"), deny);
+  const deny = computeDenyNames(targetTools, enumeration.candidateNames);
+  const outcome = applyRestrictWithRetry(agent?.ctx?.get?.("tools"), deny);
   if (outcome.state === "failed") {
     options.logger?.warn?.(
       `capability-panel: 关闭插件工具失败（session ${sessionId}，${targets.map((target) => target.name).join(", ")}）：${outcome.error ?? "unknown"}`,
@@ -879,14 +889,14 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
     /** restrict 应用于继承层（插件 + v28 显式关闭的宿主工具）。 */
     let restrictStates: Array<{ unit: string; state: ToolsRestrictionState; error?: string }> = [];
     if (targets.length > 0) {
-      const deny = computeDenyNames(targetTools, enumeration.names);
+      const deny = computeDenyNames(targetTools, enumeration.candidateNames);
       if (record.restrictDisposers.length > 0 && sameDenyNames(deny, record.appliedDeny)) {
         // 幂等短路：名单与上一代完全一致（`tools/change` 不形成循环的关键）。
         restrictStates = targets.map((target) => ({ unit: target.unit, state: "applied" as const }));
       } else {
         releaseRestrict(record);
         const agentTools = record.agent?.ctx?.get?.("tools");
-        const outcome = applyRestrict(agentTools, deny);
+        const outcome = applyRestrictWithRetry(agentTools, deny);
         if (outcome.state === "applied") {
           if (typeof outcome.dispose === "function") record.restrictDisposers.push(outcome.dispose);
           record.appliedDeny = deny;

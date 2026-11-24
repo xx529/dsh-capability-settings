@@ -58,5 +58,27 @@ export declare function computeDenyNames(targetTools: readonly (readonly HostToo
  * @param deny 已按 {@link computeDenyNames} 过滤好的工具名
  */
 export declare function applyRestrict(agentTools: any, deny: readonly string[]): RestrictOutcome;
+/**
+ * v28.1：提交 restrict，并在宿主拒绝「非继承层 / 已注销」名字时自动剔除重试。
+ *
+ * 预设插件的工具注册在 **预设祖先作用域**，agent 作用域可以 restrict；但同一个
+ * agent 作用域里也可能有插件自己注册的 scope-local 工具（例如 trace-inspect 的
+ * 影子工具），它们会混在 `tools.schemas(agent)` 的并集里。未知名字一旦提交会让
+ * 整条 restriction 失败、所有工具都关不掉，因此：
+ *   1. 先整批提交；
+ *   2. 失败时从宿主错误里解析被拒绝的名字（`unknown global tool "x"`），
+ *      只从 deny 中剔除这些名字后重试；
+ *   3. 其它错误原样返回 failed。
+ *
+ * 最多重试 {@link RESTRICT_RETRY_LIMIT} 次；剔除后为空按「没有可屏蔽工具」跳过。
+ */
+export declare const RESTRICT_RETRY_LIMIT = 4;
+/**
+ * {@link applyRestrict} 的容错版：宿主拒绝部分名字时剔除并重试。
+ *
+ * @param agentTools agent 作用域的 tools 服务
+ * @param deny 候选 deny 名单（可包含 scope-local 名字）
+ */
+export declare function applyRestrictWithRetry(agentTools: any, deny: readonly string[]): RestrictOutcome;
 /** 两个工具名清单是否等价（restrict 名单与顺序无关；空名单同样等价）。 */
 export declare function sameDenyNames(left: readonly string[], right: readonly string[]): boolean;
