@@ -6,11 +6,16 @@
  * 关键口径（不得偏离）：
  *
  *   - **枚举源**：全局 `ctx.root.get("tools").schemas()`（继承层）+ live agent 的
- *     `tools.schemas(agent)` 并集（v26.2：桌面 / Web 把核心工具改由 Agent 预设
+ *     **pre-restriction 注册表**（v26.2：桌面 / Web 把核心工具改由 Agent 预设
  *     按会话挂载，全局层看不到）。`restrict` 只能屏蔽继承层名字；agent 自身层
  *     注册的工具标 `agentScoped`；它们实际位于**预设祖先作用域**，agent 作用域
  *     可以 restrict（v28.1）。own-layer 影子名字由重试剔除；`tools.guard` 只作
  *     兜底。
+ *     **v29 关键约束**：预设层名字/定义必须取自**施加 deny 之前**的注册表
+ *     （`layers` 的 `tools` 表），不能取 `tools.schemas(agent)` —— 后者是 restrict
+ *     之后的投影，会与本管理器自己的 deny 互为因果，在 `tools/change` 微任务链里
+ *     以二周期振荡形式无限空转（主线程 100% CPU、UI 冻死）。`view().registrations`
+ *     同样被 `admits()` 过滤，也不可用；只有 `knownNames` 是全量，但拿不到定义。
  *   - **一个插件 = 一个开关单元**：关闭 = 对该插件在本会话的全部可继承工具
  *     `tools.restrict({deny})`；deny 名单**每次重算**，持久化只存 `plugin:<unit>`。
  *   - **A4 未识别单元**：可开关、计入分母、不进 Jev 候选。
