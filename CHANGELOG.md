@@ -75,6 +75,34 @@
   `client-panel` / `client-hero` 的失败与改动前基线一致（v21.2 不热应用 / 三维判据 /
   面板改版后的过期断言），不是本次回归。
 
+## [1.19.5] - 2026-11-25
+
+### 修复
+
+- **某工作区把预设（`agentScoped`）单元设为不可见后，dsh 主进程 100% CPU、UI
+  冻死**（用户反馈：desktop 中用 dsh-commander 时卡死）。根因是枚举源与 restrict
+  互为因果的微任务死循环，**不是 dsh-commander 的问题**：
+  - `agentToolSchemas` 用 `tools.schemas(agent)` 收集预设层工具名，而它是 restrict
+    **之后**的投影。施加 deny 后，被屏蔽的预设工具从 `schemas(agent)` 消失（实测
+    90→55）→ 下一轮枚举少算这些名字 → deny 缩小（103→68）→ `sameDenyNames`
+    短路失效 → `releaseRestrict` → disposer 触发 `tools/change` → `queueMicrotask`
+    重算 → deny 又变回 103……二周期振荡，事件循环被微任务饿死，永不回到轮询。
+  - 触发面：只有「隐藏了预设单元」的工作区会中招（本机为 commander 派发会话的
+    cwd，隐藏 17 个 unit、其中 8 个是预设单元、共 35 个工具）。
+  - 新增 `agentToolSchemasFromView`：名字/定义优先取**施加 deny 之前**的注册表
+    （`layers.global.tools` + `layers.chainLayers(agent)[].tools`，与限制表分开
+    存储，不受 deny 影响）；无 `layers` 但有 `view()` 的宿主退回
+    `view(agent).knownNames`（实测恒为全量，不随 restrict 收缩）；两者都没有的
+    极旧宿主才退回旧的 `schemas(agent)`。
+    - 说明：`view(agent).registrations` / `.visible` **同样**被 `admits()` 过滤、
+      也抖，不可用作枚举源；只有 `knownNames` / `restrictableNames` 稳定但只有名字。
+  - 纵深防御 `recentDenyKeys`（最近 3 代 deny 指纹）：算出重复历史名单即判枚举源
+    抖动，停止迭代并 warn 一次；`targets.length === 0` 的释放分支也纳入检测
+    （空名单用 `""` 指代）——这条分支以前是绕过防线的口子。
+  - 验证：`pnpm typecheck` 通过；`notes/verify/tools-restrict-oscillation.test.mjs`
+    3/3（layers 主路径、knownNames 兜底、极旧宿主防线）；重启后主进程 CPU
+    100%+ → 1–7%，`enumerateGlobalTools` 采样 3000+ 次/3s → 0 次/5s。
+
 ## [1.19.4] - 2026-11-23
 
 ### 变更
