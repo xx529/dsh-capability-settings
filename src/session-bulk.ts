@@ -421,7 +421,7 @@ export function createSessionBulk(deps: SessionBulkDeps): SessionBulk {
     }
   }
 
-  /** tools 域：插件单元级（含未识别单元）；locked 不参与。 */
+  /** tools 域：单元级（含宿主 / 预设 / 未识别单元）；v29.2 起三者都可按会话开关。 */
   async function runTools(
     services: SessionBulkServices,
     input: { sessionId: string; action: SessionBulkAction; dryRun: boolean },
@@ -432,10 +432,6 @@ export function createSessionBulk(deps: SessionBulkDeps): SessionBulk {
     const units: string[] = [];
     const desired = input.action === "enable";
     for (const unit of view?.units ?? []) {
-      if (unit.hostInjected === true || unit.agentScoped === true) {
-        stat.skipped += 1;
-        continue;
-      }
       if (input.action === "reset") {
         if (unit.explicit === true) units.push(unit.unit);
         continue;

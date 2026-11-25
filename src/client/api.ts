@@ -742,17 +742,17 @@ export interface ClientToolsUnit extends ClientVisibilityFields {
   /**
    * true = 宿主注入（`@deepseek-ai/*` 包 / 宿主运行时注册）。
    *
-   * v28：**会话 / 全局默认开关**禁用；可见范围、每工作区默认与工作区覆盖
-   * 由人类配置（缺省 = 全部工作区可见、默认启用）。缺省 = false（旧宿主按
-   * 第三方插件处理）。
+   * v28：不参与**全局默认**；v29.2 起**会话开关**开放，可见范围、每工作区
+   * 默认与工作区覆盖也由人类配置（缺省 = 全部工作区可见、默认启用）。缺省 =
+   * false（旧宿主按第三方插件处理）。
    */
   hostInjected?: boolean;
   /**
    * true = 该**全部**工具都注册在 Agent 预设作用域（agent scope）。
    *
-   * 桌面 / Web 组合的核心工具由预设按会话挂载；`tools.restrict` 只作用于继承层，
-   * 无法屏蔽 agent 自己的注册 ⇒ **会话开关**不可用；v28 起可见范围与工作区覆盖
-   * 可配（关闭后由执行层 guard 拒绝调用）。
+   * 桌面 / Web 组合的核心工具由预设按会话挂载；v28.1 起由 `tools.restrict`
+   * 从会话工具表移除（own-layer 名字另有执行层 guard 兜底）⇒ v29.2 起**会话
+   * 开关**与插件单元一致，可见范围与工作区覆盖也可配。
    */
   agentScoped?: boolean;
   /** 该单元里 agent-scope 工具的数量（混合单元 = 部分工具随预设固定）。 */
@@ -780,7 +780,10 @@ export interface ClientToolsUnit extends ClientVisibilityFields {
   enabledInSession?: boolean;
   /** 是否有显式会话覆盖（「恢复默认」是否可点、诊断用）。 */
   explicit: boolean;
-  /** **会话开关**不可用原因（正常缺省；不阻止可见范围 / 工作区覆盖写入）。 */
+  /**
+   * **会话开关**不可用原因（正常缺省；v29.2 起宿主 / 预设单元不再返回它）。
+   * 仅在外壳缺少 `tools.restrict` 等真正不可用时出现。
+   */
   lockedReason?: string;
   /** 上一次 restrict / 预设 guard 的降级状态（仅传了 sessionId 时）。 */
   restriction?: { state: "applied" | "skipped" | "failed"; error?: string };

@@ -144,8 +144,16 @@ interface ToolsSessionRecord {
   /** 上一代 guard 覆盖的工具名（幂等短路用）。 */
   guardedNames: string[];
   appliedDeny: string[];
-  /** v29：最近应用过的目标单元集合指纹（sorted unit ids joined）。 */
-  targetKey?: string;
+  /**
+   * v29.1：上一代**配置指纹**（会话覆盖 + 全局默认 + 冻结的可见性/默认）。
+   *
+   * 振荡防线的判据必须区分「枚举源抖动」和「用户真的改了开关」：后者会让 deny
+   * 合法地变回历史值（例如两个单元都关着时，把其中一个关→开→关），只比对
+   * deny 历史会误判并跳过应用，导致开关显示已关、工具却仍在上下文里。
+   *
+   * 配置指纹在每次 `applyRecord` 末尾更新；只有指纹**未变**时才算抖动。
+   */
+  configKey?: string;
   /**
    * v29：最近若干代**实际应用**的 deny 指纹（按时间升序，末尾最新）。
    *
@@ -440,7 +448,7 @@ function enumerateGlobalTools(
   for (const unit of units) {
     unit.tools.sort((a, b) => a.name.localeCompare(b.name));
     unit.details.sort((a, b) => a.name.localeCompare(b.name));
-    // 全部工具都来自 agent 预设 ⇒ 整个单元只读（restrict 无法屏蔽 own-layer 注册）。
+    // 全部工具都来自 agent 预设 ⇒ 整个单元标记 agentScoped（v29.2 起可会话开关）。
     unit.agentScoped = unit.tools.length > 0 && unit.tools.every((tool) => tool.agentScoped === true);
   }
   units.sort((a, b) => {
@@ -997,6 +1005,37 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
   }
 
   /**
+   * v29.1：本会话的配置指纹（只含**用户可写输入**，不含工具枚举）。
+   *
+   * 振荡防线要回答的问题是「deny 变了，是枚举源在抖，还是人改了开关？」。
+   * 会话覆盖 / 全局默认 / 冻结可见性都不变时，deny 本应稳定；只有枚举源收缩
+   * 才会让它在两个值间跳。反过来，人把某个单元关→开→关时指纹会变，deny 即使
+   * 等于历史值也属于合法重算，不能拦。
+   *
+   * 故意不包含 enumerate 结果：振荡恰恰表现为枚举随 restrict 收缩，把它算进
+   * 指纹会让真正的抖动被当成配置变更而放行。
+   */
+  function configFingerprint(
+    toggles: ReadonlyMap<string, boolean> | undefined,
+    globallyDisabled: ReadonlySet<string>,
+    defaults: ReadonlyMap<string, CapabilityDefaults> | undefined,
+  ): string {
+    const parts: string[] = [];
+    if (toggles !== undefined) {
+      for (const [key, value] of [...toggles.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+        parts.push(`t:${key}=${value ? "1" : "0"}`);
+      }
+    }
+    for (const unit of [...globallyDisabled].sort()) parts.push(`g:${unit}`);
+    if (defaults !== undefined) {
+      for (const [unit, capability] of [...defaults.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+        parts.push(`d:${unit}=${capability.visible ? "1" : "0"}${capability.effectiveDefaultEnabled ? "1" : "0"}`);
+      }
+    }
+    return parts.join("\n");
+  }
+
+  /**
    * 按当前全局工具清单（重）计算本 session 的 plugin 屏蔽。全程同步，不与其它
    * 队列的异步挂载交错。幂等：名单与上一代完全一致时直接返回（`tools.restrict`
    * 自身也会触发 `tools/change`，这条短路是刷新路径不形成循环的关键）。
@@ -1007,6 +1046,8 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
     // v21.2：用**本会话创建时冻结的**默认快照，而非当前配置文件（默认 / 可见性
     // 变更只影响新会话；会话级显式开关仍按 `toggles` 即时生效）。
     const globallyDisabled = record.globals ?? new Set<string>();
+    const configKey = configFingerprint(toggles, globallyDisabled, record.defaults);
+    const configChanged = record.configKey !== undefined && record.configKey !== configKey;
     const { targets, targetTools } = computeTargets(toggles, enumeration, globallyDisabled, record.defaults);
     const presetTargets = computePresetTargets(toggles, enumeration, globallyDisabled, record.defaults);
     record.targets = targets;
@@ -1016,13 +1057,11 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
     if (targets.length > 0) {
       const deny = computeDenyNames(targetTools, enumeration.candidateNames);
       const denyKey = deny.join(" ");
-      const targetKey = targets.map((target) => target.unit).sort().join(" ");
       // v29 兜底：算出的 deny 在最近几代里出现过（A→B→A→…）⇒ 枚举源随 restrict
       // 抖动（施加 deny 使工具从枚举里消失，下一轮算出另一份名单，来回振荡）。
-      // 不看 targets 是否稳定：抖动时 targets 本身也跟着缩水，光比 targetKey 抓不住。
-      // 保持现状 + 告警一次，把发散变成收敛。用户真的改开关时 deny 是**新**值，
-      // 不会命中历史，照常走重算分支。
-      const repeatOfEarlier = record.recentDenyKeys.includes(denyKey);
+      // v29.1：只有**配置指纹未变**时才算抖动；用户改了会话开关 / 可见性时
+      // deny 回到历史值是合法重算（否则关→开→关会被误拦，工具留在上下文）。
+      const repeatOfEarlier = !configChanged && record.recentDenyKeys.includes(denyKey);
       if (record.restrictDisposers.length > 0 && sameDenyNames(deny, record.appliedDeny)) {
         // 幂等短路：名单与上一代完全一致（`tools/change` 不形成循环的关键）。
         restrictStates = targets.map((target) => ({ unit: target.unit, state: "applied" as const }));
@@ -1043,7 +1082,6 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
           // 新的一代：把本代指纹并入历史窗口（保留最近 3 代，二周期可见）。
           record.recentDenyKeys.push(denyKey);
           if (record.recentDenyKeys.length > 3) record.recentDenyKeys.shift();
-          record.targetKey = targetKey;
           record.appliedDeny = deny;
         } else if (record.restrictWarned !== true) {
           record.restrictWarned = true;
@@ -1065,7 +1103,7 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
       // ——施加 deny 后预设工具从 `schemas(agent)` 里整批消失，单元归零；释放后
       // 又全部回流。这个分支以前无条件 release → 触发 tools/change → 再枚举，
       // 让循环绕过了 targets>0 分支里的防线。用空名单指纹（""）统一纳入检测。
-      if (record.recentDenyKeys.includes("")) {
+      if (!configChanged && record.recentDenyKeys.includes("")) {
         if (record.oscillationWarned !== true) {
           record.oscillationWarned = true;
           logger?.warn?.(
@@ -1095,6 +1133,7 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
       guardStates = presetTargets.map((unit) => ({ unit: unit.unit, state: "applied" as const }));
     }
 
+    record.configKey = configKey;
     record.restrictions = [...restrictStates, ...guardStates];
   }
 
@@ -1258,13 +1297,13 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
       // 不阻塞列表（Jev 侧有占位兜底）。
       const description = deps.resolver?.packageDescription?.(unit.unit);
       const briefTools = unit.tools.map((tool) => ({ ...tool }));
-      // v28：宿主 / 预设工具不再整行只读——**会话开关**仍锁定（面板策略），
-      // 但可见范围、每工作区默认与工作区覆盖由人类配置。默认无配置时仍恒启用，
-      // 保持旧行为。
+      // v28 起宿主 / 预设工具不再整行只读；v29.2 起**会话开关**也可用（写会话
+      // 覆盖，与插件单元同一条 restrict 路径）。可见范围、每工作区默认与工作区
+      // 覆盖仍由人类配置。默认无配置时仍恒启用，保持旧行为。
       const humanOnly = unit.hostInjected === true || unit.agentScoped === true;
       const key = unitKeyOf(unit.unit);
-      // 旧版本可能给宿主 / 预设单元留下显式会话覆盖（现在会话开关已锁定，但
-      // 读端仍照实投影，保证与运行层 effectiveEnabledFor 的口径一致）。
+      // 宿主 / 预设单元与插件单元共用会话覆盖（v29.2 起会话开关也可写）；
+      // 读端口径与运行层 `effectiveEnabledFor` 一致。
       const explicit = toggles?.has(key) === true;
       const capability = defaults.get(unit.unit);
       const visible = capability?.visible ?? true;
@@ -1284,12 +1323,7 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
         ? (capability?.workspaceDefaultEnabled ?? baseline)
         : (capability?.globalDefaultEnabled ?? baseline);
       const enabled = explicit ? toggles?.get(key) === true : effectiveDefault;
-      const unitLockedReason =
-        unit.agentScoped === true
-          ? AGENT_SCOPED_TOOL_REASON
-          : unit.hostInjected === true
-            ? HOST_INJECTED_TOOL_REASON
-            : lockedReason;
+      const unitLockedReason = lockedReason;
       const restriction = record?.restrictions.find((entry) => entry.unit === unit.unit);
       units.push({
         unit: unit.unit,
@@ -1396,24 +1430,15 @@ export function createToolsManager(ctx: any, deps: ToolsManagerDeps = {}): Tools
     await hydrateToggles(sessionId, metaOf(record));
     const enumeration = enumerate();
     const known = new Map(enumeration.units.map((unit) => [unit.unit, unit]));
-    /** 只读单元（宿主注入 / Agent 预设注入）：先摘出去（任何写入都不允许）。 */
-    const lockedReasons = new Map<string, string>();
-    for (const unit of enumeration.units) {
-      // Agent 预设注入更具体：宿主工具也可能挂在预设里，优先解释「随预设固定」。
-      if (unit.agentScoped === true) lockedReasons.set(unit.unit, AGENT_SCOPED_TOOL_REASON);
-      else if (unit.hostInjected) lockedReasons.set(unit.unit, HOST_INJECTED_TOOL_REASON);
-    }
-    // v21：不可见单元不能写会话开关（混合请求时跳过不可见项；全不可见 ⇒ 业务失败）。
+    // v29.2：宿主 / 预设单元的**会话开关**也开放（写会话覆盖，与插件单元同一条
+    // restrict 路径）；它们只是没有全局默认，`lockedReason` 只表示外壳缺少
+    // `tools.restrict`。全局默认写入仍由 setGlobalEnabled 拒绝。
     const requestedAll = [
       ...new Set(
         payload.units.filter((unit): unit is string => typeof unit === "string" && unit.length > 0 && known.has(unit)),
       ),
     ];
-    if (requestedAll.length > 0 && requestedAll.every((unit) => lockedReasons.has(unit))) {
-      const reasons = [...new Set(requestedAll.map((unit) => lockedReasons.get(unit) ?? HOST_INJECTED_TOOL_REASON))];
-      return { ok: false, errors: reasons };
-    }
-    const requestedUnits = requestedAll.filter((unit) => !lockedReasons.has(unit));
+    const requestedUnits = requestedAll;
     // v21.2：live 会话用冻结快照判定可见性（创建后的全局可见性变更不影响本会话，
     // 会话级开关仍可正常写）；冷会话按当前配置。
     let defaults: Map<string, CapabilityDefaults>;

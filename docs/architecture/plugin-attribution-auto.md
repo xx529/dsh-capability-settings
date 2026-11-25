@@ -925,7 +925,7 @@ attribution?: {
 | 层 | 位置 | 行为 |
 |---|---|---|
 | 采集 | `src/tools/manager.ts` `agentToolSchemas` + `enumerateGlobalTools` | 对 `agents.list()` 的前 20 个 live agent 调 `tools.schemas(agent)`，只补全局层没有的名字；`names`（restrict 可用集合）仍只含全局层名字。 |
-| 只读 | `ToolsUnitView.agentScoped` / `AGENT_SCOPED_REASON` | 全部工具都是 agent-scope 的单元 → 会话开关锁定、缺省恒启用。**v28 起**：可见范围 / 每工作区默认 / 工作区覆盖可由人类配置（`lockedReason` 只锁会话开关），Jev 不再枚举这类单元。 |
+| 只读 | `ToolsUnitView.agentScoped` / `AGENT_SCOPED_REASON` | 全部工具都是 agent-scope 的单元 → 缺省恒启用。**v28 起**：可见范围 / 每工作区默认 / 工作区覆盖可由人类配置；**v29.2 起**会话开关也开放（不再下发 `lockedReason`），Jev 仍不枚举这类单元。 |
 | 归属 | `src/tools/attribution/host-catalog.ts` | 解析宿主随包的 `@deepseek-ai/dsh/docs/tool-catalog.md` 的 `Tool Package Map`（宿主生成，权威 name → package）。唯一命中直接用；同名多包（`bash` / `pwsh`）记 ambiguous，回落人工表（`src/shared/plugin-attribution.ts`）。 |
 
 **v28 修订（人类开关域）**

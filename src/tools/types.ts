@@ -18,7 +18,7 @@ export const UNATTRIBUTED_UNIT = "__unattributed__";
 /** 未识别来源单元的展示名（卡片标题 / 详情标题）。 */
 export const UNATTRIBUTED_DISPLAY = "来源未识别";
 
-/** 「Agent 预设注入」单元的会话开关锁定原因（v26.2；v28 起可见性/工作区默认可配）。 */
+/** 宿主 / 预设工具不参与全局默认的说明文案（v28；v29.2 起会话开关可用）。 */
 export { AGENT_SCOPED_REASON, AGENT_SCOPED_TOOL_REASON, HOST_INJECTED_TOOL_REASON } from "../shared/host-injected.js";
 
 /** 持久化键前缀：`plugin:<unit>`（本批唯一使用的前缀）。 */
@@ -75,11 +75,10 @@ export interface ToolsUnitView {
   /**
    * true = 该**全部**工具都注册在 Agent 预设作用域（agent scope）里。
    *
-   * 桌面 / Web 组合下内建工具都由预设按会话挂载；`tools.restrict` 只作用于
-   * 继承层，无法屏蔽 agent 自己的注册 ⇒ **会话开关**不可用
-   * （{@link AGENT_SCOPED_REASON}）；v28 起可见范围 / 每工作区默认 / 工作区覆盖
-   * 可配。预设工具位于预设祖先作用域，v28.1 起由 `tools.restrict` 从新会话的
-   * 工具表移除；guard 只作 own-layer 兜底。
+   * 桌面 / Web 组合下内建工具都由预设按会话挂载；预设工具位于预设祖先作用域，
+   * v28.1 起由 `tools.restrict` 从新会话工具表移除（guard 只作 own-layer 兜底）。
+   * v28 起可见范围 / 每工作区默认 / 工作区覆盖可配；v29.2 起**会话开关**与插件
+   * 单元一致（不再因该标记锁定）。
    */
   agentScoped?: boolean;
   /** 该单元里 agent-scope 工具的数量（混合单元 = 部分工具随预设固定）。 */
@@ -156,12 +155,13 @@ export interface ToolsUnitView {
    */
   explicit: boolean;
   /**
-   * **会话开关**不可用原因；正常缺省。来源 = 宿主/预设单元
-   * （{@link HOST_INJECTED_TOOL_REASON} / {@link AGENT_SCOPED_TOOL_REASON}）、
-   * 当前 agent 作用域缺少 `tools.restrict`（旧外壳 / 服务缺失），或该 unit 含
-   * 被契约禁止的名字（`run_code` 等，理论不会出现）。
+   * **会话开关**不可用原因；正常缺省。只剩两种来源：当前 agent 作用域缺少
+   * `tools.restrict`（旧外壳 / 服务缺失），或该 unit 含被契约禁止的名字
+   * （`run_code` 等，理论不会出现）。
    *
-   * 注意：v28 起该字段**只锁会话开关**，不阻止可见范围与工作区默认写入。
+   * 宿主 / 预设单元**不再**返回该字段（v29.2）：它们和插件单元一样可以按会话
+   * 开关；`HOST_INJECTED_TOOL_REASON` / `AGENT_SCOPED_TOOL_REASON` 只用于解释
+   * 「不参与全局默认」，不阻止会话开关。
    */
   lockedReason?: string;
   /** 上一次 restrict（宿主 / 预设为执行层 guard）的降级状态（仅传了 sessionId 时）。 */

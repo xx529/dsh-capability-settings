@@ -16,9 +16,10 @@
     （`overrides.toggle("tools", …)` → `tools` / `enabledTools`）。语义与普通插件
     单元一致：工作区设置优先于全局；关掉 = 本工作区默认不启用；重新打开时若全局
     默认本就开启则只清项目覆盖，**恢复即回落全局**。
-  - **运行层**：继承层的宿主工具在工作区默认 / 可见性显式关闭时进
-    `tools.restrict`；预设工具注册在 agent 自己层、`restrict` 无法屏蔽，改用
-    `tools.guard` 在调用时拒绝（恢复 / 卸载即解除，失败 fail-open 只 warn）。
+  - **运行层**：宿主 / 预设工具在工作区默认 / 可见性显式关闭时进
+    `tools.restrict`（v28.1 修正：预设工具在预设祖先作用域，可被屏蔽）；
+    own-layer 影子工具用 `tools.guard` 在调用时拒绝（恢复 / 卸载即解除，
+    失败 fail-open 只 warn）。
   - **Jev 排除**：`enumerateCapabilities` 不再把预设 / 宿主 tool 单元纳入候选、
     打分或应用（`jev.rank`、手动决策、派生「动态选择」同源）——这两类工具只由
     人类通过上述开关配置，Jev 不得自动选择或改变。
@@ -38,6 +39,13 @@
   - 说明：`dsh-commander` 的工具注册带 `when`，只对配置里绑定的指挥官会话可见
     （`commander.sessionId`）；普通新会话没有 `commander_*` 是插件设计，不是本插件
     开关失效。
+- **`recentDenyKeys` 振荡防线误伤合法的「关→开→关」**（v29.1）。只有 deny 历史、
+  不区分配置是否变化：两个单元都关闭时，把其中一个关→开→关，第二轮的 deny 等于
+  第一轮的历史值，被判成枚举抖动而**跳过应用**——开关显示已关、工具却仍在上下文
+  里，并打出一条误导性的振荡 warning。
+  - 新增 `configKey` 配置指纹（会话覆盖 + 全局默认 + 冻结可见性/默认，不含枚举
+    结果）；只有指纹**未变**时重复 deny 才判抖动。配置变了就照常重算，即使 deny
+    等于历史值。
 
 ### 变更
 
@@ -45,11 +53,19 @@
   `可见性 + 每工作区默认 + 项目覆盖` 投影，并下发 `visibilityMode` /
   `visibleWorkspaceCount` / `visibleInWorkspace` / `globalDefaultEnabled` /
   `workspaceDefaultEnabled` / `projectOverride`；工作区视图按可见性隐藏并计入
-  `hiddenCount`。`lockedReason` 现在**只锁会话开关**（文案改为
-  `HOST_INJECTED_TOOL_REASON` / `AGENT_SCOPED_TOOL_REASON`），不再阻止可见范围
-  与工作区覆盖写入。默认无配置时行为不变（恒启用、会话开关锁定）。
-- 工具详情文案：宿主 / 预设工具的「注入方式」与底部说明改为「会话开关不可用，
-  可见范围与工作区默认可配」；不再写「只读展示、不能关闭」。
+  `hiddenCount`。`lockedReason` 只表示外壳缺少 `tools.restrict`（v28 时曾用于
+  锁会话开关，v29.2 起开放），不再阻止可见范围与工作区覆盖写入。默认无配置时
+  行为不变（恒启用）。
+- 工具详情文案：宿主 / 预设工具不再写「只读展示、不能关闭」；改为说明可见范围与
+  工作区默认可配（v29.2 起会话开关也可用）。
+- **宿主 / 预设工具的会话开关开放（v29.2）**：对话首屏 /「能力」Tab 与三域批量
+  动作不再跳过 `hostInjected` / `agentScoped` 单元；它们和插件单元一样写
+  `session-capabilities.json` 的 `tools` 覆盖（`plugin:<unit>`），关闭时走
+  `tools.restrict`（own-layer 影子仍由 guard 兜底），恢复默认清除覆盖。
+  `tools.list` 不再为这两类单元下发 `lockedReason`（只剩外壳缺少 `tools.restrict`
+  时才有）；**全局默认**写入仍拒绝（它们没有全局默认）。
+  - `HOST_INJECTED_TOOL_REASON` / `AGENT_SCOPED_TOOL_REASON` 文案改为解释
+    「不参与全局默认」，不再声称会话开关不可用。
 
 ### 内部
 
@@ -65,6 +81,11 @@
 ### 验证
 
 - `pnpm typecheck`、`pnpm build` 通过。
+- `node notes/verify/tools-restrict-oscillation.test.mjs` **4/4**（新增「配置回切：
+  关→开→关重新应用 deny，不被误判为抖动」；另有独立复现脚本
+  `notes/verify/toggle-back-false-positive.mjs` 验证两个单元回切）。
+- `node notes/verify/capability-dock-render.mjs`：新增宿主工具卡「会话开关可用 /
+  外壳无 restrict 时禁用」两项通过（其余 SSR/槽位断言仍是改动前基线失败）。
 - 新增 `node notes/verify/v28-human-only-tools.mjs` **19/19**（写路径 / list 投影 /
   宿主 + 预设 restrict / restrict 未知名字重试 / Jev 排除 / jsdom 可见性入口与
   工作区开关）。

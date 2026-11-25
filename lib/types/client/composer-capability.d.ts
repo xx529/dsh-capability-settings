@@ -55,7 +55,7 @@ export interface SkillRow {
     channel?: string;
     /** true = 宿主 registry 注入行（来源标签 + 渠道小标签，内容只读但可在会话启停）。 */
     injected?: boolean;
-    /** true = 宿主注入（`@deepseek-ai/*` / 宿主预设 / 随包）：只读，不可在会话开关。 */
+    /** true = 宿主注入（`@deepseek-ai/*` / 宿主预设 / 随包）：仍在会话里按单元开关（v29.2）。 */
     hostInjected?: boolean;
     enabled: boolean;
     disabled: boolean;
@@ -110,9 +110,9 @@ export interface ToolRow {
     explicit: boolean;
     /** 全局默认（覆盖标签的 title 用：`全局默认开启/关闭；本会话单独设置`）。 */
     defaultEnabled: boolean;
-    /** 不可开关原因（正常缺省）。 */
+    /** 不可开关原因（正常缺省；v29.2 起只剩外壳不支持 restrict）。 */
     lockedReason?: string;
-    /** true = 宿主注入单元：只读展示，不可在会话开关。 */
+    /** true = 宿主注入单元：来源标签用；v29.2 起同样可按会话开关。 */
     hostInjected?: boolean;
 }
 export type Row = SkillRow | McpRow | ToolRow;

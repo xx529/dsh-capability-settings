@@ -46,7 +46,7 @@ import { useWorkspaceLabel } from "./composer-common.js";
 import { JEV_CONFIG_CHANGED_EVENT } from "./jev-panel.js";
 import { aggregateMounts, MOUNT_LABEL, type MountInfo } from "./mcp-common.js";
 import { PromptTab, usePromptTabData } from "./prompt-tab.js";
-import { HOST_INJECTED_LABEL, HOST_INJECTED_REASON } from "../shared/host-injected.js";
+import { HOST_INJECTED_LABEL } from "../shared/host-injected.js";
 
 // ---------------------------------------------------------------------------
 // 图标（内联 SVG，颜色走 currentColor）
@@ -183,7 +183,7 @@ export interface SkillRow {
   channel?: string;
   /** true = 宿主 registry 注入行（来源标签 + 渠道小标签，内容只读但可在会话启停）。 */
   injected?: boolean;
-  /** true = 宿主注入（`@deepseek-ai/*` / 宿主预设 / 随包）：只读，不可在会话开关。 */
+  /** true = 宿主注入（`@deepseek-ai/*` / 宿主预设 / 随包）：仍在会话里按单元开关（v29.2）。 */
   hostInjected?: boolean;
   enabled: boolean;
   disabled: boolean;
@@ -240,9 +240,9 @@ export interface ToolRow {
   explicit: boolean;
   /** 全局默认（覆盖标签的 title 用：`全局默认开启/关闭；本会话单独设置`）。 */
   defaultEnabled: boolean;
-  /** 不可开关原因（正常缺省）。 */
+  /** 不可开关原因（正常缺省；v29.2 起只剩外壳不支持 restrict）。 */
   lockedReason?: string;
-  /** true = 宿主注入单元：只读展示，不可在会话开关。 */
+  /** true = 宿主注入单元：来源标签用；v29.2 起同样可按会话开关。 */
   hostInjected?: boolean;
 }
 
@@ -1989,7 +1989,7 @@ export function buildMcpRows(snapshot: CapabilitySnapshot, pending: Record<strin
     const id = `mcp:external:${server.serverName}`;
     // v13 R4 三态：有插件展示名 → `插件` + channel 第二枚标签；
     // 命名空间合成但无映射 → `未识别`（琥珀）；其余 → `外部注入`。
-    // 宿主注入单独标「宿主」并锁定（运行基线，所有工作区默认需要）。
+    // MCP 宿主注入单独标「宿主」并锁定（运行基线，不可按会话卸载）。
     const hostInjected = server.hostInjected === true;
     const hasChannel = typeof server.channel === "string" && server.channel.length > 0;
     const synthesized = server.synthesized === true || server.origin === "namespace";
@@ -2040,7 +2040,8 @@ export function buildToolRows(snapshot: CapabilitySnapshot, pending: Record<stri
     const id = `tool:${unit.unit}`;
     const hostInjected = unit.hostInjected === true;
     const unattributed = unit.kind === "unattributed";
-    const locked = hostInjected || unit.lockedReason !== undefined;
+    // v29.2：宿主 / 预设单元的会话开关开放；只锁宿主明确报告不可用的单元。
+    const locked = unit.lockedReason !== undefined;
     const toolCount = unit.toolCount;
     const defaultEnabled = unit.defaultEnabled ?? unit.enabledInSession ?? true;
     return {
@@ -2053,14 +2054,14 @@ export function buildToolRows(snapshot: CapabilitySnapshot, pending: Record<stri
       meta: `${toolCount} 个工具`,
       // 首屏 = 本会话生效值（会话覆盖 ?? 全局默认）。adapter 已归一；旧宿主/夹具
       // 缺新字段时按旧 `enabledInSession` 再按默认开启回落。v28：宿主工具也读
-      // `unit.enabled`（工作区默认可能显式关闭；会话开关仍锁定）。
+      // `unit.enabled`（工作区默认 / 会话覆盖都可能显式关闭）。
       enabled: pending[id] ?? unit.enabled ?? unit.enabledInSession ?? unit.defaultEnabled ?? true,
       disabled: locked,
       unit: unit.unit,
       explicit: unit.explicit === true,
       defaultEnabled,
       ...(hostInjected ? { hostInjected: true } : {}),
-      ...(locked ? { lockedReason: unit.lockedReason ?? (hostInjected ? HOST_INJECTED_REASON : undefined) } : {}),
+      ...(locked ? { lockedReason: unit.lockedReason } : {}),
     };
   });
   // 宿主单元恒排最前，其余已识别插件按展示名排序，来源未识别恒排最后（UX v1.8 §5.4）。
