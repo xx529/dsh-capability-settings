@@ -261,7 +261,7 @@ export function apply(ctx: any) {
     const disposeCapabilityView = ctx.slots.inject("conversation.view", () =>
       ctx.slots.register({ name: "conversation.view", id: "capability", order: 40, label: "能力" }, (props: any) => {
         const sessionId = resolveViewSessionId(ctx, props);
-        return SessionCapabilityView({ apiFor: composerApiFor, sessionId, onManage: openCapabilityPanel });
+        return SessionCapabilityView({ apiFor: composerApiFor, sessionId });
       }),
     );
     if (typeof disposeCapabilityView === "function") disposers.push(disposeCapabilityView);

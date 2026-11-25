@@ -19,7 +19,7 @@
  *
  * @module dsh-capability-settings/client/composer-capability
  */
-import type { CapabilityPanelApi, ClientMcpRuntimeServer, ClientMcpServer, ClientSkillSummary, ClientToolsUnit, SessionBulkAction, SessionBulkDomain, SessionBulkFailure } from "./api.js";
+import type { CapabilityPanelApi, ClientMcpRuntimeServer, ClientMcpServer, ClientPromptFile, ClientSkillSummary, ClientToolsUnit, SessionBulkAction, SessionBulkDomain, SessionBulkFailure } from "./api.js";
 import { type MountInfo } from "./mcp-common.js";
 export interface CapabilitySnapshot {
     skills: ClientSkillSummary[];
@@ -116,6 +116,18 @@ export interface ToolRow {
     hostInjected?: boolean;
 }
 export type Row = SkillRow | McpRow | ToolRow;
+/** 来源筛选分组。 */
+export type SourceGroup = "global" | "project" | "host" | "plugin" | "external";
+/** 固定展示顺序（与卡片列表的分组顺序一致）。 */
+export declare const SOURCE_GROUP_ORDER: SourceGroup[];
+/** Tab 内的来源分组文案：Tools 的來源未识别单列「未识别」。 */
+export declare function sourceGroupLabel(tab: TabId, group: SourceGroup): string;
+/** 行来源 → 筛选分组。 */
+export declare function sourceGroupOf(row: Row): SourceGroup;
+/** Prompt 文件来源 → 筛选分组。 */
+export declare function promptSourceGroup(file: ClientPromptFile): "global" | "project";
+/** Prompt 文件是否可在首屏开关（与 PromptTab 的 toggleable 同口径）。 */
+export declare function promptFileToggleable(file: ClientPromptFile): boolean;
 /** 能力面板域 Tab（`onManage` 可指定打开哪个 Tab，由 src/client.ts 接线）。 */
 export type PanelDomain = "skills" | "mcp" | "jev";
 /**
@@ -162,18 +174,18 @@ export declare function CapabilityCard({ row, busy, onToggle }: {
  * **不参与** Jev 能力决策，也不参与三域批量动作（`BULK_DOMAINS` 保持三域）。
  */
 type TabId = "skills" | "mcp" | "tools" | "prompt";
-/** 行 3 控制条的批量态（idle / 执行中 / 部分失败）。 */
+/** 批量态（idle / 执行中 / 部分失败）；按当前 Tab 的筛选子集执行。 */
 export interface BulkState {
     phase: "idle" | "running" | "partial";
-    /** 本次 / 上次动作；idle 且从未执行时缺省。 */
+    /** 本次动作；idle 且从未执行时缺省。 */
     action?: SessionBulkAction;
-    /** 已完成的域数（进度文案用）。 */
-    doneDomains: number;
-    /** 本次要跑的域总数（重试时只含失败域）。 */
-    totalDomains: number;
+    /** 目标条数（enable/disable）或域数（reset）。 */
+    total: number;
+    /** 本批所属 Tab；reset（全局）缺省 = 在所有 Tab 可见。 */
+    tab?: TabId;
     /** 聚合的逐项失败（`{n} 项失败 · 重试`）。 */
     failed: SessionBulkFailure[];
-    /** 含失败的域（重试只重放这些域）。 */
+    /** 含失败的域（reset 重试只重放这些域）。 */
     failedDomains: SessionBulkDomain[];
     /** 传输层 / 业务失败的一次性文案。 */
     error?: string;
@@ -192,16 +204,9 @@ interface PanelProps {
     pending: Record<string, boolean>;
     busy: Record<string, boolean>;
     onToggle: (row: Row) => void;
-    onReset: () => void;
     onRefresh: () => void;
     onCollapse: () => void;
-    onManage?: () => void;
     onRetry?: () => void;
-    /** 行 3 控制条：三域批量开关（R1）。 */
-    onBulk: (action: SessionBulkAction) => void;
-    /** 重试只重放失败域。 */
-    onRetryBulk: () => void;
-    bulkState: BulkState;
     /** 用户切 Tab 时通知外层（首屏入口用它记住上次的域，下次打开弹窗落点一致）。 */
     onTabChange?: (tab: TabId) => void;
 }
@@ -209,9 +214,8 @@ export declare function CapabilityPanel(props: PanelProps & {
     initialTab?: TabId;
 }): import("react").JSX.Element;
 export declare function ComposerCapabilityEntry(props: ComposerCapabilityEntryProps): import("react").JSX.Element;
-export declare function SessionCapabilityView({ apiFor, sessionId: initialSessionId, onManage, }: {
+export declare function SessionCapabilityView({ apiFor, sessionId: initialSessionId, }: {
     apiFor: (sessionId: string | undefined) => CapabilityPanelApi;
     sessionId?: string;
-    onManage?: () => void;
 }): import("react").JSX.Element;
 export {};

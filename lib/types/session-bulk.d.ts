@@ -12,7 +12,9 @@
  *     不同 session 互不影响。
  *   - **部分失败不回滚**（A7）：某条失败只进 `failed[]`，已成功的保留；
  *     重试 = 重放同一 action（已成功项进 `unchanged`）。
- *   - **宿主自己枚举**：客户端不传目标列表（避免与宿主枚举口径漂移）。
+ *   - **宿主自己枚举**：缺省客户端不传目标列表（避免与宿主枚举口径漂移）；
+ *     v30 起可选 `targets` 只处理列出的子集（名字口径同 per-row API），
+ *     空数组 = 该域 0 个目标，`reset` 忽略 targets（恢复默认始终全量）。
  *   - 写盘批量化：三个域都走批量端点——mcp/tools 由 loader/manager 一次落盘
  *     （`state.setToggles`），skills 走 `skills/session.ts#setEnabledBatch`
  *     （整批一次宿主目录发现 + 一次落盘）；restrict 只重算一次。
@@ -44,6 +46,19 @@ export interface SessionBulkDomainStat {
     skipped: number;
     failed: number;
 }
+/**
+ * 批量目标子集（v30）：只处理这些条目，名字口径与 per-row API 一致
+ * （skills = skill 名；mcp = target：项目 key / serverName；tools = unit id）。
+ *
+ * - 某个域缺省 = 该域全部；
+ * - 空数组 = 该域 0 个目标（不是“全部”）；
+ * - `reset` 忽略 targets（恢复默认始终三域全量）。
+ */
+export interface SessionBulkTargets {
+    skills?: string[];
+    mcp?: string[];
+    tools?: string[];
+}
 /** `session.setBulk` 入参（缺省 = 三域全部）。 */
 export interface SessionBulkInput {
     /** 必填；空 → 业务失败。 */
@@ -51,6 +66,8 @@ export interface SessionBulkInput {
     action: SessionBulkAction;
     /** 缺省 = 三域全部；客户端按域串行调用以取得粗粒度进度。 */
     domains?: SessionBulkDomain[];
+    /** 只处理这些条目；缺省 = 域内全量。 */
+    targets?: SessionBulkTargets;
     /** 项目作用域（skills 列表 / mcp 项目条目需要）；缺省由宿主从 session header.cwd 解析。 */
     cwd?: string;
     /** 仅测试/诊断：只计算不写入，返回将改变的数量。 */

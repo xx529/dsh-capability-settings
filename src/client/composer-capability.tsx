@@ -25,6 +25,7 @@ import type {
   CapabilityPanelApi,
   ClientMcpRuntimeServer,
   ClientMcpServer,
+  ClientPromptFile,
   ClientSkillSummary,
   ClientToolsUnit,
   DeriveGetResult,
@@ -41,6 +42,7 @@ import type {
   SessionBulkAction,
   SessionBulkDomain,
   SessionBulkFailure,
+  SessionBulkTargets,
 } from "./api.js";
 import { useWorkspaceLabel } from "./composer-common.js";
 import { JEV_CONFIG_CHANGED_EVENT } from "./jev-panel.js";
@@ -247,6 +249,60 @@ export interface ToolRow {
 }
 
 export type Row = SkillRow | McpRow | ToolRow;
+
+// ---------------------------------------------------------------------------
+// 来源分组（v30）：筛选标签的取值；卡片自己的来源标签更细（内置/预设/未识别），
+// 这里把它们收敛成用户可多选的几组：
+//   - 宿主 = hostInjected / bundled / preset（宿主注入、随包内置、Agent 预设）
+//   - 外部 = external / unattributed（外部注入、来源未识别）
+// ---------------------------------------------------------------------------
+
+/** 来源筛选分组。 */
+export type SourceGroup = "global" | "project" | "host" | "plugin" | "external";
+
+/** 固定展示顺序（与卡片列表的分组顺序一致）。 */
+export const SOURCE_GROUP_ORDER: SourceGroup[] = ["global", "project", "host", "plugin", "external"];
+
+const SOURCE_GROUP_LABEL: Record<SourceGroup, string> = {
+  global: "全局",
+  project: "项目",
+  host: "宿主",
+  plugin: "插件",
+  external: "外部",
+};
+
+/** Tab 内的来源分组文案：Tools 的來源未识别单列「未识别」。 */
+export function sourceGroupLabel(tab: TabId, group: SourceGroup): string {
+  return tab === "tools" && group === "external" ? "未识别" : SOURCE_GROUP_LABEL[group];
+}
+
+/** 行来源 → 筛选分组。 */
+export function sourceGroupOf(row: Row): SourceGroup {
+  switch (row.tone) {
+    case "project":
+      return "project";
+    case "global":
+      return "global";
+    case "plugin":
+      return "plugin";
+    case "external":
+    case "unattributed":
+      return "external";
+    default:
+      // host / bundled / preset
+      return "host";
+  }
+}
+
+/** Prompt 文件来源 → 筛选分组。 */
+export function promptSourceGroup(file: ClientPromptFile): "global" | "project" {
+  return file.scope === "project" ? "project" : "global";
+}
+
+/** Prompt 文件是否可在首屏开关（与 PromptTab 的 toggleable 同口径）。 */
+export function promptFileToggleable(file: ClientPromptFile): boolean {
+  return file.state !== "duplicate" && file.state !== "invisible" && file.state !== "too-large" && file.state !== "unreadable";
+}
 
 const EMPTY_SNAPSHOT: CapabilitySnapshot = {
   skills: [],
@@ -2219,24 +2275,36 @@ type TabId = "skills" | "mcp" | "tools" | "prompt";
 /** 批量动作的三域执行顺序（与宿主 §6.2-6 一致：skills → mcp → tools）。 */
 const BULK_DOMAINS: SessionBulkDomain[] = ["skills", "mcp", "tools"];
 
-/** 行 3 控制条的批量态（idle / 执行中 / 部分失败）。 */
+/** 批量态（idle / 执行中 / 部分失败）；按当前 Tab 的筛选子集执行。 */
 export interface BulkState {
   phase: "idle" | "running" | "partial";
-  /** 本次 / 上次动作；idle 且从未执行时缺省。 */
+  /** 本次动作；idle 且从未执行时缺省。 */
   action?: SessionBulkAction;
-  /** 已完成的域数（进度文案用）。 */
-  doneDomains: number;
-  /** 本次要跑的域总数（重试时只含失败域）。 */
-  totalDomains: number;
+  /** 目标条数（enable/disable）或域数（reset）。 */
+  total: number;
+  /** 本批所属 Tab；reset（全局）缺省 = 在所有 Tab 可见。 */
+  tab?: TabId;
   /** 聚合的逐项失败（`{n} 项失败 · 重试`）。 */
   failed: SessionBulkFailure[];
-  /** 含失败的域（重试只重放这些域）。 */
+  /** 含失败的域（reset 重试只重放这些域）。 */
   failedDomains: SessionBulkDomain[];
   /** 传输层 / 业务失败的一次性文案。 */
   error?: string;
 }
 
-const IDLE_BULK: BulkState = { phase: "idle", doneDomains: 0, totalDomains: BULK_DOMAINS.length, failed: [], failedDomains: [] };
+const IDLE_BULK: BulkState = { phase: "idle", total: 0, failed: [], failedDomains: [] };
+
+/** 批量失败后的重试计划：只重放失败项 / 失败域。 */
+interface BulkRetryPlan {
+  action: SessionBulkAction;
+  /** 行批量时记录当时的 Tab（重试不受当前 Tab 切换影响）。 */
+  tab?: TabId;
+  targets?: SessionBulkTargets;
+  domains?: SessionBulkDomain[];
+  promptIds?: string[];
+  scope: string;
+  total: number;
+}
 
 interface PanelProps {
   mode: "dock" | "hero" | "overlay" | "view" | "modal";
@@ -2252,16 +2320,9 @@ interface PanelProps {
   pending: Record<string, boolean>;
   busy: Record<string, boolean>;
   onToggle: (row: Row) => void;
-  onReset: () => void;
   onRefresh: () => void;
   onCollapse: () => void;
-  onManage?: () => void;
   onRetry?: () => void;
-  /** 行 3 控制条：三域批量开关（R1）。 */
-  onBulk: (action: SessionBulkAction) => void;
-  /** 重试只重放失败域。 */
-  onRetryBulk: () => void;
-  bulkState: BulkState;
   /** 用户切 Tab 时通知外层（首屏入口用它记住上次的域，下次打开弹窗落点一致）。 */
   onTabChange?: (tab: TabId) => void;
 }
@@ -2278,14 +2339,9 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
     pending,
     busy,
     onToggle,
-    onReset,
-    onCollapse,
-    onManage,
     onRefresh,
+    onCollapse,
     onRetry,
-    onBulk,
-    onRetryBulk,
-    bulkState,
     initialTab,
     onTabChange,
   } = props;
@@ -2305,7 +2361,17 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
     if (!promptSupported && tab === "prompt") setTabState("skills");
   }, [promptSupported, tab]);
   const [query, setQuery] = useState("");
-  const [resetBusy, setResetBusy] = useState(false);
+  /** v30：来源筛选按 Tab 分别记忆；空数组 = 全部。 */
+  const [filters, setFilters] = useState<Record<TabId, SourceGroup[]>>({
+    skills: [],
+    mcp: [],
+    tools: [],
+    prompt: [],
+  });
+  const [bulk, setBulk] = useState<BulkState>(IDLE_BULK);
+  const bulkRef = useRef<BulkState>(IDLE_BULK);
+  bulkRef.current = bulk;
+  const retryRef = useRef<BulkRetryPlan | undefined>(undefined);
   // 派生继承：主对话显示下拉；派生会话只读展示创建时的模式。
   const derive = useDeriveMode(api, mode === "view" || mode === "modal");
   const derivedHead = derive.info?.derived !== undefined ? derivedBanner(derive.info.derived) : undefined;
@@ -2313,41 +2379,335 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
   const prompt = usePromptTabData(api, mode === "view");
   const readOnlyPrompt = mode === "view";
 
-  const skillsOn = skillRows.filter((row) => row.enabled).length;
-  const mcpOn = mcpRows.filter((row) => row.enabled).length;
-  const toolsOn = toolRows.filter((row) => row.enabled).length;
-  // 已启用的注入技能数（来源为插件 / DSH 内置 / Agent 预设），用于底栏统计文案。
-  const injectedOn = skillRows.filter((row) => row.injected === true && row.enabled).length;
   const rows: Row[] = tab === "skills" ? skillRows : tab === "mcp" ? mcpRows : tab === "tools" ? toolRows : [];
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (q === "") return rows;
-    return rows.filter((row) => {
-      const text = `${row.name} ${row.kind === "skill" ? row.description : row.kind === "tool" ? row.description : row.meta}`;
-      return text.toLowerCase().includes(q);
-    });
-  }, [rows, query]);
+  const selectedGroups = filters[tab];
+  const queryLower = query.trim().toLowerCase();
+  const readOnlyPromptTab = tab === "prompt" && readOnlyPrompt;
 
-  // 计数口径（UX v1.8 §3.5）：三域已启用数相加 / 三域单元数相加；Tools 按插件计。
-  const totalOn = skillsOn + mcpOn + toolsOn;
-  const total = skillRows.length + mcpRows.length + toolRows.length;
-  // 可开关单元（锁定/不可切换的行不参与批量目标态判定）。
-  const switchableRows: Row[] = [...skillRows, ...mcpRows, ...toolRows].filter((row) => !row.disabled);
-  const canEnable = switchableRows.some((row) => !row.enabled);
-  const canDisable = switchableRows.some((row) => row.enabled);
-  const bulkRunning = bulkState.phase === "running";
-  const bulkAction = bulkState.action;
-  const bulkError = bulkState.error;
-  const bulkFailed = bulkState.failed.length;
-  const actionLabel = (action: SessionBulkAction, running: boolean): string => {
-    if (running && bulkAction === action) return action === "enable" ? "全部开启中…" : "全部关闭中…";
-    // idle/partial 态下若上次动作是另一方向，按钮恢复常态文案。
+  const filteredRows = useMemo(() => {
+    let list = rows;
+    if (selectedGroups.length > 0) list = list.filter((row) => selectedGroups.includes(sourceGroupOf(row)));
+    if (queryLower !== "") {
+      list = list.filter((row) => {
+        const text = `${row.name} ${row.kind === "skill" ? row.description : row.kind === "tool" ? row.description : row.meta}`;
+        return text.toLowerCase().includes(queryLower);
+      });
+    }
+    return list;
+  }, [rows, selectedGroups, queryLower]);
+
+  const promptGroupsSelected = useMemo(
+    () =>
+      new Set(selectedGroups.filter((group): group is "global" | "project" => group === "global" || group === "project")),
+    [selectedGroups],
+  );
+  const filteredPromptFiles = useMemo(() => {
+    let list = prompt.files;
+    if (promptGroupsSelected.size > 0) {
+      list = list.filter((file) => promptGroupsSelected.has(promptSourceGroup(file)));
+    }
+    if (queryLower !== "") {
+      list = list.filter((file) =>
+        `${file.name} ${file.displayPath} ${file.scope === "project" ? "项目" : "全局"}`.toLowerCase().includes(queryLower),
+      );
+    }
+    return list;
+  }, [prompt.files, promptGroupsSelected, queryLower]);
+
+  const currentTotal = tab === "prompt" ? prompt.fileCount : rows.length;
+  const groupCounts = useMemo(() => {
+    const counts = new Map<SourceGroup, number>();
+    const add = (group: SourceGroup) => counts.set(group, (counts.get(group) ?? 0) + 1);
+    if (tab === "prompt") {
+      for (const file of prompt.files) add(promptSourceGroup(file));
+    } else {
+      for (const row of rows) add(sourceGroupOf(row));
+    }
+    return counts;
+  }, [tab, rows, prompt.files]);
+  const groupOptions = SOURCE_GROUP_ORDER.filter((group) => (groupCounts.get(group) ?? 0) > 0);
+
+  // 批量目标：先按来源标签 + 搜索收窄，再剔除锁定 / 不可切换行。
+  const switchableRows = filteredRows.filter((row) => !row.disabled);
+  const enabledRows = switchableRows.filter((row) => row.enabled).length;
+  const promptToggleable = filteredPromptFiles.filter(promptFileToggleable);
+  const enabledPrompt = promptToggleable.filter((file) => file.enabled).length;
+  const frozenFiles = prompt.frozen?.files ?? [];
+  const injectedVisible = filteredPromptFiles.filter((file) =>
+    frozenFiles.some((frozen) => frozen.id === file.id || frozen.displayPath === file.displayPath),
+  ).length;
+  const targetCount = tab === "prompt" ? promptToggleable.length : switchableRows.length;
+
+  const bulkRunning = bulk.phase === "running";
+  // 行 / Prompt 的批量只在本 Tab 显示进度与失败；reset 是全局动作，所有 Tab 可见。
+  const bulkVisible = bulk.tab === undefined || bulk.tab === tab;
+  const canEnable = readOnlyPromptTab
+    ? false
+    : tab === "prompt"
+      ? promptToggleable.some((file) => !file.enabled)
+      : switchableRows.some((row) => !row.enabled);
+  const canDisable = readOnlyPromptTab
+    ? false
+    : tab === "prompt"
+      ? promptToggleable.some((file) => file.enabled)
+      : switchableRows.some((row) => row.enabled);
+
+  const scopeLabel =
+    selectedGroups.length === 0
+      ? "当前 Tab 全部"
+      : [...selectedGroups]
+          .sort((a, b) => SOURCE_GROUP_ORDER.indexOf(a) - SOURCE_GROUP_ORDER.indexOf(b))
+          .map((group) => sourceGroupLabel(tab, group))
+          .join(" / ");
+  const searchActive = queryLower !== "";
+  const visibleCount = tab === "prompt" ? filteredPromptFiles.length : filteredRows.length;
+  const noTargets = !readOnlyPromptTab && !searchActive && targetCount === 0;
+  const scopeBase = readOnlyPromptTab
+    ? `${visibleCount} 个指令文件`
+    : searchActive
+      ? `搜索命中 ${visibleCount} 项`
+      : noTargets
+        ? "无可切换项"
+        : `可切换 ${targetCount} 项`;
+  const scopeState = noTargets
+    ? ""
+    : readOnlyPromptTab
+      ? `${injectedVisible} 已注入`
+      : tab === "prompt"
+        ? `${enabledPrompt} 已注入`
+        : `${enabledRows} 已启用`;
+  const scopeTitle = readOnlyPromptTab ? "只读" : "批量作用";
+  const scopeText = `${scopeTitle}：${scopeLabel} · ${scopeBase}${scopeState !== "" ? ` · ${scopeState}` : ""}`;
+
+  const actionLabel = (action: "enable" | "disable"): string => {
+    if (bulkRunning && bulk.action === action) return action === "enable" ? "全部开启中…" : "全部关闭中…";
+    // partial / idle：按钮恢复常态文案，失败项单独显示「重试」。
     return action === "enable" ? "全部开启" : "全部关闭";
   };
-  const progressText =
-    bulkRunning && bulkAction !== undefined
-      ? `${bulkAction === "enable" ? "正在开启" : bulkAction === "disable" ? "正在关闭" : "正在恢复"} ${bulkState.doneDomains} / ${bulkState.totalDomains} 个域…`
-      : undefined;
+  const progressText = bulkRunning
+    ? bulk.action === "reset"
+      ? "正在恢复默认…"
+      : `正在${bulk.action === "enable" ? "开启" : "关闭"} ${bulk.total} 项…`
+    : undefined;
+  const failureText =
+    bulk.failed.length > 0
+      ? `${bulk.failed.length} 项失败 · 重试`
+      : bulk.failedDomains.length > 0
+        ? `${bulk.failedDomains.length} 个域失败 · 重试`
+        : bulk.error !== undefined && retryRef.current !== undefined
+          ? "重试"
+          : undefined;
+  const bulkButtonTitle = (action: "enable" | "disable"): string => {
+    if (bulkRunning) return "批量执行中";
+    if (readOnlyPromptTab) return "会话已开始：Prompt 首轮注入已冻结";
+    if (targetCount === 0) return "当前筛选没有可切换的能力";
+    if (action === "enable" && !canEnable) return "已全部开启";
+    if (action === "disable" && !canDisable) return "已全部关闭";
+    return `${action === "enable" ? "开启" : "关闭"}「${scopeLabel}」中的 ${targetCount} 项（仅当前 Tab）`;
+  };
+
+  function setTabGroups(groups: SourceGroup[]): void {
+    setFilters((prev) => ({ ...prev, [tab]: groups }));
+  }
+
+  function toggleGroup(group: SourceGroup): void {
+    const current = filters[tab];
+    const next =
+      current.length === 0
+        ? [group]
+        : current.includes(group)
+          ? current.filter((candidate) => candidate !== group)
+          : [...current, group];
+    setTabGroups(next);
+  }
+
+  function rowTargetName(row: Row): string {
+    return row.kind === "skill" ? row.name : row.kind === "mcp" ? row.target : row.unit;
+  }
+
+  function targetsForRows(targetRows: Row[]): SessionBulkTargets {
+    const targets: SessionBulkTargets = {};
+    const names = targetRows.map((row) => rowTargetName(row));
+    if (tab === "skills") targets.skills = names;
+    else if (tab === "mcp") targets.mcp = names;
+    else if (tab === "tools") targets.tools = names;
+    return targets;
+  }
+
+  function beginBulk(action: SessionBulkAction, total: number, tabForBulk?: TabId): void {
+    const next: BulkState = {
+      phase: "running",
+      action,
+      total,
+      ...(tabForBulk !== undefined ? { tab: tabForBulk } : {}),
+      failed: [],
+      failedDomains: [],
+    };
+    bulkRef.current = next;
+    setBulk(next);
+  }
+
+  function finishBulk(next: BulkState, retry?: BulkRetryPlan): void {
+    bulkRef.current = next;
+    retryRef.current = retry;
+    setBulk(next);
+  }
+
+  async function runScopedRows(
+    action: "enable" | "disable",
+    targets: SessionBulkTargets,
+    count: number,
+    scope: string,
+    domain: SessionBulkDomain = tab as SessionBulkDomain,
+  ): Promise<void> {
+    if (api === undefined || bulkRef.current.phase === "running") return;
+    beginBulk(action, count, domain as TabId);
+    try {
+      const result = await api.session.setBulk({ action, domains: [domain], targets });
+      if (!result.ok) {
+        finishBulk({
+          phase: "idle",
+          action,
+          total: count,
+          tab: domain as TabId,
+          failed: [],
+          failedDomains: [],
+          error: result.errors.join("; ") || "批量设置失败",
+        });
+        return;
+      }
+      const failedDomains = [...new Set(result.failed.map((item) => item.domain))];
+      const retryTargets: SessionBulkTargets = {};
+      for (const item of result.failed) {
+        const list = retryTargets[item.domain] ?? [];
+        list.push(item.target);
+        retryTargets[item.domain] = list;
+      }
+      finishBulk(
+        {
+          phase: result.failed.length > 0 ? "partial" : "idle",
+          action,
+          total: count,
+          tab: domain as TabId,
+          failed: result.failed,
+          failedDomains,
+        },
+        result.failed.length > 0 ? { action, tab: domain, targets: retryTargets, scope, total: result.failed.length } : undefined,
+      );
+      onRefresh();
+    } catch (err) {
+      finishBulk({
+        phase: "idle",
+        action,
+        total: count,
+        tab: domain as TabId,
+        failed: [],
+        failedDomains: [],
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  async function runPromptBulk(action: "enable" | "disable", files: ClientPromptFile[], scope: string): Promise<void> {
+    if (bulkRef.current.phase === "running") return;
+    beginBulk(action, files.length, "prompt");
+    const result = await prompt.setEnabledMany(files, action === "enable");
+    if (!result.ok) {
+      finishBulk(
+        {
+          phase: "partial",
+          action,
+          total: files.length,
+          tab: "prompt",
+          failed: [],
+          failedDomains: [],
+          error: result.errors.join("; ") || "Prompt 写入失败",
+        },
+        { action, tab: "prompt", promptIds: files.map((file) => file.id), scope, total: files.length },
+      );
+      return;
+    }
+    finishBulk({ phase: "idle", action, total: files.length, tab: "prompt", failed: [], failedDomains: [] });
+  }
+
+  async function runReset(domains: SessionBulkDomain[] = BULK_DOMAINS): Promise<void> {
+    if (api === undefined || bulkRef.current.phase === "running") return;
+    beginBulk("reset", domains.length);
+    const failed: SessionBulkFailure[] = [];
+    const failedDomains: SessionBulkDomain[] = [];
+    let bulkError: string | undefined;
+    for (const domain of domains) {
+      try {
+        const result = await api.session.setBulk({ action: "reset", domains: [domain] });
+        if (!result.ok) {
+          bulkError = result.errors.join("; ");
+          failedDomains.push(domain);
+        } else if (result.failed.length > 0) {
+          failed.push(...result.failed);
+          failedDomains.push(domain);
+        }
+      } catch (err) {
+        bulkError = err instanceof Error ? err.message : String(err);
+        failedDomains.push(domain);
+      }
+    }
+    const uniqueDomains = [...new Set(failedDomains)];
+    finishBulk(
+      {
+        phase: failed.length > 0 || uniqueDomains.length > 0 ? "partial" : "idle",
+        action: "reset",
+        total: domains.length,
+        failed,
+        failedDomains: uniqueDomains,
+        ...(bulkError !== undefined ? { error: bulkError } : {}),
+      },
+      uniqueDomains.length > 0 ? { action: "reset", domains: uniqueDomains, scope: "三域全部", total: uniqueDomains.length } : undefined,
+    );
+    onRefresh();
+  }
+
+  function handleBulk(action: "enable" | "disable"): void {
+    if (api === undefined || bulkRunning) return;
+    if (tab === "prompt") {
+      if (promptToggleable.length === 0) return;
+      void runPromptBulk(action, promptToggleable, scopeLabel);
+      return;
+    }
+    if (switchableRows.length === 0) return;
+    void runScopedRows(action, targetsForRows(switchableRows), switchableRows.length, scopeLabel);
+  }
+
+  function retryBulk(): void {
+    const plan = retryRef.current;
+    if (plan === undefined || bulkRef.current.phase === "running") return;
+    if (plan.action === "reset") {
+      void runReset(plan.domains ?? BULK_DOMAINS);
+      return;
+    }
+    if (plan.tab === "prompt") {
+      const ids = new Set(plan.promptIds ?? []);
+      const files = prompt.files.filter((file) => ids.has(file.id));
+      if (files.length > 0) void runPromptBulk(plan.action as "enable" | "disable", files, plan.scope);
+      return;
+    }
+    if (plan.targets !== undefined) {
+      void runScopedRows(
+        plan.action as "enable" | "disable",
+        plan.targets,
+        plan.total,
+        plan.scope,
+        plan.tab as SessionBulkDomain,
+      );
+    }
+  }
+
+  const footerOn = tab === "prompt" ? prompt.enabledCount : rows.filter((row) => row.enabled).length;
+  const footerTotal = tab === "prompt" ? prompt.fileCount : rows.length;
+  const sourceInjectedOn = rows.filter(
+    (row) =>
+      row.enabled && (row.tone === "host" || row.tone === "bundled" || row.tone === "preset" || row.tone === "plugin"),
+  ).length;
+  const sessionNote = mode === "view" ? "仅当前会话" : "开关只作用于当前对话";
 
   return (
     <div className={`skp-dock-panel skp-dock-panel-${mode}`}>
@@ -2407,141 +2767,173 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
         </div>
       )}
 
-      {/* Tab 栏：能力类型（后续类型从这里扩展） */}
+      {/* Tab 栏：能力类型 + 当前 Tab 的批量开关（原「管理全部」位置） */}
       <div className="skp-dock-tab-row">
         <div className="skp-dock-tabs" role="tablist">
           <button
             type="button"
             role="tab"
             aria-selected={tab === "skills"}
+            disabled={bulkRunning}
             className={`skp-dock-tab${tab === "skills" ? " skp-dock-tab-active" : ""}`}
             onClick={() => setTab("skills")}
           >
             Skills
             <span className="skp-dock-tab-count">
-              {skillsOn} / {skillRows.length}
+              {skillRows.filter((row) => row.enabled).length} / {skillRows.length}
             </span>
           </button>
           <button
             type="button"
             role="tab"
             aria-selected={tab === "mcp"}
+            disabled={bulkRunning}
             className={`skp-dock-tab${tab === "mcp" ? " skp-dock-tab-active" : ""}`}
             onClick={() => setTab("mcp")}
           >
             MCP
             <span className="skp-dock-tab-count">
-              {mcpOn} / {mcpRows.length}
+              {mcpRows.filter((row) => row.enabled).length} / {mcpRows.length}
             </span>
           </button>
           <button
             type="button"
             role="tab"
             aria-selected={tab === "tools"}
+            disabled={bulkRunning}
             className={`skp-dock-tab${tab === "tools" ? " skp-dock-tab-active" : ""}`}
             onClick={() => setTab("tools")}
           >
             Tools
             <span className="skp-dock-tab-count">
-              {toolsOn} / {toolRows.length}
+              {toolRows.filter((row) => row.enabled).length} / {toolRows.length}
             </span>
           </button>
           {promptSupported && (
-          <>
-                    {/*
-            Prompt（v23）：首轮注入的指令文件。计数口径按视图区分——
-            首屏 = 本会话会注入的已启用数 / 文件数；只读页 = 冻结清单里已注入数 / 文件数。
-          */}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "prompt"}
-            className={`skp-dock-tab${tab === "prompt" ? " skp-dock-tab-active" : ""}`}
-            title="首轮注入的指令文件（AGENTS.md / CLAUDE.md 等）· 首屏可开关，会话开始后只读冻结"
-            onClick={() => setTab("prompt")}
-          >
-            Prompt
-            <span className="skp-dock-tab-count">
-              {readOnlyPrompt ? `${prompt.injectedCount} / ${prompt.fileCount}` : `${prompt.enabledCount} / ${prompt.fileCount}`}
-            </span>
-          </button>
-          </>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "prompt"}
+              disabled={bulkRunning}
+              className={`skp-dock-tab${tab === "prompt" ? " skp-dock-tab-active" : ""}`}
+              title="首轮注入的指令文件（AGENTS.md / CLAUDE.md 等）· 首屏可开关，会话开始后只读冻结"
+              onClick={() => setTab("prompt")}
+            >
+              Prompt
+              <span className="skp-dock-tab-count">
+                {readOnlyPrompt
+                  ? `${prompt.injectedCount} / ${prompt.fileCount}`
+                  : `${prompt.enabledCount} / ${prompt.fileCount}`}
+              </span>
+            </button>
           )}
         </div>
         <span className="skp-dock-spacer" />
-        {promptSupported && tab === "prompt" && (
-          <span
-            className="skp-dock-tag skp-dock-tag-preset"
-            title="Prompt 只决定把哪些指令文件交给 DSH；Jev 能力决策与三域批量开关只处理 Skills / MCP / Tools"
+        <div className="skp-dock-bulk" role="group" aria-label="当前 Tab 批量开关">
+          <button
+            type="button"
+            className="skp-dock-rail-btn skp-dock-rail-btn-primary"
+            disabled={bulkRunning || !canEnable}
+            title={bulkButtonTitle("enable")}
+            onClick={() => handleBulk("enable")}
           >
-            不参与 Jev 能力决策
-          </span>
-        )}
-        {onManage !== undefined && (
-          <button type="button" className="skp-dock-link" onClick={onManage}>
-            管理全部 ↗
+            {actionLabel("enable")}
           </button>
-        )}
+          <button
+            type="button"
+            className="skp-dock-rail-btn"
+            disabled={bulkRunning || !canDisable}
+            title={bulkButtonTitle("disable")}
+            onClick={() => handleBulk("disable")}
+          >
+            {actionLabel("disable")}
+          </button>
+        </div>
       </div>
 
-      {/*
-        行 3：本会话控制条（R1）。左批量 + 计数 + 范围说明；右侧 R2 派生继承控件
-        **本批不实现**（为零代码的提案），这里留空位、不渲染任何继承控件或弱提示。
-        Prompt Tab 不参与三域批量动作（`BULK_DOMAINS` 保持三域），切到 Prompt 时整条隐藏，
-        由 Prompt 自己的汇总行 / 冻结 banner 取代。
-      */}
-      {tab !== "prompt" && (
-      <div className="skp-dock-rail" role="group" aria-label="本会话全局开关">
-        <button
-          type="button"
-          className="skp-dock-rail-btn skp-dock-rail-btn-primary"
-          aria-disabled={bulkRunning || !canEnable ? true : undefined}
-          disabled={bulkRunning || !canEnable}
-          title={bulkRunning ? "批量执行中" : !canEnable ? "已全部开启" : "作用于本会话的 Skills · MCP · Tools 三域整体"}
-          onClick={() => onBulk("enable")}
-        >
-          {actionLabel("enable", bulkRunning)}
-        </button>
-        <button
-          type="button"
-          className="skp-dock-rail-btn"
-          aria-disabled={bulkRunning || !canDisable ? true : undefined}
-          disabled={bulkRunning || !canDisable}
-          title={bulkRunning ? "批量执行中" : !canDisable ? "已全部关闭" : "作用于本会话的 Skills · MCP · Tools 三域整体"}
-          onClick={() => onBulk("disable")}
-        >
-          {actionLabel("disable", bulkRunning)}
-        </button>
-        <span className="skp-dock-rail-count">
-          已启用 {totalOn} / {total}
-        </span>
-        <span className="skp-dock-rail-note">仅当前会话 · 不改项目默认</span>
-        {progressText !== undefined && <span className="skp-dock-rail-progress">{progressText}</span>}
-        {!bulkRunning && bulkFailed > 0 && (
-          <button type="button" className="skp-dock-rail-fail" title="只重放失败域" onClick={onRetryBulk}>
-            {bulkFailed} 项失败 · 重试
-          </button>
-        )}
-        {!bulkRunning && bulkError !== undefined && <span className="skp-dock-rail-fail">{bulkError}</span>}
-        {derive.info?.derived !== undefined ? (
-          <span
-            className="skp-derive-static skp-derive-rail-static"
-            title="派生会话：创建时的继承方式已固定；本页修改只影响本会话"
+      {/* 筛选行：来源标签（多选）+ 批量作用范围 + 派生继承 */}
+      <div className="skp-dock-rail skp-dock-filter" role="group" aria-label="按来源筛选">
+        <div className="skp-dock-chips" role="group" aria-label="来源筛选">
+          <button
+            type="button"
+            className={`skp-dock-chip skp-dock-chip-all${selectedGroups.length === 0 ? " skp-dock-chip-active" : ""}`}
+            aria-pressed={selectedGroups.length === 0}
+            title="显示全部来源"
+            onClick={() => setTabGroups([])}
           >
-            {derivedStaticLabel(derive.info.derived)}
-          </span>
-        ) : (
-          <DeriveModeSelect
-            variant="rail"
-            value={derive.info?.mode ?? "session"}
-            loading={derive.loading}
-            pending={derive.pending}
-            title={derive.error ?? undefined}
-            threshold={derive.threshold}
-            onChange={(next) => void derive.setMode(next)}
-          />
-        )}
+            全部
+            <span className="skp-dock-chip-count">{currentTotal}</span>
+          </button>
+          <span className="skp-dock-chip-sep" aria-hidden="true" />
+          {groupOptions.map((group) => (
+            <button
+              key={group}
+              type="button"
+              className={`skp-dock-chip${selectedGroups.includes(group) ? " skp-dock-chip-active" : ""}`}
+              aria-pressed={selectedGroups.includes(group)}
+              title={`${sourceGroupLabel(tab, group)}来源，${groupCounts.get(group) ?? 0} 项`}
+              onClick={() => toggleGroup(group)}
+            >
+              {sourceGroupLabel(tab, group)}
+              <span className="skp-dock-chip-count">{groupCounts.get(group) ?? 0}</span>
+            </button>
+          ))}
+        </div>
+        <span className="skp-dock-spacer" />
+        <div className="skp-dock-filter-right">
+          {bulkVisible && bulk.phase === "partial" && failureText !== undefined ? (
+            <button type="button" className="skp-dock-rail-fail" title="只重放失败项" onClick={retryBulk}>
+              {failureText}
+            </button>
+          ) : bulkVisible && bulkRunning && progressText !== undefined ? (
+            <span className="skp-dock-rail-progress">{progressText}</span>
+          ) : (
+            <span className="skp-dock-rail-scope" title={scopeText}>
+              {scopeTitle}：<b>{scopeLabel}</b> · {scopeBase}
+              {scopeState !== "" ? <> · {scopeState}</> : null}
+            </span>
+          )}
+          {tab === "prompt" ? (
+            <span
+              className="skp-dock-tag skp-dock-tag-preset"
+              title={
+                readOnlyPrompt
+                  ? "会话已开始：首轮注入清单已冻结，文件开关与批量按钮都不再生效"
+                  : "Prompt 只决定把哪些指令文件交给 DSH；Jev 能力决策与三域批量开关只处理 Skills / MCP / Tools"
+              }
+            >
+              {readOnlyPrompt ? "首轮冻结 · 只读" : "不参与 Jev 能力决策"}
+            </span>
+          ) : derive.info?.derived !== undefined ? (
+            <span
+              className="skp-derive-static skp-derive-rail-static"
+              title="派生会话：创建时的继承方式已固定；本页修改只影响本会话"
+            >
+              {derivedStaticLabel(derive.info.derived)}
+            </span>
+          ) : (
+            <DeriveModeSelect
+              variant="rail"
+              value={derive.info?.mode ?? "session"}
+              loading={derive.loading}
+              pending={derive.pending}
+              title={derive.error ?? undefined}
+              threshold={derive.threshold}
+              onChange={(next) => void derive.setMode(next)}
+            />
+          )}
+        </div>
       </div>
+
+      {bulkVisible && bulk.error !== undefined && (
+        <div className="skp-dock-banner" role="alert">
+          <span>{bulk.error}</span>
+          {retryRef.current !== undefined && (
+            <button type="button" className="skp-dock-link" onClick={retryBulk}>
+              重试
+            </button>
+          )}
+        </div>
       )}
 
       {error !== undefined && (
@@ -2557,32 +2949,50 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
 
       {/* 卡片网格：Prompt 用独立网格（首屏可开关 / 会话内只读），其余三域沿用原网格 */}
       {tab === "prompt" ? (
-        <PromptTab data={prompt} readOnly={readOnlyPrompt} query={query} onClearQuery={() => setQuery("")} />
+        <PromptTab
+          data={prompt}
+          readOnly={readOnlyPrompt}
+          query={query}
+          onClearQuery={() => setQuery("")}
+          scopeFilter={promptGroupsSelected}
+          onClearFilter={() => setTabGroups([])}
+        />
       ) : (
         <div className="skp-dock-grid" role="tabpanel">
           {tab === "tools" && props.snapshot.attributionSettling && (
             <div className="skp-dock-grid-note">来源解析中…</div>
           )}
-          {loading && filtered.length === 0 ? (
+          {loading && filteredRows.length === 0 ? (
             <div className="skp-dock-empty">加载中…</div>
-          ) : filtered.length === 0 ? (
+          ) : filteredRows.length === 0 ? (
             <div className="skp-dock-empty">
-              {query.trim() !== ""
+              {queryLower !== ""
                 ? `没有匹配「${query.trim()}」的能力`
-                : tab === "skills"
-                  ? "本会话暂无可配置的 Skills"
-                  : tab === "mcp"
-                    ? "本会话暂无可配置的 MCP"
-                    : "本会话暂无可配置的 Tools"}
-              {query.trim() !== "" && (
+                : selectedGroups.length > 0
+                  ? "当前筛选下没有能力"
+                  : tab === "skills"
+                    ? "本会话暂无可配置的 Skills"
+                    : tab === "mcp"
+                      ? "本会话暂无可配置的 MCP"
+                      : "本会话暂无可配置的 Tools"}
+              {queryLower !== "" ? (
                 <button type="button" className="skp-dock-link" onClick={() => setQuery("")}>
                   清空搜索
                 </button>
-              )}
+              ) : selectedGroups.length > 0 ? (
+                <button type="button" className="skp-dock-link" onClick={() => setTabGroups([])}>
+                  清除筛选
+                </button>
+              ) : null}
             </div>
           ) : (
-            filtered.map((row) => (
-              <CapabilityCard key={row.id} row={row} busy={bulkRunning || busy[row.id] === true} onToggle={() => onToggle(row)} />
+            filteredRows.map((row) => (
+              <CapabilityCard
+                key={row.id}
+                row={row}
+                busy={bulkRunning || busy[row.id] === true}
+                onToggle={() => onToggle(row)}
+              />
             ))
           )}
         </div>
@@ -2591,11 +3001,21 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
       {/* 底栏 */}
       <div className="skp-dock-foot">
         <span className="skp-dock-foot-note">
-          {tab === "prompt" ? null : (
+          {tab === "prompt" ? (
+            readOnlyPrompt ? (
+              `首轮已冻结 ${prompt.injectedCount} / ${prompt.fileCount} 个指令文件 · 只读`
+            ) : (
+              `${footerOn} / ${footerTotal} 个指令文件参与首轮注入 · ${sessionNote}`
+            )
+          ) : (
             <>
-              {totalOn} / {total} 项已启用{injectedOn > 0 ? ` · 其中 ${injectedOn} 项来自插件 / DSH 内置 / Agent 预设` : ""} · 开关只作用于当前对话
+              {footerOn} / {footerTotal} 项已启用
+              {sourceInjectedOn > 0 ? ` · 其中 ${sourceInjectedOn} 项来自宿主 / 插件` : ""} · {sessionNote}
               {hiddenTotal > 0 && (
-                <span className="skp-vis-summary" title="能力可见性由全局「可见范围」按工作区控制；不可见能力不出现在本会话，也不能在这里打开">
+                <span
+                  className="skp-vis-summary"
+                  title="能力可见性由全局「可见范围」按工作区控制；不可见能力不出现在本会话，也不能在这里打开"
+                >
                   {" "}
                   · 能力可见性由全局控制 · 不可见 {hiddenTotal} 项已隐藏
                 </span>
@@ -2608,12 +3028,9 @@ export function CapabilityPanel(props: PanelProps & { initialTab?: TabId }) {
           <button
             type="button"
             className="skp-dock-btn"
-            disabled={resetBusy || bulkRunning}
+            disabled={bulkRunning}
             title="清除本会话的显式开关，恢复默认（Skills / MCP / Tools 三域；Tools 回落到全局默认）"
-            onClick={() => {
-              setResetBusy(true);
-              Promise.resolve(onReset()).finally(() => setResetBusy(false));
-            }}
+            onClick={() => void runReset()}
           >
             恢复默认
           </button>
@@ -2643,10 +3060,6 @@ function useCapabilityController(api: CapabilityPanelApi, workspace: string, ena
     mcp: Record<string, boolean>;
     tools: Record<string, boolean>;
   }>({ skills: {}, mcp: {}, tools: {} });
-  const [bulkState, setBulkState] = useState<BulkState>(IDLE_BULK);
-  const bulkRef = useRef<BulkState>(IDLE_BULK);
-  bulkRef.current = bulkState;
-
   const skillRows = useMemo(
     () =>
       buildSkillRows(snapshot, pending).map((row) => {
@@ -2739,99 +3152,6 @@ function useCapabilityController(api: CapabilityPanelApi, workspace: string, ena
     [api, refresh, setError],
   );
 
-  /**
-   * 行 3 控制条的三域批量（R1）：**按域串行**调用 `session.setBulk` 取粗粒度进度，
-   * 部分失败只进 `failed[]`（宿主不回滚），这里聚合成 `{n} 项失败 · 重试`。
-   * 重试只重放失败域（同一 action）。
-   */
-  const runBulk = useCallback(
-    async (action: SessionBulkAction, retryDomains?: SessionBulkDomain[]) => {
-      if (bulkRef.current.phase === "running") return;
-      const domains = retryDomains !== undefined && retryDomains.length > 0 ? retryDomains : BULK_DOMAINS;
-      // 乐观回显：enable/disable 时把参与域的可开关行先切到目标态；reset 不清空（回默认）。
-      const optimisticTarget = action === "enable" ? true : action === "disable" ? false : undefined;
-      const targetRows: Row[] = [
-        ...(domains.includes("skills") ? skillRows : []),
-        ...(domains.includes("mcp") ? mcpRows : []),
-        ...(domains.includes("tools") ? toolRows : []),
-      ].filter((row) => !row.disabled && optimisticTarget !== undefined);
-      const optimisticMap: Record<string, boolean> = {};
-      for (const row of targetRows) optimisticMap[row.id] = optimisticTarget === true;
-      if (targetRows.length > 0) setPending((prev) => ({ ...prev, ...optimisticMap }));
-
-      const nextState: BulkState = {
-        phase: "running",
-        action,
-        doneDomains: 0,
-        totalDomains: domains.length,
-        failed: [],
-        failedDomains: [],
-      };
-      setBulkState(nextState);
-      setError(undefined);
-
-      const collectedFailed: SessionBulkFailure[] = [];
-      const failedDomains: SessionBulkDomain[] = [];
-      let bulkError: string | undefined;
-      let done = 0;
-      for (const domain of domains) {
-        try {
-          const result = await api.session.setBulk({ action, domains: [domain] });
-          if (!result.ok) {
-            bulkError = result.errors.join("; ");
-            failedDomains.push(domain);
-          } else if (result.failed.length > 0) {
-            collectedFailed.push(...result.failed);
-            failedDomains.push(domain);
-          }
-        } catch (err) {
-          bulkError = String(err instanceof Error ? err.message : err);
-          failedDomains.push(domain);
-        } finally {
-          done += 1;
-          setBulkState((prev) => (prev.phase === "running" ? { ...prev, doneDomains: done } : prev));
-        }
-      }
-      // 失败行回滚乐观态（让 UI 显示宿主真实状态）；成功行留给 refresh 后的快照。
-      if (failedDomains.length > 0) {
-        const failedIds = new Set(
-          collectedFailed
-            .map((failure) => rowIdOfBulkFailure(failure, snapshot))
-            .filter((id): id is string => id !== undefined),
-        );
-        setPending((prev) => {
-          const copy = { ...prev };
-          for (const id of failedIds) delete copy[id];
-          return copy;
-        });
-      }
-      const finalState: BulkState = {
-        phase: collectedFailed.length > 0 || failedDomains.length > 0 ? "partial" : "idle",
-        action,
-        doneDomains: done,
-        totalDomains: domains.length,
-        failed: collectedFailed,
-        failedDomains,
-        ...(bulkError !== undefined ? { error: bulkError } : {}),
-      };
-      setBulkState(finalState);
-      refresh();
-    },
-    [api, refresh, setError, skillRows, mcpRows, toolRows, snapshot],
-  );
-
-  /** 重试：只重放上一轮的失败域（同一 action）。 */
-  const retryBulk = useCallback(() => {
-    const state = bulkRef.current;
-    if (state.action === undefined || state.failedDomains.length === 0) return;
-    void runBulk(state.action, state.failedDomains);
-  }, [runBulk]);
-
-  /** 恢复默认 = `session.setBulk({action:"reset"})`：只清显式会话覆盖，不改项目默认。 */
-  const reset = useCallback(async () => {
-    await runBulk("reset");
-  }, [runBulk]);
-
   return {
     snapshot,
     loading,
@@ -2842,29 +3162,9 @@ function useCapabilityController(api: CapabilityPanelApi, workspace: string, ena
     toolRows,
     pending,
     busy,
-    bulkState,
     toggle,
-    onBulk: (action: SessionBulkAction) => void runBulk(action),
-    retryBulk,
-    reset,
     applyOptimistic,
   };
-}
-
-/** 批量失败项 → composer 行 id（`failed[]` 的 target 按域映射回行）。 */
-function rowIdOfBulkFailure(failure: SessionBulkFailure, snapshot: CapabilitySnapshot): string | undefined {
-  if (failure.domain === "skills") return `skill:${failure.target}`;
-  if (failure.domain === "tools") return `tool:${failure.target}`;
-  if (failure.kind === "mcp-project") {
-    const server = snapshot.servers.find((candidate) => candidate.key === failure.target);
-    return server !== undefined ? `mcp:project:${server.key}` : undefined;
-  }
-  const server =
-    snapshot.servers.find((candidate) => candidate.key === failure.target) ??
-    snapshot.servers.find((candidate) => candidate.serverName === failure.target);
-  if (server !== undefined) return server.scope === "project" ? `mcp:project:${server.key}` : `mcp:global:${server.key}`;
-  if (snapshot.externals.some((candidate) => candidate.serverName === failure.target)) return `mcp:external:${failure.target}`;
-  return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -3254,13 +3554,8 @@ function EntryBody({
               pending={controller.pending}
               busy={controller.busy}
               onToggle={(row) => void controller.toggle(row)}
-              onReset={controller.reset}
-              onBulk={controller.onBulk}
-              onRetryBulk={controller.retryBulk}
-              bulkState={controller.bulkState}
               onRefresh={controller.refresh}
               onCollapse={closeModal}
-              {...(onManage !== undefined ? { onManage } : {})}
               onRetry={controller.refresh}
             />
           </div>
@@ -3280,11 +3575,9 @@ function EntryBody({
 export function SessionCapabilityView({
   apiFor,
   sessionId: initialSessionId,
-  onManage,
 }: {
   apiFor: (sessionId: string | undefined) => CapabilityPanelApi;
   sessionId?: string;
-  onManage?: () => void;
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [sessionId, setSessionId] = useState<string | undefined>(initialSessionId);
@@ -3333,13 +3626,8 @@ export function SessionCapabilityView({
           pending={controller.pending}
           busy={controller.busy}
           onToggle={(row) => void controller.toggle(row)}
-          onReset={controller.reset}
-          onBulk={controller.onBulk}
-          onRetryBulk={controller.retryBulk}
-          bulkState={controller.bulkState}
           onRefresh={controller.refresh}
           onCollapse={() => undefined}
-          {...(onManage !== undefined ? { onManage } : {})}
           onRetry={controller.refresh}
         />
       </div>

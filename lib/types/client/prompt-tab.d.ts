@@ -35,6 +35,14 @@ export interface PromptTabData {
     fileCount: number;
     refresh: () => void;
     toggle: (file: ClientPromptFile) => void;
+    /**
+     * 首屏批量（v30）：一次写整份会话选择。
+     * 只读页不应调用；调用方负责先按可见性/状态筛掉不可开关文件。
+     */
+    setEnabledMany: (files: ClientPromptFile[], enabled: boolean) => Promise<{
+        ok: boolean;
+        errors: string[];
+    }>;
 }
 /**
  * Prompt Tab 数据控制器：`list()` 每会话 API（adapter 自动注入 sessionId）。
@@ -54,9 +62,12 @@ export declare function usePromptTabData(api: CapabilityPanelApi | undefined, re
  * @param query 页头搜索词（复用面板既有搜索框）。
  * @param onClearQuery 清空搜索（空态里的「清空搜索」）。
  */
-export declare function PromptTab({ data, readOnly, query, onClearQuery, }: {
+export declare function PromptTab({ data, readOnly, query, onClearQuery, scopeFilter, onClearFilter, }: {
     data: PromptTabData;
     readOnly: boolean;
     query: string;
     onClearQuery?: () => void;
+    /** v30：来源标签筛选（全局 / 项目）；空集 = 全部。 */
+    scopeFilter?: ReadonlySet<"global" | "project">;
+    onClearFilter?: () => void;
 }): import("react").JSX.Element;

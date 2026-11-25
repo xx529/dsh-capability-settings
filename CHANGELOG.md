@@ -3,6 +3,43 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 新增
+
+- **会话能力来源筛选标签 + 当前 Tab 批量（v30）**：会话首屏弹窗与会话内「能力」Tab
+  的 Tab 行右侧改为「全部开启 / 全部关闭」，只作用于**当前 Tab**；原批量条位置改为
+  来源标签（`全部 / 全局 / 项目 / 宿主 / 插件`，MCP 多「外部」，Tools 的未识别单列，
+  Prompt 为 `全部 / 全局 / 项目`）。标签计数按当前 Tab 实时汇总、空来源不渲染，
+  可多选（「全部」互斥），搜索与来源筛选叠加；列表与批量范围都跟随筛选，
+  右侧实时显示 `批量作用：… · 可切换 n 项 · 已启用 m`。
+- **`session.setBulk` 支持 `targets`（v30）**：可选 `{ skills?, mcp?, tools? }`，
+  只处理列出的条目，缺省 = 域内全量；空数组 = 0 个目标；`reset` 忽略 targets。
+  客户端按「当前 Tab + 来源标签 + 搜索」算出子集，每 Tab 一次 RPC；宿主仍复用
+  Skills `setEnabledBatch` / MCP `setSessionEnabledMany` / Tools 一次 restrict 与
+  逐项失败聚合。
+- **Prompt 首屏批量**：Prompt Tab 的「全部开启 / 全部关闭」走
+  `prompt.setSessionSelection` 一次写整份会话选择；会话内冻结时按钮置灰、卡片只读。
+
+### 变更
+
+- **移除「管理全部 ↗」**：入口不再出现在会话能力弹窗；批量语义从「三域整体」
+  收敛为「当前 Tab ∩ 来源标签 ∩ 搜索命中 ∩ 可开关行」。
+- **「恢复默认」保持全局**：仍清除 Skills / MCP / Tools 三域的显式会话覆盖，
+  不随 Tab / 筛选收敛；Prompt 的独立会话选择不在该按钮内。
+- **筛选按 Tab 记忆**：切回该 Tab 恢复上次来源选择；搜索词跨 Tab 保留。
+
+### 内部
+
+- `SessionBulkTargets` / `SessionBulkInput.targets` 类型与宿主解析、校验；
+  `runSkills` / `runMcp` / `runTools` 在枚举时按 Set 过滤，统计只覆盖目标行。
+- `src/client/prompt-tab.tsx` 新增 `setEnabledMany`（一次写整份 selected）与
+  `scopeFilter` / `onClearFilter`；`CapabilityPanel` 改为面板内批量编排，
+  移除 controller 的三域批量状态。
+- 验证：`node notes/verify/v30-filter-tags-ui.mjs` 13/13；真实组件 SSR 视觉稿
+  `node notes/verify/v30-filter-tags-visual.mjs`；`v13-session-bulk` 新增
+  targets 子集用例（本地 16/17，B-07 冷会话断言为既有失败）。
+
 ## [1.19.6] - 2026-11-25
 
 ### 新增

@@ -874,6 +874,15 @@ export interface ToolsApi {
 export type SessionBulkDomain = "skills" | "mcp" | "tools";
 /** 批量动作：全部打开 / 全部关闭 / 清除显式会话覆盖。 */
 export type SessionBulkAction = "enable" | "disable" | "reset";
+/** 批量目标子集（v30）：只处理这些条目；缺省 = 该域全部。 */
+export interface SessionBulkTargets {
+    /** skill 名。 */
+    skills?: string[];
+    /** target：项目 key / serverName。 */
+    mcp?: string[];
+    /** 工具单元 id（插件 / 宿主 / 未识别单元）。 */
+    tools?: string[];
+}
 /** `session.setBulk` 的入参。 */
 export interface SessionBulkInput {
     /** 必填；空 → 业务失败。 */
@@ -881,6 +890,8 @@ export interface SessionBulkInput {
     action: SessionBulkAction;
     /** 缺省 = 三域全部；客户端按域串行调用以取得粗粒度进度。 */
     domains?: SessionBulkDomain[];
+    /** 只处理这些条目；缺省 = 域内全量。`reset` 忽略。 */
+    targets?: SessionBulkTargets;
     /** 项目作用域（skills 列表 / mcp 项目条目需要）；缺省由宿主从 session header.cwd 解析。 */
     cwd?: string;
     /** 仅测试/诊断：只计算不写入。 */

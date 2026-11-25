@@ -76,6 +76,11 @@ export interface PromptTabData {
   fileCount: number;
   refresh: () => void;
   toggle: (file: ClientPromptFile) => void;
+  /**
+   * 首屏批量（v30）：一次写整份会话选择。
+   * 只读页不应调用；调用方负责先按可见性/状态筛掉不可开关文件。
+   */
+  setEnabledMany: (files: ClientPromptFile[], enabled: boolean) => Promise<{ ok: boolean; errors: string[] }>;
 }
 
 function errMessage(error: unknown): string {
@@ -169,6 +174,39 @@ export function usePromptTabData(api: CapabilityPanelApi | undefined, readOnly: 
     [api, list, pendingId, refresh],
   );
 
+  const setEnabledMany = useCallback(
+    async (batch: ClientPromptFile[], enabled: boolean): Promise<{ ok: boolean; errors: string[] }> => {
+      if (api === undefined || list === undefined) return { ok: false, errors: ["Prompt 尚未加载"] };
+      if (pendingId !== undefined) return { ok: false, errors: ["Prompt 正在写入，请稍后重试"] };
+      if (batch.length === 0) return { ok: true, errors: [] };
+      const files = list.files;
+      const next = new Set(files.filter((file) => file.enabled).map((file) => file.id));
+      for (const file of batch) {
+        if (enabled) next.add(file.id);
+        else next.delete(file.id);
+      }
+      const defaults = files
+        .filter((file) => (file.visibility?.visible ?? true) && file.defaultEnabled)
+        .map((file) => file.id);
+      // 与单文件 toggle 同口径：等于默认集合时写 null（清除会话显式选择）。
+      const selected = sameStringSet([...next], defaults) ? null : [...next];
+      setPendingId("__bulk__");
+      setError(undefined);
+      try {
+        await api.prompt.setSessionSelection({ selected });
+        return { ok: true, errors: [] };
+      } catch (err) {
+        const message = errMessage(err);
+        setError(message);
+        return { ok: false, errors: [message] };
+      } finally {
+        setPendingId(undefined);
+        refresh();
+      }
+    },
+    [api, list, pendingId, refresh],
+  );
+
   const files = list?.files ?? [];
   return {
     ...(list !== undefined ? { list } : {}),
@@ -182,6 +220,7 @@ export function usePromptTabData(api: CapabilityPanelApi | undefined, readOnly: 
     fileCount: files.length,
     refresh,
     toggle,
+    setEnabledMany,
   };
 }
 
@@ -536,17 +575,26 @@ export function PromptTab({
   readOnly,
   query,
   onClearQuery,
+  scopeFilter,
+  onClearFilter,
 }: {
   data: PromptTabData;
   readOnly: boolean;
   query: string;
   onClearQuery?: () => void;
+  /** v30：来源标签筛选（全局 / 项目）；空集 = 全部。 */
+  scopeFilter?: ReadonlySet<"global" | "project">;
+  onClearFilter?: () => void;
 }) {
+  const scoped = useMemo(() => {
+    if (scopeFilter === undefined || scopeFilter.size === 0) return data.files;
+    return data.files.filter((file) => scopeFilter.has(file.scope === "project" ? "project" : "global"));
+  }, [data.files, scopeFilter]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (q === "") return data.files;
-    return data.files.filter((file) => `${file.name} ${file.displayPath} ${scopeLabel(file.scope)}`.toLowerCase().includes(q));
-  }, [data.files, query]);
+    if (q === "") return scoped;
+    return scoped.filter((file) => `${file.name} ${file.displayPath} ${scopeLabel(file.scope)}`.toLowerCase().includes(q));
+  }, [scoped, query]);
 
   const busy = data.pendingId !== undefined;
   const injectable = data.files.filter((file) => file.enabled && file.state !== "duplicate");
@@ -595,10 +643,17 @@ export function PromptTab({
               ? `没有匹配「${query.trim()}」的 Prompt`
               : data.files.length === 0
                 ? "未发现可注入的 Prompt 文件"
-                : "没有可展示的 Prompt"}
+                : scoped.length === 0
+                  ? "当前筛选下没有 Prompt"
+                  : "没有可展示的 Prompt"}
             {query.trim() !== "" && onClearQuery !== undefined && (
               <button type="button" className="skp-dock-link" onClick={onClearQuery}>
                 清空搜索
+              </button>
+            )}
+            {query.trim() === "" && scoped.length === 0 && onClearFilter !== undefined && (
+              <button type="button" className="skp-dock-link" onClick={onClearFilter}>
+                清除筛选
               </button>
             )}
           </div>

@@ -12,7 +12,9 @@
  *     不同 session 互不影响。
  *   - **部分失败不回滚**（A7）：某条失败只进 `failed[]`，已成功的保留；
  *     重试 = 重放同一 action（已成功项进 `unchanged`）。
- *   - **宿主自己枚举**：客户端不传目标列表（避免与宿主枚举口径漂移）。
+ *   - **宿主自己枚举**：缺省客户端不传目标列表（避免与宿主枚举口径漂移）；
+ *     v30 起可选 `targets` 只处理列出的子集（名字口径同 per-row API），
+ *     空数组 = 该域 0 个目标，`reset` 忽略 targets（恢复默认始终全量）。
  *   - 写盘批量化：三个域都走批量端点——mcp/tools 由 loader/manager 一次落盘
  *     （`state.setToggles`），skills 走 `skills/session.ts#setEnabledBatch`
  *     （整批一次宿主目录发现 + 一次落盘）；restrict 只重算一次。
@@ -51,6 +53,20 @@ export interface SessionBulkDomainStat {
   failed: number;
 }
 
+/**
+ * 批量目标子集（v30）：只处理这些条目，名字口径与 per-row API 一致
+ * （skills = skill 名；mcp = target：项目 key / serverName；tools = unit id）。
+ *
+ * - 某个域缺省 = 该域全部；
+ * - 空数组 = 该域 0 个目标（不是“全部”）；
+ * - `reset` 忽略 targets（恢复默认始终三域全量）。
+ */
+export interface SessionBulkTargets {
+  skills?: string[];
+  mcp?: string[];
+  tools?: string[];
+}
+
 /** `session.setBulk` 入参（缺省 = 三域全部）。 */
 export interface SessionBulkInput {
   /** 必填；空 → 业务失败。 */
@@ -58,6 +74,8 @@ export interface SessionBulkInput {
   action: SessionBulkAction;
   /** 缺省 = 三域全部；客户端按域串行调用以取得粗粒度进度。 */
   domains?: SessionBulkDomain[];
+  /** 只处理这些条目；缺省 = 域内全量。 */
+  targets?: SessionBulkTargets;
   /** 项目作用域（skills 列表 / mcp 项目条目需要）；缺省由宿主从 session header.cwd 解析。 */
   cwd?: string;
   /** 仅测试/诊断：只计算不写入，返回将改变的数量。 */
@@ -182,6 +200,28 @@ function parseInput(input: unknown): { ok: true; value: SessionBulkInput } | Ses
     // 固定顺序：skills → mcp → tools（与客户端串行调用口径一致）。
     result.domains = DOMAIN_ORDER.filter((domain) => seen.has(domain));
   }
+  if (payload.targets !== undefined) {
+    const rawTargets = payload.targets;
+    if (rawTargets === null || typeof rawTargets !== "object" || Array.isArray(rawTargets)) {
+      return { ok: false, errors: ["targets must be an object"] };
+    }
+    const record = rawTargets as Record<string, unknown>;
+    const targets: SessionBulkTargets = {};
+    for (const domain of DOMAIN_ORDER) {
+      const raw = record[domain];
+      if (raw === undefined) continue;
+      if (!Array.isArray(raw)) return { ok: false, errors: [`targets.${domain} must be an array`] };
+      const names = new Set<string>();
+      for (const item of raw) {
+        if (typeof item !== "string") return { ok: false, errors: [`targets.${domain} must contain strings`] };
+        const name = item.trim();
+        if (name.length > 0) names.add(name);
+      }
+      // 空数组保留：语义 = 该域 0 个目标，而不是“缺省全量”。
+      targets[domain] = [...names];
+    }
+    if (Object.keys(targets).length > 0) result.targets = targets;
+  }
   if (typeof payload.cwd === "string" && payload.cwd.length > 0) result.cwd = payload.cwd;
   if (payload.dryRun === true) result.dryRun = true;
   return { ok: true, value: result };
@@ -231,16 +271,20 @@ export function createSessionBulk(deps: SessionBulkDeps): SessionBulk {
       cwd?: string;
       live: boolean;
       dryRun: boolean;
+      targets?: string[];
     },
     failed: SessionBulkFailure[],
     stat: SessionBulkDomainStat,
   ): Promise<void> {
     const rows = (await services.skills.sessionList(input.cwd, input.sessionId)) ?? [];
     const explicit = input.action === "reset" ? storedToggle(input.sessionId, "skills") : {};
+    // reset 忽略 targets（恢复默认始终全量）；enable/disable 只处理子集。
+    const wanted = input.action === "reset" || input.targets === undefined ? undefined : new Set(input.targets);
     /** 需要写入的名字（先算完再**同一 tick 全部发起**，方案 §6.3 域内不加额外限流）。 */
     const targets: string[] = [];
     for (const row of rows) {
       if (row.shadowStub === true) continue;
+      if (wanted !== undefined && !wanted.has(row.name)) continue;
       if (input.action === "reset") {
         // reset：只清「有显式覆盖」的名字（磁盘记录里的键）。
         if (!Object.hasOwn(explicit, row.name)) continue;
@@ -333,12 +377,13 @@ export function createSessionBulk(deps: SessionBulkDeps): SessionBulk {
   /** mcp 域：配置条目 + 运行时注入实例；enable 写显式 true（不是清覆盖）。 */
   async function runMcp(
     services: SessionBulkServices,
-    input: { sessionId: string; action: SessionBulkAction; cwd?: string; dryRun: boolean },
+    input: { sessionId: string; action: SessionBulkAction; cwd?: string; dryRun: boolean; targets?: string[] },
     failed: SessionBulkFailure[],
     stat: SessionBulkDomainStat,
   ): Promise<void> {
     type Entry = { target: string; kind: "project" | "server"; enabled: boolean | undefined };
     const entries: Entry[] = [];
+    const wanted = input.action === "reset" || input.targets === undefined ? undefined : new Set(input.targets);
     if (input.action === "reset") {
       // 只清有显式覆盖的键；无覆盖项不变（mcp 项目默认仍生效）。
       const toggles = { ...storedToggle(input.sessionId, "mcp"), ...loaderToggle(input.sessionId) };
@@ -354,6 +399,8 @@ export function createSessionBulk(deps: SessionBulkDeps): SessionBulk {
       const configured = new Set((list?.servers ?? []).map((server) => server.serverName));
       for (const row of list?.servers ?? []) {
         if (row.shadowed === true) continue;
+        const targetName = row.scope === "project" ? row.key : row.serverName;
+        if (wanted !== undefined && !wanted.has(targetName)) continue;
         const current = typeof row.enabledInSession === "boolean" ? row.enabledInSession : row.disabledInProject !== true;
         if (current === desired) {
           stat.unchanged += 1;
@@ -365,7 +412,7 @@ export function createSessionBulk(deps: SessionBulkDeps): SessionBulk {
           continue;
         }
         entries.push({
-          target: row.scope === "project" ? row.key : row.serverName,
+          target: targetName,
           kind: row.scope === "project" ? "project" : "server",
           enabled: desired,
         });
@@ -375,6 +422,7 @@ export function createSessionBulk(deps: SessionBulkDeps): SessionBulk {
         sessionId: input.sessionId,
       });
       for (const view of runtime?.servers ?? []) {
+        if (wanted !== undefined && !wanted.has(view.serverName)) continue;
         // 宿主注入实例 = 运行基线：批量动作不碰（只读展示）。
         if (view.hostInjected === true) {
           stat.skipped += 1;
@@ -424,14 +472,16 @@ export function createSessionBulk(deps: SessionBulkDeps): SessionBulk {
   /** tools 域：单元级（含宿主 / 预设 / 未识别单元）；v29.2 起三者都可按会话开关。 */
   async function runTools(
     services: SessionBulkServices,
-    input: { sessionId: string; action: SessionBulkAction; dryRun: boolean },
+    input: { sessionId: string; action: SessionBulkAction; dryRun: boolean; targets?: string[] },
     failed: SessionBulkFailure[],
     stat: SessionBulkDomainStat,
   ): Promise<void> {
     const view = await services.tools.list({ sessionId: input.sessionId });
     const units: string[] = [];
     const desired = input.action === "enable";
+    const wanted = input.action === "reset" || input.targets === undefined ? undefined : new Set(input.targets);
     for (const unit of view?.units ?? []) {
+      if (wanted !== undefined && !wanted.has(unit.unit)) continue;
       if (input.action === "reset") {
         if (unit.explicit === true) units.push(unit.unit);
         continue;
@@ -499,11 +549,44 @@ export function createSessionBulk(deps: SessionBulkDeps): SessionBulk {
     for (const domain of domains) {
       try {
         if (domain === "skills") {
-          await runSkills(services, { sessionId, action, ...(cwd !== undefined ? { cwd } : {}), live, dryRun }, failed, byDomain.skills);
+          await runSkills(
+            services,
+            {
+              sessionId,
+              action,
+              ...(cwd !== undefined ? { cwd } : {}),
+              live,
+              dryRun,
+              ...(input.targets?.skills !== undefined ? { targets: input.targets.skills } : {}),
+            },
+            failed,
+            byDomain.skills,
+          );
         } else if (domain === "mcp") {
-          await runMcp(services, { sessionId, action, ...(cwd !== undefined ? { cwd } : {}), dryRun }, failed, byDomain.mcp);
+          await runMcp(
+            services,
+            {
+              sessionId,
+              action,
+              ...(cwd !== undefined ? { cwd } : {}),
+              dryRun,
+              ...(input.targets?.mcp !== undefined ? { targets: input.targets.mcp } : {}),
+            },
+            failed,
+            byDomain.mcp,
+          );
         } else {
-          await runTools(services, { sessionId, action, dryRun }, failed, byDomain.tools);
+          await runTools(
+            services,
+            {
+              sessionId,
+              action,
+              dryRun,
+              ...(input.targets?.tools !== undefined ? { targets: input.targets.tools } : {}),
+            },
+            failed,
+            byDomain.tools,
+          );
         }
       } catch (error) {
         // 域级异常：本域整体记失败，不阻断其它域（失败不回滚）。
